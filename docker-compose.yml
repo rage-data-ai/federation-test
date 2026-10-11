@@ -1,0 +1,8 @@
+services:
+  trino:
+    image: trinodb/trino:476
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./docker/trino/catalog:/etc/trino/catalog:ro
+      - ./docker/trino/kafka:/etc/trino/kafka:ro

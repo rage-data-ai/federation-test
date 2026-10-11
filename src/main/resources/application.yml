@@ -1,0 +1,31 @@
+server:
+  port: 18080
+
+spring:
+  application:
+    name: federation-gateway
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+federation:
+  trino:
+    url: jdbc:trino://localhost:8081
+    user: federation
+    password: ""
+    query-timeout-seconds: 120
+    catalog-dir: docker/trino/catalog
+    kafka-config-dir: docker/trino/kafka
+  cache:
+    enabled: true
+    ttl-seconds: 30
+    max-size: 256
+  max-rows: 10000
+  catalog-store: data/catalogs.json
+  kafka-mappings: {}
+  vector:
+    default-k: 10
+    milvus-uri: ""

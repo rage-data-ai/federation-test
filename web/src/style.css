@@ -1,0 +1,46 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b1220;
+  --panel: #121a2b;
+  --panel-2: #182338;
+  --line: #2a3750;
+  --text: #eef3fb;
+  --muted: #8b9bb4;
+  --accent: #4ea1ff;
+  --accent-2: #7ec0ff;
+  --ok: #3ecf8e;
+  --warn: #f5a524;
+  --err: #ff6b7a;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  font-family: "PingFang SC", "Noto Sans SC", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  background:
+    radial-gradient(1200px 480px at 10% -10%, rgba(78, 161, 255, 0.12), transparent 50%),
+    var(--bg);
+  color: var(--text);
+}
+
+button,
+select,
+textarea,
+input {
+  font: inherit;
+}
+
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 2px solid rgba(78, 161, 255, 0.55);
+  outline-offset: 1px;
+}
