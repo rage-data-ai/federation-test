@@ -4,13 +4,38 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 8
+    groups:
+      spring-boot:
+        patterns:
+          - "org.springframework.boot*"
+          - "org.springframework*"
+      testcontainers:
+        patterns:
+          - "org.testcontainers*"
+
   - package-ecosystem: npm
     directory: "/web"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 8
+    groups:
+      eslint-typescript:
+        patterns:
+          - "eslint*"
+          - "@typescript-eslint*"
+          - "typescript-eslint"
+          - "@vue/eslint-config-typescript"
+          - "vue-eslint-parser"
+      vite-vitest:
+        patterns:
+          - "vite"
+          - "vitest"
+          - "@vitejs/*"
+          - "tinypool"
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
+    open-pull-requests-limit: 5

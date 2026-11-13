@@ -59,6 +59,19 @@ test.describe('console smoke', () => {
     await expect(dialog).toHaveCount(0)
   })
 
+  test('catalog form dialog traps focus and closes on Escape', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: '数据源管理' }).click()
+    await expect(page.locator('#ds-title')).toBeVisible()
+    await page.getByRole('button', { name: '添加数据源' }).click()
+    const dialog = page.getByRole('dialog', { name: '添加数据源' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toHaveAttribute('aria-modal', 'true')
+    await expect(dialog.locator('input').first()).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+  })
+
   test('desktop shell visual baseline', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: '智能问数' }).click()

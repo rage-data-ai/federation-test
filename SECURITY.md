@@ -4,6 +4,8 @@
 
 请通过仓库 Issues（或私有渠道）报告安全问题，并标注 `security`。请勿在公开 Issue 中粘贴密钥、令牌或生产连接串。
 
+维护者会在确认后优先修补鉴权、注入与密钥泄露类问题；依赖 CVE 通过 Dependabot 周更（Maven / npm）与月更（GitHub Actions）跟进。
+
 ## 部署建议
 
 1. 生产环境设置 `FEDERATION_SECURITY_ENABLED=true`，并为每个调用方配置独立 Bearer token（`federation.security.tokens`）。
@@ -12,10 +14,18 @@
 2c. 可选 `federation.security.row-filters`（用户 → `catalog.schema.table:predicate`）：查询触及该表时，SQL 须包含谓词列标识，否则 403。
 3. 可选配置 `FEDERATION_JWT_ISSUER_URI`，接受外部 IdP 签发的 JWT（roles claim 默认 `roles`）。控制台可通过 PKCE 登录（见 `docs/oidc.md`）或粘贴 access_token。
 4. 使用强随机 token；不要使用仓库示例值。
-5. `FEDERAL_DB_*`、`LLM_API_KEY`、数据源密码仅通过环境变量或密钥管理系统注入。
+5. `FEDERAL_DB_*`、`LLM_API_KEY`、`FEDERATION_ASK_EMBED_API_KEY`、`FEDERATION_ASK_PGVECTOR_*`、数据源密码仅通过环境变量或密钥管理系统注入。
 6. 将 CORS 收紧为实际前端来源（`FEDERATION_CORS_ORIGINS`）。
 7. 网关默认对 500 错误脱敏，并以 RFC 7807 Problem Details 返回；客户端可见的业务错误仍可能包含 SQL 失败原因，请勿把网关直接暴露到不可信公网而不加鉴权与网络隔离。
 8. 可选配置 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出分布式追踪。
+9. 令牌吊销：生产优先 Redis（`federation.security.revocation-redis-uri`）或共享卷文件 store；单机可用内存/本地文件。
+10. 可选 pgvector（`FEDERATION_ASK_PGVECTOR_URL`）仅用于术语召回；不可达时自动降级，不扩大攻击面。
+
+## 依赖与 SBOM
+
+- CI 产出 CycloneDX SBOM（`target/bom.json`）。
+- 控制台：`cd web && npm audit`（生产依赖应保持 0；开发链 CVE 由 Dependabot 分组 PR 消化）。
+- 后端：随 Spring Boot / Testcontainers 周更；合并前跑 `mvn -B verify`。
 
 ## 已知边界
 

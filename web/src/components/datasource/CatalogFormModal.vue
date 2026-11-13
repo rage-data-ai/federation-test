@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
+import { reactive, ref, toRef, watch } from 'vue'
+import { useFocusTrap } from '../../composables/useFocusTrap'
 import { SOURCE_TYPES, emptyCatalog } from '../../examples'
 
 const props = defineProps({
@@ -14,11 +15,14 @@ const props = defineProps({
 const emit = defineEmits(['close', 'save', 'test', 'type-change'])
 
 const local = reactive(emptyCatalog())
+const dialog = ref<HTMLElement | null>(null)
+const open = toRef(props, 'show')
+useFocusTrap(open, dialog, () => emit('close'))
 
 watch(
   () => props.show,
-  (open) => {
-    if (open) {
+  (isOpen) => {
+    if (isOpen) {
       Object.assign(local, emptyCatalog(), props.form)
     }
   },
@@ -40,8 +44,17 @@ function snapshot() {
 
 <template>
   <div v-if="show" class="mask" @click.self="emit('close')">
-    <form class="dialog" @submit.prevent="emit('save', snapshot())">
-      <h3>{{ editing ? '编辑数据源' : '添加数据源' }}</h3>
+    <form
+      ref="dialog"
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="editing ? 'catalog-edit-title' : 'catalog-add-title'"
+      @submit.prevent="emit('save', snapshot())"
+    >
+      <h3 :id="editing ? 'catalog-edit-title' : 'catalog-add-title'">
+        {{ editing ? '编辑数据源' : '添加数据源' }}
+      </h3>
       <label>
         名称（SQL 里的 catalog）
         <input v-model="local.name" :disabled="editing" required placeholder="例如 mysql70 或 es81" />
@@ -90,8 +103,8 @@ function snapshot() {
       <p class="hint">
         保存后由 Trino 动态加载，无需重启。Kafka 填用户名密码即 SASL_PLAINTEXT/PLAIN。
       </p>
-      <p v-if="formMessage" class="ok">{{ formMessage }}</p>
-      <p v-if="formError" class="err">{{ formError }}</p>
+      <p v-if="formMessage" class="ok" role="status">{{ formMessage }}</p>
+      <p v-if="formError" class="err" role="alert">{{ formError }}</p>
       <div class="actions">
         <button type="button" @click="emit('test', snapshot())">测试连接</button>
         <button type="button" @click="emit('close')">取消</button>

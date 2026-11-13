@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   collectMetadata,
   deleteMetadata,
@@ -11,6 +11,7 @@ import {
 } from './api'
 import { typeLabel } from './examples'
 import CatalogFormModal from './components/datasource/CatalogFormModal.vue'
+import { useFocusTrap } from './composables/useFocusTrap'
 import { useCatalogForm, type CatalogRecord } from './composables/useCatalogForm'
 import { useMetadataTree, type MetadataTable } from './composables/useMetadataTree'
 import type { ExampleItem, QueryResult } from './types'
@@ -32,9 +33,29 @@ const collecting = ref('')
 const menu = ref('')
 const sideOpen = ref(false)
 const sqlBox = ref<HTMLTextAreaElement | null>(null)
+const previewDialog = ref<HTMLElement | null>(null)
+const previewOpen = computed(() => !!preview.value)
+useFocusTrap(previewOpen, previewDialog, () => {
+  preview.value = ''
+})
 let errorTimer = 0
 
 const hasRows = computed(() => !!result.value?.columns?.length)
+
+// Escape closes the mobile drawer
+watch(sideOpen, (open, _prev, onCleanup) => {
+  if (!open) {
+    return
+  }
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      sideOpen.value = false
+      menu.value = ''
+    }
+  }
+  document.addEventListener('keydown', onKey, true)
+  onCleanup(() => document.removeEventListener('keydown', onKey, true))
+})
 
 function closeMenu() {
   menu.value = ''
@@ -266,8 +287,8 @@ function catalogEndpoint(item: CatalogRecord | null | undefined) {
     <aside class="side" :class="{ open: sideOpen }">
       <div class="side-top">
         <input v-model="metaQuery" class="search" type="search" placeholder="搜索表 / 字段" />
-        <button class="icon" type="button" title="添加数据源" @click="openCreate">＋</button>
-        <button class="icon" type="button" title="刷新" @click="refreshAll">↻</button>
+        <button class="icon" type="button" title="添加数据源" aria-label="添加数据源" @click="openCreate">＋</button>
+        <button class="icon" type="button" title="刷新" aria-label="刷新数据源" @click="refreshAll">↻</button>
       </div>
       <p v-if="sideError" class="flash">{{ sideError }}</p>
 
@@ -421,8 +442,14 @@ function catalogEndpoint(item: CatalogRecord | null | undefined) {
     </main>
 
     <div v-if="preview" class="mask" @click.self="preview = ''">
-      <div class="dialog preview">
-        <h3>单元格预览</h3>
+      <div
+        ref="previewDialog"
+        class="dialog preview"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cell-preview-title"
+      >
+        <h3 id="cell-preview-title">单元格预览</h3>
         <pre>{{ preview }}</pre>
         <div class="actions">
           <button class="primary" type="button" @click="preview = ''">关闭</button>
