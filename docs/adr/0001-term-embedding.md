@@ -13,7 +13,8 @@ NVIDIA Auto Ontology 用 NIM embeddings + pgvector 做术语召回。本网关�
 1. `TermEmbedder` 可插拔：默认 `HashingTermEmbedder`；配置 `federation.ask.embed-endpoint` 后用 `HttpTermEmbedder`（OpenAI 兼容，含 NIM）。
 2. `OntologyEmbeddingStore` 可插拔：`file` / `jdbc` / `both`（默认 `both`）。`OntologyEmbeddingIndex` 按词表指纹缓存（内存 → JDBC `fed_ontology_embedding` → 落盘），避免每次问数全量重嵌。
 3. 可选 `federation.ask.pgvector-url`：启用 `PgvectorTermRetriever`（`<=>` 余弦距离）。URL 空或连接失败时自动 disabled，不硬依赖外部 Postgres。
-4. 召回顺序：字面命中 → **pgvector（若启用）** → 嵌入索引 → n-gram → 编辑距离（searchEntities）。
+4. 可选 ANN：`federation.ask.pgvector-index`=`hnsw`（默认）/`ivfflat`/`none`；建索引失败降级精确扫描。
+5. 召回顺序：字面命中 → **pgvector（若启用）** → 嵌入索引 → n-gram → 编辑距离（searchEntities）。
 
 ## 后果
 

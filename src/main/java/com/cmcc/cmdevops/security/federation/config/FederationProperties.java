@@ -490,6 +490,14 @@ public class FederationProperties {
         private String pgvectorPassword = "";
         /** pgvector 列维度；默认对齐 {@code HashingTermEmbedder.DEFAULT_DIM}。 */
         private int pgvectorDimensions = 256;
+        /**
+         * ANN 索引：{@code none}/{@code exact}（精确扫描）、{@code ivfflat}、{@code hnsw}（默认）。
+         * 创建失败自动降级为精确扫描，不影响问数。
+         */
+        private String pgvectorIndex = "hnsw";
+        private int pgvectorIvfflatLists = 100;
+        private int pgvectorHnswM = 16;
+        private int pgvectorHnswEfConstruction = 64;
 
         public double getMinConfidence() {
             return minConfidence;
@@ -593,6 +601,38 @@ public class FederationProperties {
 
         public void setPgvectorDimensions(int pgvectorDimensions) {
             this.pgvectorDimensions = pgvectorDimensions <= 0 ? 256 : pgvectorDimensions;
+        }
+
+        public String getPgvectorIndex() {
+            return pgvectorIndex;
+        }
+
+        public void setPgvectorIndex(String pgvectorIndex) {
+            this.pgvectorIndex = pgvectorIndex == null || pgvectorIndex.isBlank() ? "hnsw" : pgvectorIndex.trim();
+        }
+
+        public int getPgvectorIvfflatLists() {
+            return pgvectorIvfflatLists;
+        }
+
+        public void setPgvectorIvfflatLists(int pgvectorIvfflatLists) {
+            this.pgvectorIvfflatLists = pgvectorIvfflatLists <= 0 ? 100 : pgvectorIvfflatLists;
+        }
+
+        public int getPgvectorHnswM() {
+            return pgvectorHnswM;
+        }
+
+        public void setPgvectorHnswM(int pgvectorHnswM) {
+            this.pgvectorHnswM = pgvectorHnswM <= 0 ? 16 : pgvectorHnswM;
+        }
+
+        public int getPgvectorHnswEfConstruction() {
+            return pgvectorHnswEfConstruction;
+        }
+
+        public void setPgvectorHnswEfConstruction(int pgvectorHnswEfConstruction) {
+            this.pgvectorHnswEfConstruction = pgvectorHnswEfConstruction <= 0 ? 64 : pgvectorHnswEfConstruction;
         }
     }
 

@@ -72,6 +72,20 @@ test.describe('console smoke', () => {
     await expect(dialog).toHaveCount(0)
   })
 
+  test('ask critical path exposes landmarks and composer semantics', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: '智能问数' }).click()
+    await expect(page.getByRole('heading', { name: '智能问数', level: 1 })).toBeVisible()
+    const thread = page.getByRole('log', { name: '问数对话记录' })
+    await expect(thread).toBeVisible()
+    await expect(thread).toHaveAttribute('aria-live', 'polite')
+    await expect(page.getByRole('group', { name: '默认问题' })).toBeVisible()
+    const composer = page.getByRole('region', { name: '提问区' })
+    await expect(composer).toBeVisible()
+    await expect(page.getByRole('textbox', { name: '问题输入' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '发送问题' })).toBeDisabled()
+  })
+
   test('desktop shell visual baseline', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: '智能问数' }).click()

@@ -23,33 +23,57 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
         <button type="button" :disabled="busy || !turns.length" @click="clearTurns">新对话</button>
       </div>
     </header>
-    <div ref="scroller" class="thread" role="log" aria-live="polite" aria-relevant="additions">
+    <div
+      ref="scroller"
+      class="thread"
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions"
+      :aria-busy="busy ? 'true' : undefined"
+      aria-label="问数对话记录"
+    >
       <div v-if="!turns.length" class="welcome">
         <h2>智能问数</h2>
         <p class="hint">用业务语言提问，系统按 本体 → 元数据 → SQL 的顺序检索、校验并执行，口径缺失时会先问你。</p>
-        <p v-if="statusError" class="err">{{ statusError }}</p>
-        <p v-else-if="status && !ready" class="err">
+        <p v-if="statusError" class="err" role="alert">{{ statusError }}</p>
+        <p v-else-if="status && !ready" class="err" role="status">
           还没有配置大模型。
           <button class="link" type="button" @click="openLlmSettings">去配置</button>
         </p>
-        <div class="samples">
-          <p class="hint">默认问题</p>
-          <button v-for="item in SAMPLES" :key="item" class="ghost" type="button" :disabled="!ready" @click="send(item)">{{ item }}</button>
+        <div class="samples" role="group" aria-label="默认问题">
+          <p class="hint" id="ask-samples-hint">默认问题</p>
+          <button
+            v-for="item in SAMPLES"
+            :key="item"
+            class="ghost"
+            type="button"
+            :disabled="!ready"
+            :aria-describedby="'ask-samples-hint'"
+            @click="send(item)"
+          >
+            {{ item }}
+          </button>
         </div>
       </div>
 
-      <article v-for="(turn, idx) in turns" :key="idx" class="turn">
+      <article v-for="(turn, idx) in turns" :key="idx" class="turn" :aria-label="`回合 ${idx + 1}`">
         <p class="question">{{ turn.question }}</p>
 
         <div class="reply">
           <div class="trace-head">
-            <button class="link" type="button" @click="turn.showTrace = !turn.showTrace">
+            <button
+              class="link"
+              type="button"
+              :aria-expanded="turn.showTrace ? 'true' : 'false'"
+              :aria-controls="`ask-trace-${idx}`"
+              @click="turn.showTrace = !turn.showTrace"
+            >
               {{ turn.showTrace ? '收起过程' : '展开过程' }}
             </button>
-            <span v-if="!turn.done" class="live">{{ lastStage(turn) }}</span>
+            <span v-if="!turn.done" class="live" role="status" aria-live="polite">{{ lastStage(turn) }}</span>
           </div>
 
-          <div v-if="turn.showTrace" class="trace">
+          <div v-if="turn.showTrace" :id="`ask-trace-${idx}`" class="trace">
             <section v-if="turn.answerability" class="step">
               <h4>
                 <span class="tag">可答性</span>
@@ -102,7 +126,7 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
             </section>
           </div>
 
-          <p v-if="turn.error" class="err banner">{{ turn.error }}</p>
+          <p v-if="turn.error" class="err banner" role="alert">{{ turn.error }}</p>
 
           <AskAnswerClarify
             :clarify="turn.clarify"
@@ -115,7 +139,7 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
       </article>
     </div>
 
-    <footer class="composer">
+    <footer class="composer" role="region" aria-label="提问区">
       <label class="sr-only" for="ask-draft">问题输入</label>
       <textarea
         id="ask-draft"
@@ -124,11 +148,21 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
         :disabled="!ready && !!status"
         placeholder="用业务语言提问。Enter 发送，Shift+Enter 换行"
         aria-label="问题输入"
+        :aria-invalid="status && !ready ? 'true' : undefined"
         @keydown="onKey"
       />
       <div class="composer-actions">
-        <button v-if="busy" type="button" @click="stop">停止</button>
-        <button v-else class="primary" type="button" :disabled="!draft.trim() || (!ready && !!status)" @click="send()">发送</button>
+        <button v-if="busy" type="button" aria-label="停止问数" @click="stop">停止</button>
+        <button
+          v-else
+          class="primary"
+          type="button"
+          :disabled="!draft.trim() || (!ready && !!status)"
+          aria-label="发送问题"
+          @click="send()"
+        >
+          发送
+        </button>
       </div>
     </footer>
   </section>

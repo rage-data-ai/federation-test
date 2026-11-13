@@ -8,7 +8,9 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,24 +22,61 @@ import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 /**
  * 可选 pgvector 术语召回（对齐 Auto Ontology）。未配置 URL / 连接失败时 {@link #enabled()} 为 false，
  * 调用方回退到内存/落盘/JDBC 索引，不硬依赖外部 Postgres。
+ * ANN 索引（HNSW / IVFFlat）可选；创建失败时降级为精确扫描。
  */
 public final class PgvectorTermRetriever implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(PgvectorTermRetriever.class);
     private static final double MIN_SIM = 0.42;
 
+    enum IndexMode {
+        NONE,
+        IVFFLAT,
+        HNSW;
+
+        static IndexMode parse(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return HNSW;
+            }
+            return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+                case "none", "off", "exact" -> NONE;
+                case "ivfflat", "ivf" -> IVFFLAT;
+                case "hnsw" -> HNSW;
+                default -> HNSW;
+            };
+        }
+    }
+
     private final String jdbcUrl;
     private final String username;
     private final String password;
     private final int dimensions;
+    private final IndexMode indexMode;
+    private final int ivfflatLists;
+    private final int hnswM;
+    private final int hnswEfConstruction;
     private final boolean enabled;
     private final ConcurrentHashMap<String, Boolean> synced = new ConcurrentHashMap<>();
+    private final AtomicReference<String> activeIndex = new AtomicReference<>("none");
 
-    private PgvectorTermRetriever(String jdbcUrl, String username, String password, int dimensions, boolean enabled) {
+    private PgvectorTermRetriever(
+            String jdbcUrl,
+            String username,
+            String password,
+            int dimensions,
+            IndexMode indexMode,
+            int ivfflatLists,
+            int hnswM,
+            int hnswEfConstruction,
+            boolean enabled) {
         this.jdbcUrl = jdbcUrl;
         this.username = username == null ? "" : username;
         this.password = password == null ? "" : password;
         this.dimensions = Math.max(32, dimensions);
+        this.indexMode = indexMode == null ? IndexMode.HNSW : indexMode;
+        this.ivfflatLists = Math.max(1, ivfflatLists);
+        this.hnswM = Math.max(2, hnswM);
+        this.hnswEfConstruction = Math.max(4, hnswEfConstruction);
         this.enabled = enabled;
     }
 
@@ -51,11 +90,20 @@ public final class PgvectorTermRetriever implements AutoCloseable {
             return disabled();
         }
         int dim = ask.getPgvectorDimensions() > 0 ? ask.getPgvectorDimensions() : HashingTermEmbedder.DEFAULT_DIM;
-        PgvectorTermRetriever candidate =
-                new PgvectorTermRetriever(url.trim(), ask.getPgvectorUsername(), ask.getPgvectorPassword(), dim, true);
+        IndexMode mode = IndexMode.parse(ask.getPgvectorIndex());
+        PgvectorTermRetriever candidate = new PgvectorTermRetriever(
+                url.trim(),
+                ask.getPgvectorUsername(),
+                ask.getPgvectorPassword(),
+                dim,
+                mode,
+                ask.getPgvectorIvfflatLists(),
+                ask.getPgvectorHnswM(),
+                ask.getPgvectorHnswEfConstruction(),
+                true);
         try {
             candidate.ensureSchema();
-            log.info("pgvector term retriever enabled (dim={})", dim);
+            log.info("pgvector term retriever enabled (dim={}, index={})", dim, mode.name().toLowerCase(Locale.ROOT));
             return candidate;
         } catch (Exception e) {
             log.warn("pgvector unavailable, falling back to local embedding index: {}", e.toString());
@@ -64,11 +112,17 @@ public final class PgvectorTermRetriever implements AutoCloseable {
     }
 
     public static PgvectorTermRetriever disabled() {
-        return new PgvectorTermRetriever("", "", "", HashingTermEmbedder.DEFAULT_DIM, false);
+        return new PgvectorTermRetriever(
+                "", "", "", HashingTermEmbedder.DEFAULT_DIM, IndexMode.NONE, 100, 16, 64, false);
     }
 
     public boolean enabled() {
         return enabled;
+    }
+
+    /** 当前生效的 ANN 索引类型：{@code none}/{@code ivfflat}/{@code hnsw}。 */
+    public String activeIndex() {
+        return activeIndex.get();
     }
 
     public List<Match> retrieve(String question, List<Term> lexicon, TermEmbedder embedder, int limit) {
@@ -78,7 +132,8 @@ public final class PgvectorTermRetriever implements AutoCloseable {
         TermEmbedder engine = embedder == null ? new HashingTermEmbedder(dimensions) : embedder;
         String fingerprint = OntologyEmbeddingIndex.fingerprint(lexicon, engine.name());
         try {
-            syncIfNeeded(fingerprint, lexicon, engine);
+            int rows = syncIfNeeded(fingerprint, lexicon, engine);
+            ensureAnnIndex(rows);
             float[] query = fit(engine.embed(question));
             String source = "pgvector:" + engine.name();
             List<Match> hits = new ArrayList<>();
@@ -136,6 +191,27 @@ public final class PgvectorTermRetriever implements AutoCloseable {
         return sb.toString();
     }
 
+    /** 构建 CREATE INDEX DDL；供单测断言。失败路径由 {@link #ensureAnnIndex(int)} 吞掉。 */
+    static String annIndexDdl(IndexMode mode, int lists, int m, int efConstruction) {
+        return switch (mode) {
+            case NONE -> "";
+            case IVFFLAT -> """
+                    CREATE INDEX IF NOT EXISTS idx_ontology_term_vec_ann
+                    ON ontology_term_vec
+                    USING ivfflat (embedding vector_cosine_ops)
+                    WITH (lists = %d)
+                    """
+                    .formatted(Math.max(1, lists));
+            case HNSW -> """
+                    CREATE INDEX IF NOT EXISTS idx_ontology_term_vec_ann
+                    ON ontology_term_vec
+                    USING hnsw (embedding vector_cosine_ops)
+                    WITH (m = %d, ef_construction = %d)
+                    """
+                    .formatted(Math.max(2, m), Math.max(4, efConstruction));
+        };
+    }
+
     float[] fit(float[] vector) {
         float[] out = new float[dimensions];
         if (vector == null || vector.length == 0) {
@@ -145,14 +221,15 @@ public final class PgvectorTermRetriever implements AutoCloseable {
         return HashingTermEmbedder.l2Normalize(out);
     }
 
-    private void syncIfNeeded(String fingerprint, List<Term> lexicon, TermEmbedder engine) throws SQLException {
+    private int syncIfNeeded(String fingerprint, List<Term> lexicon, TermEmbedder engine) throws SQLException {
         if (Boolean.TRUE.equals(synced.get(fingerprint))) {
-            return;
+            return lexicon.size();
         }
         synchronized (synced) {
             if (Boolean.TRUE.equals(synced.get(fingerprint))) {
-                return;
+                return lexicon.size();
             }
+            int inserted = 0;
             try (Connection connection = open()) {
                 connection.setAutoCommit(false);
                 try (PreparedStatement delete = connection.prepareStatement(
@@ -180,12 +257,14 @@ public final class PgvectorTermRetriever implements AutoCloseable {
                         insert.setDouble(7, term.quality());
                         insert.setString(8, toVectorLiteral(fit(engine.embed(term.text()))));
                         insert.addBatch();
+                        inserted++;
                     }
                     insert.executeBatch();
                 }
                 connection.commit();
             }
             synced.put(fingerprint, Boolean.TRUE);
+            return inserted;
         }
     }
 
@@ -207,6 +286,40 @@ public final class PgvectorTermRetriever implements AutoCloseable {
                             )
                             """
                             .formatted(dimensions));
+        }
+        // 尝试建 ANN；空表时 IVFFlat 常失败 → 降级 none，同步后再试
+        ensureAnnIndex(0);
+    }
+
+    private void ensureAnnIndex(int rowHint) {
+        if (!enabled || indexMode == IndexMode.NONE) {
+            activeIndex.set("none");
+            return;
+        }
+        if (indexMode == IndexMode.IVFFLAT && rowHint > 0 && rowHint < ivfflatLists) {
+            // lists 过大时 IVFFlat 拒绝；按行数收缩
+            tryCreateIndex(IndexMode.IVFFLAT, Math.max(1, rowHint), hnswM, hnswEfConstruction);
+            return;
+        }
+        tryCreateIndex(indexMode, ivfflatLists, hnswM, hnswEfConstruction);
+    }
+
+    private void tryCreateIndex(IndexMode mode, int lists, int m, int efConstruction) {
+        String ddl = annIndexDdl(mode, lists, m, efConstruction);
+        if (ddl.isBlank()) {
+            activeIndex.set("none");
+            return;
+        }
+        try (Connection connection = open(); Statement statement = connection.createStatement()) {
+            statement.execute(ddl);
+            activeIndex.set(mode.name().toLowerCase(Locale.ROOT));
+            log.debug("pgvector ANN index ready: {}", activeIndex.get());
+        } catch (SQLException e) {
+            activeIndex.set("none");
+            log.warn(
+                    "pgvector {} index unavailable, using exact cosine scan: {}",
+                    mode.name().toLowerCase(Locale.ROOT),
+                    e.toString());
         }
     }
 

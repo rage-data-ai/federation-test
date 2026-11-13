@@ -24,7 +24,8 @@
 ## 依赖与 SBOM
 
 - CI 产出 CycloneDX SBOM（`target/bom.json`）。
-- 控制台：`cd web && npm audit`（生产依赖应保持 0；开发链 CVE 由 Dependabot 分组 PR 消化）。
+- 控制台：`cd web && npm audit`（**生产依赖 `npm audit --omit=dev` 应保持 0**）。
+- 开发链：已用 `overrides` 钉 `tinypool`/`minimatch@^11`（eslint/vue-tsc 链已清）。剩余 **2 条 moderate** 来自 `vitest@3`→`@vitest/mocker`，官方修复需 vitest 5（破坏性）。**接受为仅影响本地/CI 单测工具链的风险**，由 Dependabot 跟踪；不强升 vitest 5 直至评估迁移成本。
 - 后端：随 Spring Boot / Testcontainers 周更；合并前跑 `mvn -B verify`。
 
 ## 已知边界

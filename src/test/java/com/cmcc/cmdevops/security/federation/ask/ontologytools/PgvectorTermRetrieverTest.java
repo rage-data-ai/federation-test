@@ -48,5 +48,20 @@ class PgvectorTermRetrieverTest {
         assertTrue(PgvectorTermRetriever.disabled()
                 .retrieve("告警", lexicon, new HashingTermEmbedder(), 5)
                 .isEmpty());
+        assertEquals("none", PgvectorTermRetriever.disabled().activeIndex());
+    }
+
+    @Test
+    void annIndexDdlAndModeParse() {
+        assertTrue(PgvectorTermRetriever.annIndexDdl(PgvectorTermRetriever.IndexMode.NONE, 100, 16, 64).isBlank());
+        String ivf = PgvectorTermRetriever.annIndexDdl(PgvectorTermRetriever.IndexMode.IVFFLAT, 50, 16, 64);
+        assertTrue(ivf.contains("ivfflat"));
+        assertTrue(ivf.contains("lists = 50"));
+        String hnsw = PgvectorTermRetriever.annIndexDdl(PgvectorTermRetriever.IndexMode.HNSW, 100, 16, 64);
+        assertTrue(hnsw.contains("hnsw"));
+        assertTrue(hnsw.contains("ef_construction = 64"));
+        assertEquals(PgvectorTermRetriever.IndexMode.NONE, PgvectorTermRetriever.IndexMode.parse("exact"));
+        assertEquals(PgvectorTermRetriever.IndexMode.IVFFLAT, PgvectorTermRetriever.IndexMode.parse("ivf"));
+        assertEquals(PgvectorTermRetriever.IndexMode.HNSW, PgvectorTermRetriever.IndexMode.parse(""));
     }
 }
