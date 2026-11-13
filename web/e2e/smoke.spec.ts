@@ -19,6 +19,14 @@ async function stabilizeFonts(page: import('@playwright/test').Page) {
 }
 
 test.describe('console smoke', () => {
+  test.beforeEach(async ({ page }) => {
+    // Auto theme follows the machine clock (light 06:00–18:00). Pin light so axe and
+    // screenshots do not flip when the CI runner crosses 18:00 UTC.
+    await page.addInitScript(() => {
+      localStorage.setItem('theme-mode', 'light')
+    })
+  })
+
   test('skip-link, main landmark, and module navigation', async ({ page }) => {
     await page.goto('/')
     await expect(page.locator('#main-stage')).toBeVisible()
