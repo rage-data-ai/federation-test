@@ -15,8 +15,8 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Unit tests
-        run: mvn -B test
+      - name: Unit tests and quality gates
+        run: mvn -B verify
 
   frontend:
     runs-on: ubuntu-latest

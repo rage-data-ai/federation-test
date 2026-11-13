@@ -29,6 +29,7 @@ import com.cmcc.cmdevops.security.federation.model.QueryResponse;
 import com.cmcc.cmdevops.security.federation.model.RoutePlan;
 import com.cmcc.cmdevops.security.federation.router.QueryRouter;
 import com.cmcc.cmdevops.security.federation.security.AuditService;
+import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.QuotaService;
 import com.cmcc.cmdevops.security.federation.sql.FederatedSqlAnalyzer;
@@ -48,7 +49,7 @@ class QueryServiceTest {
 
     @BeforeEach
     void setUp() {
-        GatewayUser.set(new GatewayUser("tester"));
+        GatewayUser.set(new GatewayUser("tester", GatewayRole.ALL));
         FederationProperties properties = new FederationProperties();
         properties.getKafkaMappings().put("kafka.events.orders", "paimon.ods.orders");
         properties.getCache().setEnabled(false);

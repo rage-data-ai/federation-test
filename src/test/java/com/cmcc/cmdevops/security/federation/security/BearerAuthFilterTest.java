@@ -54,6 +54,26 @@ class BearerAuthFilterTest {
         AtomicBoolean passed = new AtomicBoolean();
         filter.doFilter(request, response, (req, res) -> {
             assertEquals("alice", GatewayUser.current().name());
+            assertTrue(GatewayUser.current().hasRole(GatewayRole.ADMIN));
+            passed.set(true);
+        });
+        assertTrue(passed.get());
+    }
+
+    @Test
+    void respectsConfiguredRoles() throws Exception {
+        FederationProperties properties = new FederationProperties();
+        properties.getSecurity().setEnabled(true);
+        properties.getSecurity().getTokens().put("reader", "r-token");
+        properties.getSecurity().getRoles().put("reader", "QUERY");
+        BearerAuthFilter filter = new BearerAuthFilter(properties);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/query");
+        request.addHeader("Authorization", "Bearer r-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean passed = new AtomicBoolean();
+        filter.doFilter(request, response, (req, res) -> {
+            assertTrue(GatewayUser.current().hasRole(GatewayRole.QUERY));
+            assertTrue(!GatewayUser.current().hasRole(GatewayRole.ADMIN));
             passed.set(true);
         });
         assertTrue(passed.get());

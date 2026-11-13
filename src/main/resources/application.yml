@@ -16,6 +16,12 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_PROBABILITY:1.0}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:}
 
 federation:
   trino:
@@ -39,6 +45,10 @@ federation:
     enabled: ${FEDERATION_SECURITY_ENABLED:false}
     tokens:
       demo: ${FEDERATION_DEMO_TOKEN:demo-token}
+      reader: ${FEDERATION_READER_TOKEN:reader-token}
+    roles:
+      demo: QUERY,ADMIN
+      reader: QUERY
   cors:
     allowed-origins: ${FEDERATION_CORS_ORIGINS:http://localhost:5173,http://localhost:18080}
   quota:

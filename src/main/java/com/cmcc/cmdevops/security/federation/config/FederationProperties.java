@@ -180,7 +180,10 @@ public class FederationProperties {
 
     public static class Security {
         private boolean enabled = false;
+        /** 用户名 → Bearer token（兼容旧配置；未单独配 roles 时默认 QUERY+ADMIN） */
         private Map<String, String> tokens = new LinkedHashMap<>();
+        /** 用户名 → 逗号分隔角色，如 QUERY 或 QUERY,ADMIN */
+        private Map<String, String> roles = new LinkedHashMap<>();
 
         public boolean isEnabled() {
             return enabled;
@@ -196,6 +199,14 @@ public class FederationProperties {
 
         public void setTokens(Map<String, String> tokens) {
             this.tokens = tokens;
+        }
+
+        public Map<String, String> getRoles() {
+            return roles;
+        }
+
+        public void setRoles(Map<String, String> roles) {
+            this.roles = roles == null ? new LinkedHashMap<>() : roles;
         }
     }
 

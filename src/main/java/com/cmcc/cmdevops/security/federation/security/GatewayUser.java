@@ -1,13 +1,26 @@
 package com.cmcc.cmdevops.security.federation.security;
 
-/**
- * 当前请求的网关身份。未启用鉴权时为 {@link #ANONYMOUS}。
- */
-public record GatewayUser(String name) {
+import java.util.EnumSet;
+import java.util.Set;
 
-    public static final GatewayUser ANONYMOUS = new GatewayUser("anonymous");
+/**
+ * 当前请求的网关身份。未启用鉴权时为 {@link #ANONYMOUS}（具备全部角色，便于本地开发）。
+ */
+public record GatewayUser(String name, Set<GatewayRole> roles) {
+
+    public static final GatewayUser ANONYMOUS = new GatewayUser("anonymous", GatewayRole.ALL);
 
     private static final ThreadLocal<GatewayUser> CURRENT = new ThreadLocal<>();
+
+    public GatewayUser {
+        roles = roles == null || roles.isEmpty()
+                ? Set.of(GatewayRole.QUERY)
+                : Set.copyOf(EnumSet.copyOf(roles));
+    }
+
+    public boolean hasRole(GatewayRole role) {
+        return roles.contains(role);
+    }
 
     public static void set(GatewayUser user) {
         CURRENT.set(user == null ? ANONYMOUS : user);

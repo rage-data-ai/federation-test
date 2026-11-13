@@ -2,67 +2,55 @@
 
 评估基准：Trino / Spring Boot / Apache Calcite 等成熟开源项目的工程与架构实践。  
 初评日期：2026-11-13（Asia/Shanghai）  
-复评轮次：第 3 轮（同日）
-
-代码规模：主源约 8.6k+ LOC。God Class 拆分进展：
-- `OntologyDraftService` 2432 → ~834 + `ontology.draft.*`
-- `OntologyTools` 722 → ~235 + Context/Path/Index/Views
-- `OntologyRepository` 821 → ~443 + `OntologyNaming` / `OntologyRdfIO`
+复评轮次：第 4 轮（同日）
 
 ## 优点
 
 1. **包边界清晰**：`api / ask / ontology / catalog / sql / engine / store / security / llm / metadata / vector` 分层可读。
-2. **问数护栏设计正确**：`SqlGuard` 强制只读、表白名单、大表时间过滤与 Trino 预校验；`InsightSession` 限制预算。
-3. **本体域模型有结构**：Jena TDB2 + 词汇表、Repository、确定性工具检索；设计文档已与实现对齐。
-4. **持久化抽象与密钥面有意识**：Store 接口 + JDBC；视图不回传明文密钥。
-5. **核心逻辑可测**：路由、改写、鉴权、问数、本体起草等单测（当前约 104 个）。
-6. **前端功能闭环**：数据源 / 本体 / 问数 + SSE；依赖极简。
+2. **问数护栏设计正确**：`SqlGuard` + `InsightSession` 预算限制。
+3. **本体域模型有结构**：Jena TDB2 + 词汇表、Repository、确定性工具检索。
+4. **持久化抽象与密钥面有意识**：Store 接口；视图不回传明文密钥。
+5. **核心逻辑可测**：单测 + MockMvc 切片；JaCoCo 门禁（指令 ≥60%、行 ≥55%）。
+6. **前端功能闭环且已开始模块化**：数据源 / 本体 / 问数；composable + 子组件拆分。
 
-## 第一轮已关闭的 P0/P1
+## 已关闭差距（累计）
 
-| 原问题 | 状态 |
-|--------|------|
-| 查询管线断路（Kafka / vector / DIRECT） | ✅ `QueryService` 全链路接通；`QueryRouter` 单源直连 |
-| 鉴权 / Audit / Quota 空转 | ✅ `BearerAuthFilter` + 入口接线 |
-| 500 异常外泄 | ✅ 脱敏 + 日志 |
-| 内网地址硬编码 | ✅ `FEDERAL_DB_*` 必填；提供 `.env.example` / `application-dev.yml` |
-| 文档与实现偏离 | ✅ README / ontology-design 状态已纠偏 |
-| 无 CI / LICENSE / editorconfig | ✅ |
-| God Class `OntologyDraftService` | ✅ 拆为 `DraftJson` / `Heuristics` / `Descriptions` / `Dimensions` / `Applier` |
-| 无网关镜像 / Compose 不完整 | ✅ Dockerfile 多阶段 + Compose（mysql/trino/gateway） |
-| CORS 写死 | ✅ 可配置 `FEDERATION_CORS_ORIGINS` |
+| 问题 | 状态 |
+|------|------|
+| 查询管线断路 | ✅ |
+| 鉴权 / Audit / Quota 空转 | ✅ Bearer + 审计/配额 |
+| 粗粒度 RBAC | ✅ `QUERY` / `ADMIN` + `@RequireRole` |
+| 500 异常外泄 | ✅ |
+| 内网硬编码 | ✅ |
+| God Class（Draft/Tools/Repository） | ✅ 拆分 |
+| 巨型 Vue SFC | ✅ DatasourceView / OntologyView 抽出 composable |
+| CI / LICENSE / Dependabot | ✅ |
+| Docker Compose 一键 | ✅ |
+| Prometheus 指标 | ✅ |
+| OTLP Tracing | ✅ Micrometer OTel bridge（endpoint 可配） |
+| Spotless / JaCoCo 门槛 | ✅ `mvn verify` |
+| MockMvc 切片测试 | ✅ `QueryControllerWebTest` |
+| 前端 ESLint / Vitest | ✅ |
 
-## 第二 / 三轮增量
+## 距顶尖开源仍待项
 
-- Prometheus：`/actuator/prometheus`，业务指标 `federation.query` / `federation.query.latency`
-- 前端 Vitest：`api.js` 请求错误与 SSE 解析
-- Compose 一键：`mysql` + `trino` + `gateway`（含 UI）
-- 继续拆分 `OntologyTools`、`OntologyRepository`
-
-## 仍待达到顶尖开源水准的差距
-
-### P1（下一轮优先）
+### P1
 
 | # | 问题 | 建议 |
 |---|------|------|
-| 1 | 鉴权仅为共享 Bearer，无 RBAC / OAuth2 | 引入 Spring Security 资源服务器或网关前置 IdP |
-| 2 | 尚无分布式 tracing | OpenTelemetry / Micrometer Tracing |
-| 3 | 前端无 ESLint/TS；巨型 SFC | ESLint + 渐进 TS；拆 Datasource/Ontology 视图 |
-| 4 | 缺 Testcontainers / 端到端契约测试 | 对鉴权与 `/query` 加切片 + 容器化回归 |
-| 5 | 静态分析与覆盖率门槛 | Spotless / SpotBugs / JaCoCo |
+| 1 | 非完整 OAuth2/OIDC | Spring Authorization Server / 外部 IdP 资源服务器 |
+| 2 | 无 Testcontainers 端到端 | MySQL +（可选）Trino 容器化回归 |
+| 3 | 前端仍有大 SFC、无 TypeScript | 继续拆 AskView/OntologyGraph；渐进 TS |
+| 4 | 覆盖率阈值可再抬高 | 补 MetadataService / FederalDataSource 测试后提到 70%+ |
+| 5 | 统一 Problem Details | RFC 7807 替换异构错误体 |
 
 ### P2
 
-| # | 问题 |
-|---|------|
-| 1 | 静态分析门禁（Spotless / SpotBugs / Error Prone）与覆盖率门槛 |
-| 2 | Dependabot / Renovate |
-| 3 | 巨型 Vue SFC 拆分与 a11y |
-| 4 | RFC 7807 Problem Details 统一错误模型 |
-| 5 | 本体版本管理 / 回滚（设计已知风险） |
+本体版本/回滚、a11y 深化、Error Prone、前端视觉回归测试。
 
-## 总评（复评）
+## 总评（第 4 轮）
 
-已从「功能密集 PoC」提升到「可对外演示、可 CI 协作的早期开源项目」水位：管线与文档一致、安全可开关、配置可移植、起草复杂度已模块化、交付物含镜像。
+已从 PoC 提升到**可协作、可门禁、可观测、带 RBAC 的早期生产候选**水位。  
+距 Apache/CNCF「顶尖开源」仍差完整身份联邦、容器化 E2E 与更高覆盖率/类型化前端——但主架构与工程基线已对齐一流项目的主干实践。
 
-距 Apache/CNCF 级「顶尖开源」仍差：身份模型、可观测、前端工程化、集成测试金字塔与静态分析门禁。按上表 P1 继续迭代即可收敛。
+验证证据（本轮）：`mvn -B verify` → 111 tests、JaCoCo check、Spotless check 通过；`cd web && npm run lint && npm test && npm run build` 通过。

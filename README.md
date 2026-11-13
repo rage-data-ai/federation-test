@@ -82,7 +82,14 @@ docker compose up -d --build
 }
 ```
 
-`engine` 可强制指定 `trino` / `direct` / `spark`。生产可把 `FEDERATION_SECURITY_ENABLED=true`，并带 `Authorization: Bearer <token>`（默认 demo 用户令牌见 `FEDERATION_DEMO_TOKEN`）。
+`engine` 可强制指定 `trino` / `direct` / `spark`。生产可把 `FEDERATION_SECURITY_ENABLED=true`，并带 `Authorization: Bearer <token>`：
+
+| 用户 | 默认令牌环境变量 | 角色 |
+|------|------------------|------|
+| `demo` | `FEDERATION_DEMO_TOKEN` | `QUERY,ADMIN` |
+| `reader` | `FEDERATION_READER_TOKEN` | `QUERY`（只读查询/问数） |
+
+写入数据源、元数据、本体、模型配置需要 `ADMIN`。可选 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出 tracing。
 
 ## 示例
 
@@ -149,11 +156,11 @@ SQL 以 `EXPLAIN` 开头时，前缀会原样下发给引擎。`/explain` 只返
 ## 开发
 
 ```bash
-mvn -B test
-cd web && npm ci && npm run build
+mvn -B verify          # 单测 + JaCoCo 门槛 + Spotless
+cd web && npm ci && npm run lint && npm test && npm run build
 ```
 
-CI：`.github/workflows/ci.yml`（后端单测 + 前端构建）。License：Apache-2.0。
+CI：`.github/workflows/ci.yml`（后端 `verify` + 前端 lint/test/build）。License：Apache-2.0。
 
 ## 文档中尚未纳入默认 Compose 的部分
 
