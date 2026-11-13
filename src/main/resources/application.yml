@@ -16,9 +16,9 @@ management:
 
 federation:
   trino:
-    url: jdbc:trino://localhost:8081
-    user: federation
-    password: ""
+    url: ${TRINO_JDBC_URL:jdbc:trino://localhost:8081}
+    user: ${TRINO_USER:federation}
+    password: ${TRINO_PASSWORD:}
     query-timeout-seconds: 120
     catalog-dir: docker/trino/catalog
     kafka-config-dir: docker/trino/kafka
@@ -27,11 +27,17 @@ federation:
     ttl-seconds: 30
     max-size: 256
   max-rows: 10000
-  ontology-store: data/tdb2
+  ontology-store: ${ONTOLOGY_STORE:data/tdb2}
   repository:
-    url: jdbc:mysql://192.168.19.70:3308/federal?sslMode=DISABLED&allowPublicKeyRetrieval=true&characterEncoding=utf8
-    username: ${FEDERAL_DB_USER:tsoc}
+    url: ${FEDERAL_DB_URL:}
+    username: ${FEDERAL_DB_USER:}
     password: ${FEDERAL_DB_PASSWORD:}
+  security:
+    enabled: ${FEDERATION_SECURITY_ENABLED:false}
+    tokens:
+      demo: ${FEDERATION_DEMO_TOKEN:demo-token}
+  quota:
+    max-requests-per-minute: ${FEDERATION_QUOTA_PER_MINUTE:120}
   llm:
     protocol: ${LLM_PROTOCOL:openai}
     base-url: ${LLM_BASE_URL:}
@@ -45,4 +51,4 @@ federation:
   kafka-mappings: {}
   vector:
     default-k: 10
-    milvus-uri: ""
+    milvus-uri: ${MILVUS_URI:}

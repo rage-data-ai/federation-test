@@ -18,21 +18,24 @@ class QueryRouterTest {
 
     private FederatedSqlAnalyzer analyzer;
     private QueryRouter router;
+    private CatalogRegistry registry;
 
     @BeforeEach
     void setUp() {
-        CatalogRegistry registry = CatalogRegistry.inMemory();
-        registry.save(trino("mysql", "mysql"), false);
-        registry.save(trino("clickhouse", "clickhouse"), false);
+        registry = CatalogRegistry.inMemory();
+        registry.save(jdbc("mysql", "mysql"), false);
+        registry.save(jdbc("clickhouse", "clickhouse"), false);
+        registry.save(trinoOnly("kafka", "kafka"), false);
         analyzer = new FederatedSqlAnalyzer(new FederationProperties());
         router = new QueryRouter(registry);
     }
 
     @Test
-    void routeSingleSourceToTrino() {
+    void routeSingleJdbcSourceToDirect() {
         AnalyzedQuery query = analyzer.analyze("SELECT * FROM mysql.shop.customer");
         RoutePlan plan = router.route(query, query.normalizedSql());
-        assertEquals(EngineType.TRINO, plan.engine());
+        assertEquals(EngineType.DIRECT, plan.engine());
+        assertEquals("mysql", plan.directCatalog());
     }
 
     @Test
@@ -47,17 +50,38 @@ class QueryRouterTest {
     }
 
     @Test
+    void honorEngineHintTrino() {
+        AnalyzedQuery query = analyzer.analyze("SELECT * FROM mysql.shop.customer");
+        RoutePlan plan = router.route(query, query.normalizedSql(), "trino");
+        assertEquals(EngineType.TRINO, plan.engine());
+    }
+
+    @Test
+    void nonDirectTypeGoesToTrino() {
+        AnalyzedQuery query = analyzer.analyze("SELECT * FROM kafka.events.orders");
+        RoutePlan plan = router.route(query, query.normalizedSql());
+        assertEquals(EngineType.TRINO, plan.engine());
+    }
+
+    @Test
     void rejectUnregisteredCatalog() {
         AnalyzedQuery query = analyzer.analyze("SELECT * FROM unknown.shop.customer");
         assertThrows(IllegalArgumentException.class, () -> router.route(query, query.normalizedSql()));
     }
 
-    private CatalogRecord trino(String name, String type) {
+    private CatalogRecord jdbc(String name, String type) {
         CatalogRecord record = new CatalogRecord();
         record.setName(name);
         record.setType(type);
+        record.setRoute("DIRECT");
         record.setHost("127.0.0.1");
         record.setDatabase("shop");
+        return record;
+    }
+
+    private CatalogRecord trinoOnly(String name, String type) {
+        CatalogRecord record = jdbc(name, type);
+        record.setRoute("TRINO");
         return record;
     }
 }

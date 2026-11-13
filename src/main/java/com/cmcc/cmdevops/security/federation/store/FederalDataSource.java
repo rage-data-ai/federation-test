@@ -35,6 +35,10 @@ public class FederalDataSource {
 
     public FederalDataSource(FederationProperties properties, ObjectMapper objectMapper) {
         FederationProperties.Repository repository = properties.getRepository();
+        if (repository.getUrl() == null || repository.getUrl().isBlank()) {
+            throw new IllegalStateException(
+                    "未配置联邦配置库 JDBC URL。请设置环境变量 FEDERAL_DB_URL，或启用 spring.profiles.active=dev 并编辑 application-dev.yml");
+        }
         String password = repository.getPassword();
         if (password == null || password.isBlank()) {
             password = readPassword(Path.of("data/federal.password"));

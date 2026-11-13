@@ -85,11 +85,10 @@ public class FederationProperties {
         return repository;
     }
 
-    /** 网关自己的配置库，替代 data/*.json。 */
+    /** 网关自己的配置库，替代 data/*.json。须通过 FEDERAL_DB_URL 等环境变量或配置文件提供。 */
     public static class Repository {
-        private String url = "jdbc:mysql://192.168.19.70:3308/federal"
-                + "?sslMode=DISABLED&allowPublicKeyRetrieval=true&characterEncoding=utf8";
-        private String username = "tsoc";
+        private String url = "";
+        private String username = "";
         private String password = "";
 
         public String getUrl() {

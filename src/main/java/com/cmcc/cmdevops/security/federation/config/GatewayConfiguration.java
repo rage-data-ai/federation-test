@@ -5,6 +5,9 @@ import javax.sql.DataSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.cmcc.cmdevops.security.federation.vector.InMemoryVectorSearchClient;
+import com.cmcc.cmdevops.security.federation.vector.MilvusRestVectorSearchClient;
+import com.cmcc.cmdevops.security.federation.vector.VectorSearchClient;
 import com.zaxxer.hikari.HikariDataSource;
 
 @Configuration
@@ -23,5 +26,14 @@ public class GatewayConfiguration {
         dataSource.setMaximumPoolSize(8);
         dataSource.setInitializationFailTimeout(-1);
         return dataSource;
+    }
+
+    @Bean
+    public VectorSearchClient vectorSearchClient(FederationProperties properties) {
+        String uri = properties.getVector().getMilvusUri();
+        if (uri != null && !uri.isBlank()) {
+            return new MilvusRestVectorSearchClient(uri);
+        }
+        return new InMemoryVectorSearchClient();
     }
 }

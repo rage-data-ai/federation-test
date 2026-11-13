@@ -40,7 +40,8 @@ public class ResultCache {
     }
 
     private String key(QueryRequest request) {
-        return request.getSql().trim() + "|" + Objects.toString(request.getParameters(), "{}")
+        String user = com.cmcc.cmdevops.security.federation.security.GatewayUser.current().name();
+        return user + "|" + request.getSql().trim() + "|" + Objects.toString(request.getParameters(), "{}")
                 + "|" + Objects.toString(request.getEngine(), "");
     }
 }
