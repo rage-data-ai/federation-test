@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { computed, ref, toRef } from 'vue'
+import { useFocusTrap } from '../../composables/useFocusTrap'
 import { DRAFT_STEPS, qualified, type OntologyTableRef } from '../../composables/useOntologyDraft'
 import type { DraftLogEntry, DraftResult, DraftStep } from '../../types'
 
-defineProps<{
+const props = defineProps<{
   show: boolean
   drafting?: boolean
   draftSteps?: ReadonlyArray<DraftStep>
@@ -38,14 +40,40 @@ function inputValue(event: Event): string {
 }
 
 const steps = DRAFT_STEPS
+const dialog = ref<HTMLElement | null>(null)
+const open = toRef(props, 'show')
+useFocusTrap(open, dialog, () => {
+  if (!props.drafting) {
+    emit('close')
+  }
+})
+
+const titleId = 'draft-dialog-title'
+const busyLabel = computed(() =>
+  props.drafting ? `${props.draftDetail || '起草中…'} · ${props.draftElapsed ?? 0}s` : '开始起草'
+)
 </script>
 
 <template>
   <div v-if="show" class="mask" @click.self="!drafting && emit('close')">
-    <div class="dialog draft">
-      <h3>大模型起草</h3>
-      <ol class="steps">
-        <li v-for="step in (draftSteps || steps)" :key="step.key" :class="{ on: draftReached(step.key) }">{{ step.label }}</li>
+    <div
+      ref="dialog"
+      class="dialog draft"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="titleId"
+      :aria-busy="drafting ? 'true' : undefined"
+    >
+      <h3 :id="titleId">大模型起草</h3>
+      <ol class="steps" aria-label="起草步骤">
+        <li
+          v-for="step in (draftSteps || steps)"
+          :key="step.key"
+          :class="{ on: draftReached(step.key) }"
+          :aria-current="draftReached(step.key) ? 'step' : undefined"
+        >
+          {{ step.label }}
+        </li>
       </ol>
       <template v-if="!drafting && !(draftLog || []).length">
         <label>
@@ -62,9 +90,10 @@ const steps = DRAFT_STEPS
           :value="draftQuery"
           type="search"
           placeholder="过滤表名"
+          aria-label="过滤表名"
           @input="emit('update:draftQuery', inputValue($event))"
         />
-        <div class="picker">
+        <div class="picker" role="group" aria-label="可选数据表">
           <label v-for="t in (draftCandidates || [])" :key="qualified(t)" class="check" :class="{ off: takenElsewhere(qualified(t)) }">
             <input
               type="checkbox"
@@ -89,7 +118,7 @@ const steps = DRAFT_STEPS
         <p class="hint">开始后会逐步列出每一段：读了哪些表、写入了几个概念和属性、哪一段被跳过。</p>
       </template>
       <p v-else class="hint">主题域 {{ (draftSubject || '').trim() }}，已选 {{ (draftTables || []).length }} 张：{{ (draftTables || []).join('，') }}</p>
-      <ol v-if="(draftLog || []).length" class="draft-log">
+      <ol v-if="(draftLog || []).length" class="draft-log" aria-live="polite">
         <li v-for="(line, index) in draftLog" :key="index" :class="line.status">
           <span>{{ line.text }}</span>
           <ul v-if="line.notes.length">
@@ -97,16 +126,22 @@ const steps = DRAFT_STEPS
           </ul>
         </li>
       </ol>
-      <p v-if="draftError" class="err">{{ draftError }}</p>
-      <div v-if="draftResult" class="ok">
+      <p v-if="draftError" class="err" role="alert">{{ draftError }}</p>
+      <div v-if="draftResult" class="ok" role="status">
         已写入：概念 {{ draftResult.concepts }}、属性 {{ draftResult.attributes }}、关系 {{ draftResult.relations }}、
         码值 {{ draftResult.codes }}、派生概念 {{ draftResult.definedConcepts }}
       </div>
       <div class="actions">
         <button v-if="!drafting && (draftLog || []).length" type="button" @click="emit('reselect')">重新选择表</button>
         <button type="button" :disabled="drafting" @click="emit('finish')">{{ draftStep === 'done' ? '在图中查看' : '关闭' }}</button>
-        <button class="primary" type="button" :disabled="drafting || !(draftTables || []).length || !(draftSubject || '').trim()" @click="emit('run')">
-          {{ drafting ? `${draftDetail || '起草中…'} · ${draftElapsed}s` : '开始起草' }}
+        <button
+          class="primary"
+          type="button"
+          :disabled="drafting || !(draftTables || []).length || !(draftSubject || '').trim()"
+          :aria-busy="drafting ? 'true' : undefined"
+          @click="emit('run')"
+        >
+          {{ busyLabel }}
         </button>
       </div>
     </div>

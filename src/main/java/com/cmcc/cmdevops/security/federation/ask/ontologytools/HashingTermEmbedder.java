@@ -72,7 +72,8 @@ public final class HashingTermEmbedder implements TermEmbedder {
         return dot;
     }
 
-    private static float[] l2Normalize(float[] vector) {
+    /** L2 归一化（就地）；供 pgvector 载荷与哈希嵌入共用。 */
+    public static float[] l2Normalize(float[] vector) {
         double sum = 0;
         for (float v : vector) {
             sum += v * v;

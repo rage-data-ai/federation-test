@@ -481,6 +481,15 @@ public class FederationProperties {
          * {@code both}（JDBC 优先加载，双写；对齐 Auto Ontology 共享索引）。
          */
         private String embedStore = "both";
+        /**
+         * 可选 Postgres + pgvector JDBC URL。空则禁用，问数回退本地/联邦库索引。
+         * 例：{@code jdbc:postgresql://localhost:5432/ontology}
+         */
+        private String pgvectorUrl = "";
+        private String pgvectorUsername = "";
+        private String pgvectorPassword = "";
+        /** pgvector 列维度；默认对齐 {@code HashingTermEmbedder.DEFAULT_DIM}。 */
+        private int pgvectorDimensions = 256;
 
         public double getMinConfidence() {
             return minConfidence;
@@ -552,6 +561,38 @@ public class FederationProperties {
 
         public void setEmbedStore(String embedStore) {
             this.embedStore = embedStore == null || embedStore.isBlank() ? "both" : embedStore.trim();
+        }
+
+        public String getPgvectorUrl() {
+            return pgvectorUrl;
+        }
+
+        public void setPgvectorUrl(String pgvectorUrl) {
+            this.pgvectorUrl = pgvectorUrl == null ? "" : pgvectorUrl.trim();
+        }
+
+        public String getPgvectorUsername() {
+            return pgvectorUsername;
+        }
+
+        public void setPgvectorUsername(String pgvectorUsername) {
+            this.pgvectorUsername = pgvectorUsername == null ? "" : pgvectorUsername;
+        }
+
+        public String getPgvectorPassword() {
+            return pgvectorPassword;
+        }
+
+        public void setPgvectorPassword(String pgvectorPassword) {
+            this.pgvectorPassword = pgvectorPassword == null ? "" : pgvectorPassword;
+        }
+
+        public int getPgvectorDimensions() {
+            return pgvectorDimensions;
+        }
+
+        public void setPgvectorDimensions(int pgvectorDimensions) {
+            this.pgvectorDimensions = pgvectorDimensions <= 0 ? 256 : pgvectorDimensions;
         }
     }
 

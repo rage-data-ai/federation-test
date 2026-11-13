@@ -19,6 +19,7 @@ import com.cmcc.cmdevops.security.federation.ask.ontologytools.HashingTermEmbedd
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.HttpTermEmbedder;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.NgramTermRetriever;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyEmbeddingStore;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.PgvectorTermRetriever;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.TermEmbedder;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyEntityViews;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyIndex;
@@ -53,21 +54,23 @@ public class OntologyTools {
             OntologyRepository repository,
             OntologyQueryService queryService,
             FederationProperties properties,
-            OntologyEmbeddingStore embeddingStore) {
+            OntologyEmbeddingStore embeddingStore,
+            PgvectorTermRetriever pgvector) {
         this(
                 repository,
                 queryService,
                 properties.getAsk().getMaxPathDepth(),
                 termEmbedderOf(properties),
-                embeddingStore);
+                embeddingStore,
+                pgvector);
     }
 
     OntologyTools(OntologyRepository repository, OntologyQueryService queryService, int maxDepth) {
-        this(repository, queryService, maxDepth, new HashingTermEmbedder(), (OntologyEmbeddingStore) null);
+        this(repository, queryService, maxDepth, new HashingTermEmbedder(), (OntologyEmbeddingStore) null, null);
     }
 
     OntologyTools(OntologyRepository repository, OntologyQueryService queryService, int maxDepth, TermEmbedder embedder) {
-        this(repository, queryService, maxDepth, embedder, (OntologyEmbeddingStore) null);
+        this(repository, queryService, maxDepth, embedder, (OntologyEmbeddingStore) null, null);
     }
 
     OntologyTools(
@@ -81,7 +84,8 @@ public class OntologyTools {
                 queryService,
                 maxDepth,
                 embedder,
-                embeddingCacheDir == null ? null : new FileOntologyEmbeddingStore(embeddingCacheDir));
+                embeddingCacheDir == null ? null : new FileOntologyEmbeddingStore(embeddingCacheDir),
+                null);
     }
 
     OntologyTools(
@@ -90,10 +94,21 @@ public class OntologyTools {
             int maxDepth,
             TermEmbedder embedder,
             OntologyEmbeddingStore embeddingStore) {
+        this(repository, queryService, maxDepth, embedder, embeddingStore, null);
+    }
+
+    OntologyTools(
+            OntologyRepository repository,
+            OntologyQueryService queryService,
+            int maxDepth,
+            TermEmbedder embedder,
+            OntologyEmbeddingStore embeddingStore,
+            PgvectorTermRetriever pgvector) {
         this.repository = repository;
         this.pathFinder = new OntologyPathFinder(maxDepth);
         this.views = new OntologyEntityViews(queryService);
-        this.contextBuilder = new BusinessContextBuilder(repository, pathFinder, views, embedder, embeddingStore);
+        this.contextBuilder =
+                new BusinessContextBuilder(repository, pathFinder, views, embedder, embeddingStore, pgvector);
     }
 
     static TermEmbedder termEmbedderOf(FederationProperties properties) {

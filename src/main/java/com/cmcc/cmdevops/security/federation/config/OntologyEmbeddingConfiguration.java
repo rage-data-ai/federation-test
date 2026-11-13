@@ -10,11 +10,12 @@ import com.cmcc.cmdevops.security.federation.ask.OntologyTools;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.CompositeOntologyEmbeddingStore;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.FileOntologyEmbeddingStore;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyEmbeddingStore;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.PgvectorTermRetriever;
 import com.cmcc.cmdevops.security.federation.store.FederalDataSource;
 import com.cmcc.cmdevops.security.federation.store.JdbcOntologyEmbeddingStore;
 
 /**
- * 问数术语向量持久化：file / jdbc / both（默认 both，JDBC 优先）。
+ * 问数术语向量：file / jdbc / both，以及可选 pgvector（失败自动禁用）。
  */
 @Configuration
 public class OntologyEmbeddingConfiguration {
@@ -28,5 +29,10 @@ public class OntologyEmbeddingConfiguration {
             case "file" -> file;
             default -> new CompositeOntologyEmbeddingStore(List.of(new JdbcOntologyEmbeddingStore(federal), file));
         };
+    }
+
+    @Bean(destroyMethod = "close")
+    PgvectorTermRetriever pgvectorTermRetriever(FederationProperties properties) {
+        return PgvectorTermRetriever.create(properties.getAsk());
     }
 }

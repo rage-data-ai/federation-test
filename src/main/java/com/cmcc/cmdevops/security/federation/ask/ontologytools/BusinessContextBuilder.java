@@ -37,9 +37,10 @@ public final class BusinessContextBuilder {
     private final OntologyEntityViews views;
     private final TermEmbedder termEmbedder;
     private final OntologyEmbeddingStore embeddingStore;
+    private final PgvectorTermRetriever pgvector;
 
     public BusinessContextBuilder(OntologyRepository repository, OntologyPathFinder pathFinder, OntologyEntityViews views) {
-        this(repository, pathFinder, views, new HashingTermEmbedder(), (OntologyEmbeddingStore) null);
+        this(repository, pathFinder, views, new HashingTermEmbedder(), (OntologyEmbeddingStore) null, null);
     }
 
     public BusinessContextBuilder(
@@ -47,7 +48,7 @@ public final class BusinessContextBuilder {
             OntologyPathFinder pathFinder,
             OntologyEntityViews views,
             TermEmbedder termEmbedder) {
-        this(repository, pathFinder, views, termEmbedder, (OntologyEmbeddingStore) null);
+        this(repository, pathFinder, views, termEmbedder, (OntologyEmbeddingStore) null, null);
     }
 
     public BusinessContextBuilder(
@@ -61,7 +62,8 @@ public final class BusinessContextBuilder {
                 pathFinder,
                 views,
                 termEmbedder,
-                embeddingCacheDir == null ? null : new FileOntologyEmbeddingStore(embeddingCacheDir));
+                embeddingCacheDir == null ? null : new FileOntologyEmbeddingStore(embeddingCacheDir),
+                null);
     }
 
     public BusinessContextBuilder(
@@ -70,11 +72,22 @@ public final class BusinessContextBuilder {
             OntologyEntityViews views,
             TermEmbedder termEmbedder,
             OntologyEmbeddingStore embeddingStore) {
+        this(repository, pathFinder, views, termEmbedder, embeddingStore, null);
+    }
+
+    public BusinessContextBuilder(
+            OntologyRepository repository,
+            OntologyPathFinder pathFinder,
+            OntologyEntityViews views,
+            TermEmbedder termEmbedder,
+            OntologyEmbeddingStore embeddingStore,
+            PgvectorTermRetriever pgvector) {
         this.repository = repository;
         this.pathFinder = pathFinder;
         this.views = views;
         this.termEmbedder = termEmbedder == null ? new HashingTermEmbedder() : termEmbedder;
         this.embeddingStore = embeddingStore;
+        this.pgvector = pgvector;
     }
 
     public BusinessContext businessContext(String question, Set<String> extraEntities) {
@@ -98,8 +111,13 @@ public final class BusinessContextBuilder {
         List<Match> matches = exclusive ? new ArrayList<>()
                 : match(question == null ? "" : question, lexicon, warnings);
         if (!exclusive && question != null && matches.isEmpty()) {
-            // 无字面命中时：先本地哈希嵌入召回，再 n-gram 补漏（无需 pgvector / EMBED API）
-            matches.addAll(EmbeddingTermRetriever.retrieve(question, lexicon, termEmbedder, embeddingStore, 5));
+            // 无字面命中：可选 pgvector → 本地/联邦嵌入索引 → n-gram
+            if (pgvector != null && pgvector.enabled()) {
+                matches.addAll(pgvector.retrieve(question, lexicon, termEmbedder, 5));
+            }
+            if (matches.isEmpty()) {
+                matches.addAll(EmbeddingTermRetriever.retrieve(question, lexicon, termEmbedder, embeddingStore, 5));
+            }
             if (matches.isEmpty()) {
                 matches.addAll(NgramTermRetriever.retrieve(question, lexicon, 5));
             }
