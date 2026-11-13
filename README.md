@@ -21,7 +21,7 @@ HTTP /api/v1/query  ·  /api/v1/ask (SSE)
          MySQL/PG/CK            mysql / postgresql / clickhouse / …
 ```
 
-设计评估见 [`docs/design-review.md`](docs/design-review.md)；本体设计见 [`docs/ontology-design.md`](docs/ontology-design.md)。
+设计评估见 [`docs/design-review.md`](docs/design-review.md)；本体设计见 [`docs/ontology-design.md`](docs/ontology-design.md)；OIDC/JWT 见 [`docs/oidc.md`](docs/oidc.md)。
 
 ## 快速开始
 
@@ -65,6 +65,7 @@ docker compose up -d --build
 | DELETE | `/api/v1/catalogs/{name}` | 删除数据源 |
 | POST | `/api/v1/catalogs/test` | 测试连接 |
 | GET | `/api/v1/health` | 健康检查 |
+| GET | `/api/v1/auth/me` | 当前身份（Bearer / JWT） |
 | GET | `/api/v1/llm/status` | 大模型是否已配置 |
 | PUT | `/api/v1/llm/config` | 写入大模型配置 |
 | POST | `/api/v1/ask` | 智能问数（SSE） |

@@ -1,6 +1,14 @@
 <script setup>
 import { computed, onMounted, onUnmounted, provide, reactive, ref } from 'vue'
-import { llmConfig, llmStatus, saveLlm, testLlm } from './api'
+import { authMe, llmConfig, llmStatus, saveLlm, testLlm } from './api'
+import {
+  beginOidcLogin,
+  clearAccessToken,
+  completeOidcCallback,
+  getAccessToken,
+  readOidcConfig,
+  setAccessToken
+} from './auth'
 import AskView from './AskView.vue'
 import DatasourceView from './DatasourceView.vue'
 import OntologyView from './OntologyView.vue'
@@ -25,6 +33,19 @@ const llmBusy = ref('')
 provide('openLlmSettings', openLlm)
 provide('llmRevision', llmRevision)
 
+const showAuth = ref(false)
+const authForm = reactive({ token: getAccessToken() })
+const authUser = ref(null)
+const authError = ref('')
+const authBusy = ref(false)
+const oidcEnabled = !!readOidcConfig()
+const authLabel = computed(() => {
+  if (authUser.value?.name) {
+    return `身份：${authUser.value.name}`
+  }
+  return getAccessToken() ? '身份：已配置令牌' : '身份：未登录'
+})
+
 const themeMode = ref(localStorage.getItem('theme-mode') || 'auto')
 const theme = ref('dark')
 let themeTimer = 0
@@ -37,10 +58,17 @@ const themeLabel = computed(() => {
 })
 const themeIcon = computed(() => (themeMode.value === 'auto' ? '◐' : themeMode.value === 'dark' ? '☾' : '☀'))
 
-onMounted(() => {
+onMounted(async () => {
   applyTheme()
   themeTimer = window.setInterval(applyTheme, 60_000)
-  refreshLlm()
+  try {
+    await completeOidcCallback()
+  } catch (e) {
+    authError.value = e.message
+    showAuth.value = true
+  }
+  authForm.token = getAccessToken()
+  await Promise.all([refreshLlm(), refreshAuth()])
 })
 
 onUnmounted(() => {
@@ -52,6 +80,55 @@ async function refreshLlm() {
     llm.value = await llmStatus()
   } catch {
     llm.value = null
+  }
+}
+
+async function refreshAuth() {
+  try {
+    authUser.value = await authMe()
+    authError.value = ''
+  } catch (e) {
+    authUser.value = null
+    if (getAccessToken()) {
+      authError.value = e.message
+    }
+  }
+}
+
+function openAuth() {
+  authForm.token = getAccessToken()
+  authError.value = ''
+  showAuth.value = true
+  refreshAuth()
+}
+
+async function saveAuthToken() {
+  authBusy.value = true
+  authError.value = ''
+  try {
+    setAccessToken(authForm.token)
+    await refreshAuth()
+    showAuth.value = false
+  } catch (e) {
+    authError.value = e.message
+  } finally {
+    authBusy.value = false
+  }
+}
+
+function logoutAuth() {
+  clearAccessToken()
+  authForm.token = ''
+  authUser.value = null
+  showAuth.value = false
+}
+
+async function loginOidc() {
+  authError.value = ''
+  try {
+    await beginOidcLogin()
+  } catch (e) {
+    authError.value = e.message
   }
 }
 
@@ -154,6 +231,10 @@ function cycleTheme() {
         <span class="name">{{ item.short }}</span>
       </button>
       <div class="rail-foot">
+        <button class="module" type="button" :title="authLabel" @click="openAuth">
+          <span class="glyph" aria-hidden="true">⚷</span>
+          <span class="name">身份</span>
+        </button>
         <button class="module" :class="{ pending: llm && !llm.configured }" type="button" title="大模型配置" @click="openLlm">
           <span class="glyph" aria-hidden="true">✳</span>
           <span class="name">模型</span>
@@ -168,6 +249,29 @@ function cycleTheme() {
       <KeepAlive>
         <component :is="current" />
       </KeepAlive>
+    </div>
+
+    <div v-if="showAuth" class="mask" @click.self="showAuth = false">
+      <form class="dialog" @submit.prevent="saveAuthToken">
+        <h3>访问身份</h3>
+        <p v-if="authUser" class="hint">
+          当前用户 {{ authUser.name }} · 角色 {{ (authUser.roles || []).join(', ') || '无' }}
+          · 鉴权 {{ authUser.securityEnabled ? '已开启' : '关闭' }}
+          · JWT {{ authUser.jwtEnabled ? '已启用' : '未启用' }}
+        </p>
+        <label>
+          Bearer / Access Token
+          <input v-model="authForm.token" type="password" autocomplete="off" placeholder="粘贴网关 token 或 IdP access_token" />
+        </label>
+        <p class="hint">令牌仅保存在本机 localStorage，请求时以 Authorization: Bearer 发送。生产请用 OIDC 登录。</p>
+        <p v-if="authError" class="err">{{ authError }}</p>
+        <div class="actions">
+          <button v-if="oidcEnabled" type="button" @click="loginOidc">OIDC 登录</button>
+          <button type="button" @click="logoutAuth">清除</button>
+          <button type="button" @click="showAuth = false">关闭</button>
+          <button class="primary" type="submit" :disabled="authBusy">{{ authBusy ? '校验中…' : '保存并校验' }}</button>
+        </div>
+      </form>
     </div>
 
     <div v-if="showLlm" class="mask" @click.self="showLlm = false">

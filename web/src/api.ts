@@ -1,7 +1,17 @@
+import { getAccessToken } from './auth'
+
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null
 
-function headers(): HeadersInit {
-  return { 'Content-Type': 'application/json' }
+function headers(extra: HeadersInit = {}): HeadersInit {
+  const result: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(extra as Record<string, string>)
+  }
+  const token = getAccessToken()
+  if (token && !result.Authorization) {
+    result.Authorization = `Bearer ${token}`
+  }
+  return result
 }
 
 function errorMessage(data: unknown, fallback: string): string {
@@ -20,7 +30,7 @@ async function request<T = Json>(path: string, options: RequestInit = {}): Promi
   try {
     response = await fetch(path, {
       ...options,
-      headers: { ...headers(), ...options.headers }
+      headers: headers(options.headers)
     })
   } catch {
     throw new Error('无法连接网关 localhost:18080，请先启动后端')
@@ -88,6 +98,15 @@ export function deleteMetadata(catalog: string, schema: string, table: string) {
   )
 }
 
+export function authMe() {
+  return request<{
+    name: string
+    roles: string[]
+    securityEnabled: boolean
+    jwtEnabled: boolean
+  }>('/api/v1/auth/me')
+}
+
 export function llmStatus() {
   return request('/api/v1/llm/status')
 }
@@ -109,7 +128,7 @@ export function getOntology() {
 }
 
 export async function getOntologyTurtle(): Promise<string> {
-  const response = await fetch('/api/v1/ontology/turtle')
+  const response = await fetch('/api/v1/ontology/turtle', { headers: headers() })
   if (!response.ok) {
     throw new Error(`导出失败 (${response.status})`)
   }
@@ -158,7 +177,7 @@ async function postEvents(path: string, body: unknown, onEvent: SseHandler, sign
   try {
     response = await fetch(path, {
       method: 'POST',
-      headers: { ...headers(), Accept: 'text/event-stream' },
+      headers: headers({ Accept: 'text/event-stream' }),
       body: JSON.stringify(body),
       signal
     })

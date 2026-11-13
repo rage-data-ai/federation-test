@@ -18,6 +18,16 @@ describe('dispatchSseChunk', () => {
 describe('listCatalogs', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value)
+      },
+      removeItem: (key: string) => {
+        store.delete(key)
+      }
+    })
   })
   afterEach(() => {
     vi.unstubAllGlobals()
