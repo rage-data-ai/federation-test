@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Stream;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
@@ -34,6 +35,7 @@ public class OntologyVersionService {
     private final ObjectMapper objectMapper;
     private final Path versionsDir;
 
+    @Autowired
     public OntologyVersionService(
             OntologyRepository repository,
             ObjectMapper objectMapper,
