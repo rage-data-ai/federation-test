@@ -26,6 +26,35 @@ class MetadataStoreTest {
         assertEquals("mysql70.tsoc.asset", reloaded.list().get(0).key());
     }
 
+    @Test
+    void replaceFindListByCatalogAndCaseInsensitiveDelete() {
+        MemoryMetadataStore records = new MemoryMetadataStore();
+        MetadataStore store = new MetadataStore(records);
+        store.replaceCatalog("ck81", java.util.List.of(
+                table("ck81", "pangu", "alert"),
+                table("ck81", "pangu", "event")));
+        store.put(table("mysql70", "tsoc", "asset"));
+
+        assertEquals(2, store.listByCatalog("CK81").size());
+        assertTrue(store.find("ck81.pangu.alert").isPresent());
+        assertTrue(store.find("CK81.PANGU.ALERT").isPresent());
+        assertTrue(store.find(null).isEmpty());
+
+        assertTrue(store.deleteTable("CK81", "PANGU", "ALERT"));
+        store.deleteCatalog("mysql70");
+        assertEquals(1, store.list().size());
+        assertEquals("event", store.list().get(0).getTable());
+
+        MemoryMetadataStore memory = new MemoryMetadataStore();
+        memory.put(table("A", "s", "t"));
+        memory.replaceCatalog("A", java.util.List.of(table("A", "s", "u")));
+        assertEquals(1, memory.list().size());
+        assertTrue(memory.deleteTable("a", "s", "U"));
+        assertFalse(memory.deleteTable("a", "s", "missing"));
+        memory.deleteCatalog("A");
+        assertTrue(memory.list().isEmpty());
+    }
+
     private static TableSnapshot table(String catalog, String schema, String name) {
         TableSnapshot snapshot = new TableSnapshot();
         snapshot.setCatalog(catalog);

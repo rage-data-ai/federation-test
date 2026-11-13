@@ -15,7 +15,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.BiConsumer;
 
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterEach;
@@ -31,6 +30,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
+import com.cmcc.cmdevops.security.federation.ask.AskListener;
 import com.cmcc.cmdevops.security.federation.ask.AskService;
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
 import com.cmcc.cmdevops.security.federation.config.WebMvcSecurityConfiguration;
@@ -141,8 +141,8 @@ class AskControllerWebTest {
     @Test
     void askStreamsDone() throws Exception {
         doAnswer(invocation -> {
-            BiConsumer<String, Object> emit = invocation.getArgument(1);
-            emit.accept("answer", Map.of("text", "42"));
+            AskListener listener = invocation.getArgument(1);
+            listener.emit("answer", Map.of("text", "42"));
             return null;
         }).when(askService).ask(any(AskRequest.class), any());
 

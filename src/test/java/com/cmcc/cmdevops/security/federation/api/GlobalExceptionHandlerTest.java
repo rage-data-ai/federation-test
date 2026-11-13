@@ -2,6 +2,7 @@ package com.cmcc.cmdevops.security.federation.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -28,5 +29,27 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<ProblemDetail> response = handler.badRequest(new IllegalArgumentException("未注册的数据源: x"));
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertEquals("未注册的数据源: x", response.getBody().getDetail());
+    }
+
+    @Test
+    void mapsStateUnsupportedAndStatusExceptions() {
+        ResponseEntity<ProblemDetail> conflict = handler.conflict(new IllegalStateException("冲突"));
+        assertEquals(HttpStatus.CONFLICT, conflict.getStatusCode());
+        assertEquals("冲突", conflict.getBody().getDetail());
+
+        ResponseEntity<ProblemDetail> blank = handler.conflict(new IllegalStateException("  "));
+        assertEquals("请求无法完成", blank.getBody().getDetail());
+
+        ResponseEntity<ProblemDetail> longMsg = handler.conflict(new IllegalStateException("x".repeat(520)));
+        assertTrue(longMsg.getBody().getDetail().endsWith("..."));
+        assertEquals(503, longMsg.getBody().getDetail().length());
+
+        ResponseEntity<ProblemDetail> unimplemented = handler.notImplemented(new UnsupportedOperationException("nope"));
+        assertEquals(HttpStatus.NOT_IMPLEMENTED, unimplemented.getStatusCode());
+
+        ResponseEntity<ProblemDetail> status = handler.status(
+                new org.springframework.web.server.ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "quota"));
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, status.getStatusCode());
+        assertEquals("quota", status.getBody().getDetail());
     }
 }

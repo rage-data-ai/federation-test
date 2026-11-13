@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -29,6 +30,7 @@ import com.cmcc.cmdevops.security.federation.catalog.CatalogRegistry;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogView;
 import com.cmcc.cmdevops.security.federation.config.WebMvcSecurityConfiguration;
 import com.cmcc.cmdevops.security.federation.metadata.MetadataService;
+import com.cmcc.cmdevops.security.federation.metadata.TableSnapshot;
 import com.cmcc.cmdevops.security.federation.security.CatalogAclService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
