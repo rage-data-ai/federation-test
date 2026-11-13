@@ -178,6 +178,35 @@ export function deleteEntity(name: string) {
   return request<OntologyBundle>(`/api/v1/ontology/entities/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
 
+export type OntologyVersionInfo = {
+  id: string
+  fileName?: string
+  concepts?: number
+  attributes?: number
+  relations?: number
+  codes?: number
+  definedConcepts?: number
+  note?: string
+}
+
+export function listOntologyVersions() {
+  return request<OntologyVersionInfo[]>('/api/v1/ontology/versions')
+}
+
+export function createOntologyVersion(label?: string) {
+  return request<OntologyVersionInfo>('/api/v1/ontology/versions', {
+    method: 'POST',
+    body: JSON.stringify(label ? { label } : {})
+  })
+}
+
+export function restoreOntologyVersion(id: string) {
+  return request<OntologyBundle>(`/api/v1/ontology/versions/${encodeURIComponent(id)}/restore`, {
+    method: 'POST',
+    body: '{}'
+  })
+}
+
 export type { DraftResult }
 
 export type SseHandler = (name: string, data: unknown) => void

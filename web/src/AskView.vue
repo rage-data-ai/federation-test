@@ -14,16 +14,16 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
 </script>
 
 <template>
-  <section class="ask">
+  <section class="ask" aria-labelledby="ask-title">
     <header class="module-head">
-      <h1>智能问数</h1>
+      <h1 id="ask-title">智能问数</h1>
       <div class="head-side">
         <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">未配置，去设置</button>
         <span v-else-if="status" class="head-note">{{ status.protocol }} · {{ status.model }}</span>
         <button type="button" :disabled="busy || !turns.length" @click="clearTurns">新对话</button>
       </div>
     </header>
-    <div ref="scroller" class="thread">
+    <div ref="scroller" class="thread" role="log" aria-live="polite" aria-relevant="additions">
       <div v-if="!turns.length" class="welcome">
         <h2>智能问数</h2>
         <p class="hint">用业务语言提问，系统按 本体 → 元数据 → SQL 的顺序检索、校验并执行，口径缺失时会先问你。</p>
@@ -105,11 +105,14 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
     </div>
 
     <footer class="composer">
+      <label class="sr-only" for="ask-draft">问题输入</label>
       <textarea
+        id="ask-draft"
         v-model="draft"
         rows="2"
         :disabled="!ready && !!status"
         placeholder="用业务语言提问。Enter 发送，Shift+Enter 换行"
+        aria-label="问题输入"
         @keydown="onKey"
       />
       <div class="composer-actions">

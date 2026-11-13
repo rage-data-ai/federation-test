@@ -25,7 +25,7 @@ defineEmits<{
 </script>
 
 <template>
-  <div v-if="clarify" class="clarify">
+  <div v-if="clarify" class="clarify" role="group" :aria-label="clarify.question || '澄清选项'">
     <p>{{ clarify.question }}</p>
     <div class="options">
       <button
@@ -40,7 +40,7 @@ defineEmits<{
     </div>
   </div>
 
-  <div v-if="answer" class="answer">
+  <div v-if="answer" class="answer" aria-live="polite">
     <p class="conclusion">{{ answer.answer }}</p>
     <div v-if="answer.columns?.length" class="table-wrap">
       <table>

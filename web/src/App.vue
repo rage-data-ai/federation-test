@@ -259,6 +259,7 @@ function cycleTheme() {
 
 <template>
   <div class="shell">
+    <a class="skip-link" href="#main-stage">跳到主内容</a>
     <nav class="rail" aria-label="模块">
       <div class="brand" title="跨源联邦查询">联邦</div>
       <button
@@ -268,6 +269,7 @@ function cycleTheme() {
         :class="{ active: active === item.key }"
         type="button"
         :title="item.label"
+        :aria-label="item.label"
         :aria-current="active === item.key ? 'page' : undefined"
         @click="open(item.key)"
       >
@@ -275,25 +277,25 @@ function cycleTheme() {
         <span class="name">{{ item.short }}</span>
       </button>
       <div class="rail-foot">
-        <button class="module" type="button" :title="authLabel" @click="openAuth">
+        <button class="module" type="button" :title="authLabel" :aria-label="authLabel" @click="openAuth">
           <span class="glyph" aria-hidden="true">⚷</span>
           <span class="name">身份</span>
         </button>
-        <button class="module" :class="{ pending: llm && !llm.configured }" type="button" title="大模型配置" @click="openLlm">
+        <button class="module" :class="{ pending: llm && !llm.configured }" type="button" title="大模型配置" aria-label="大模型配置" @click="openLlm">
           <span class="glyph" aria-hidden="true">✳</span>
           <span class="name">模型</span>
         </button>
-        <button class="module" type="button" :title="themeLabel" @click="cycleTheme">
+        <button class="module" type="button" :title="themeLabel" :aria-label="themeLabel" @click="cycleTheme">
           <span class="glyph" aria-hidden="true">{{ themeIcon }}</span>
         </button>
       </div>
     </nav>
 
-    <div class="stage">
+    <main id="main-stage" class="stage" tabindex="-1">
       <KeepAlive>
         <component :is="current" />
       </KeepAlive>
-    </div>
+    </main>
 
     <div v-if="showAuth" class="mask" @click.self="showAuth = false">
       <form class="dialog" @submit.prevent="saveAuthToken">

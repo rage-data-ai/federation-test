@@ -1,6 +1,17 @@
 <script setup lang="ts">
 import { computed, inject, onActivated, ref, watch, type Ref } from 'vue'
-import { getOntology, getOntologyTurtle, listCatalogs, listMetadata, llmStatus, renameSubject } from './api'
+import {
+  createOntologyVersion,
+  getOntology,
+  getOntologyTurtle,
+  listCatalogs,
+  listMetadata,
+  listOntologyVersions,
+  llmStatus,
+  renameSubject,
+  restoreOntologyVersion,
+  type OntologyVersionInfo
+} from './api'
 import OntologyGraph from './OntologyGraph.vue'
 import DraftDialog from './components/ontology/DraftDialog.vue'
 import { qualified, useOntologyDraft } from './composables/useOntologyDraft'
@@ -84,6 +95,10 @@ const llm = ref<LlmStatus | null>(null)
 const fresh = ref<string[]>([])
 const renaming = ref<RenameState | null>(null)
 const turtle = ref('')
+const versionsOpen = ref(false)
+const versions = ref<OntologyVersionInfo[]>([])
+const versionsBusy = ref(false)
+const versionsNote = ref('')
 const openNodes = ref(new Set<string>())
 
 const columnsByTable = computed(() => {
@@ -506,6 +521,54 @@ async function showTurtle() {
   }
 }
 
+async function openVersions() {
+  versionsOpen.value = true
+  versionsNote.value = ''
+  await refreshVersions()
+}
+
+async function refreshVersions() {
+  versionsBusy.value = true
+  try {
+    versions.value = await listOntologyVersions()
+  } catch (e) {
+    error.value = errMessage(e)
+  } finally {
+    versionsBusy.value = false
+  }
+}
+
+async function snapshotVersion() {
+  versionsBusy.value = true
+  versionsNote.value = ''
+  try {
+    const created = await createOntologyVersion('manual')
+    versionsNote.value = `已保存 ${created.id}`
+    await refreshVersions()
+  } catch (e) {
+    versionsNote.value = errMessage(e)
+  } finally {
+    versionsBusy.value = false
+  }
+}
+
+async function restoreVersion(id: string) {
+  if (!window.confirm(`确认回滚到版本 ${id}？当前本体将被覆盖。`)) {
+    return
+  }
+  versionsBusy.value = true
+  versionsNote.value = ''
+  try {
+    everything.value = await restoreOntologyVersion(id)
+    versionsNote.value = `已回滚到 ${id}`
+    await refreshVersions()
+  } catch (e) {
+    versionsNote.value = errMessage(e)
+  } finally {
+    versionsBusy.value = false
+  }
+}
+
 function downloadTurtle() {
   const url = URL.createObjectURL(new Blob([turtle.value], { type: 'text/turtle' }))
   const link = document.createElement('a')
@@ -524,14 +587,15 @@ function ensureConditions() {
 </script>
 
 <template>
-  <section class="onto">
+  <section class="onto" aria-labelledby="onto-title">
     <header class="module-head">
-      <h1>本体建模</h1>
+      <h1 id="onto-title">本体建模</h1>
       <div class="head-side">
         <span class="head-note">
           <template v-if="subjects.length">{{ subject || UNASSIGNED }}：</template>
           概念 {{ snapshot.concepts.length }}，属性 {{ snapshot.attributes.length }}，码值 {{ snapshot.codes.length }}，关系 {{ snapshot.relations.length }}
         </span>
+        <button type="button" @click="openVersions">版本</button>
         <button type="button" @click="showTurtle">导出 Turtle</button>
         <button v-if="llm && !llm.configured" type="button" @click="openLlmSettings">配置大模型</button>
         <button v-else class="primary" type="button" @click="openDraft">大模型起草</button>
@@ -771,6 +835,31 @@ function ensureConditions() {
       @run="runDraft"
     />
 
+    <div v-if="versionsOpen" class="mask" @click.self="versionsOpen = false">
+      <div class="dialog preview" role="dialog" aria-labelledby="versions-title">
+        <h3 id="versions-title">本体版本</h3>
+        <p class="hint">起草前会自动打 checkpoint；也可手动快照或回滚。</p>
+        <p v-if="versionsNote" class="head-note">{{ versionsNote }}</p>
+        <div class="actions" style="margin-bottom: 10px">
+          <button type="button" :disabled="versionsBusy" @click="snapshotVersion">保存快照</button>
+          <button type="button" :disabled="versionsBusy" @click="refreshVersions">刷新</button>
+          <button class="primary" type="button" @click="versionsOpen = false">关闭</button>
+        </div>
+        <ul class="version-list">
+          <li v-if="!versions.length" class="hint">暂无版本</li>
+          <li v-for="item in versions" :key="item.id" class="version-row">
+            <div>
+              <strong>{{ item.id }}</strong>
+              <span class="hint">
+                {{ item.note || '' }} · 概念 {{ item.concepts ?? 0 }} / 属性 {{ item.attributes ?? 0 }} / 派生 {{ item.definedConcepts ?? 0 }}
+              </span>
+            </div>
+            <button type="button" :disabled="versionsBusy" @click="restoreVersion(item.id)">回滚</button>
+          </li>
+        </ul>
+      </div>
+    </div>
+
     <div v-if="turtle" class="mask" @click.self="turtle = ''">
       <div class="dialog preview">
         <h3>本体 Turtle</h3>
@@ -790,6 +879,32 @@ function ensureConditions() {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+.version-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.version-row .hint {
+  display: block;
+  margin-top: 2px;
 }
 
 .onto-body {
