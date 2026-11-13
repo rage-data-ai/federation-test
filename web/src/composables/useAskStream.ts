@@ -1,4 +1,4 @@
-import { nextTick, onUnmounted, ref } from 'vue'
+import { nextTick, onUnmounted, ref, type Ref } from 'vue'
 import { askStream } from '../api'
 
 export const SAMPLES = [
@@ -7,23 +7,44 @@ export const SAMPLES = [
   '哪些主机在事件日志服务停止（事件 1100）之后，又出现了进程创建（事件 4688）？这样的主机有多少台？'
 ]
 
-export const STAGE_LABEL = { ontology: '本体', metadata: '元数据', insight: '分析' }
-export const SOURCE_LABEL = { ontology: '本体定义', inferred: '推断', user: '用户指定' }
-export const SQL_STATUS = { executed: '已执行', rejected: '校验拒绝', failed: '执行失败' }
+export const STAGE_LABEL: Record<string, string> = { ontology: '本体', metadata: '元数据', insight: '分析' }
+export const SOURCE_LABEL: Record<string, string> = { ontology: '本体定义', inferred: '推断', user: '用户指定' }
+export const SQL_STATUS: Record<string, string> = { executed: '已执行', rejected: '校验拒绝', failed: '执行失败' }
 
-export function cell(value) {
+export type AskStage = {
+  message?: string
+  [key: string]: unknown
+}
+
+export type AskTurn = {
+  question: string
+  stages: AskStage[]
+  ontology: Record<string, unknown> | null
+  metadata: Record<string, unknown> | null
+  sqls: unknown[]
+  results: unknown[]
+  answer: Record<string, unknown> | null
+  clarify: Record<string, unknown> | null
+  error: string
+  done: boolean
+  showTrace: boolean
+}
+
+export type ChatHistoryItem = { role: 'user' | 'assistant'; content: string }
+
+export function cell(value: unknown): string {
   if (value === null || value === undefined) {
     return 'NULL'
   }
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
-export function lastStage(turn) {
+export function lastStage(turn: Pick<AskTurn, 'stages'>): string {
   const stage = turn.stages[turn.stages.length - 1]
-  return stage ? stage.message : '提交中…'
+  return stage ? String(stage.message ?? '提交中…') : '提交中…'
 }
 
-function emptyTurn(question) {
+function emptyTurn(question: string): AskTurn {
   return {
     question,
     stages: [],
@@ -39,11 +60,13 @@ function emptyTurn(question) {
   }
 }
 
-function buildHistory(turns) {
-  const items = []
+function buildHistory(turns: AskTurn[]): ChatHistoryItem[] {
+  const items: ChatHistoryItem[] = []
   for (const turn of turns) {
     items.push({ role: 'user', content: turn.question })
-    const reply = turn.answer?.answer || turn.clarify?.question
+    const reply =
+      (typeof turn.answer?.answer === 'string' ? turn.answer.answer : undefined) ||
+      (typeof turn.clarify?.question === 'string' ? turn.clarify.question : undefined)
     if (reply) {
       items.push({ role: 'assistant', content: reply })
     }
@@ -51,16 +74,28 @@ function buildHistory(turns) {
   return items
 }
 
-function applyEvent(turn, name, data) {
+function asRecord(data: unknown): Record<string, unknown> {
+  return data && typeof data === 'object' ? (data as Record<string, unknown>) : {}
+}
+
+function applyEvent(turn: AskTurn, name: string, data: unknown): void {
+  const payload = asRecord(data)
   switch (name) {
     case 'stage':
-      turn.stages.push(data)
+      turn.stages.push(payload as AskStage)
       break
     case 'ontology':
-      turn.ontology = { ...data.context, mode: data.mode, recovery: data.recovery }
+      turn.ontology = {
+        ...asRecord(payload.context),
+        mode: payload.mode,
+        recovery: payload.recovery
+      }
       break
     case 'metadata':
-      turn.metadata = { ...data.report, recovery: data.recovery }
+      turn.metadata = {
+        ...asRecord(payload.report),
+        recovery: payload.recovery
+      }
       break
     case 'sql':
       turn.sqls.push(data)
@@ -69,13 +104,13 @@ function applyEvent(turn, name, data) {
       turn.results.push(data)
       break
     case 'answer':
-      turn.answer = data
+      turn.answer = payload
       break
     case 'clarify':
-      turn.clarify = data
+      turn.clarify = payload
       break
     case 'error':
-      turn.error = data.message
+      turn.error = typeof payload.message === 'string' ? payload.message : String(payload.message ?? '')
       break
     default:
       break
@@ -86,11 +121,11 @@ function applyEvent(turn, name, data) {
  * SSE ask flow: turns, draft, busy, send/stop, and scroll.
  */
 export function useAskStream() {
-  const turns = ref([])
+  const turns = ref<AskTurn[]>([])
   const draft = ref('')
   const busy = ref(false)
-  const scroller = ref(null)
-  let controller = null
+  const scroller = ref<HTMLElement | null>(null)
+  let controller: AbortController | null = null
 
   function scrollDown() {
     nextTick(() => {
@@ -100,12 +135,12 @@ export function useAskStream() {
     })
   }
 
-  function onEvent(turn, name, data) {
+  function onEvent(turn: AskTurn, name: string, data: unknown) {
     applyEvent(turn, name, data)
     scrollDown()
   }
 
-  async function send(text) {
+  async function send(text?: string) {
     const question = (text ?? draft.value).trim()
     if (!question || busy.value) {
       return
@@ -120,7 +155,7 @@ export function useAskStream() {
     try {
       await askStream({ question, history: prior }, (name, data) => onEvent(live, name, data), controller.signal)
     } catch (e) {
-      live.error = e.message
+      live.error = e instanceof Error ? e.message : String(e)
     } finally {
       live.done = true
       busy.value = false
@@ -140,17 +175,17 @@ export function useAskStream() {
     turns.value = []
   }
 
-  function onKey(event) {
+  function onKey(event: KeyboardEvent) {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault()
-      send()
+      void send()
     }
   }
 
   onUnmounted(() => controller?.abort())
 
   return {
-    turns,
+    turns: turns as Ref<AskTurn[]>,
     draft,
     busy,
     scroller,

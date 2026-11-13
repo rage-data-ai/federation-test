@@ -1,20 +1,43 @@
-import { reactive, ref } from 'vue'
+import { reactive, ref, type Ref } from 'vue'
 import { createCatalog, deleteCatalog, testCatalog, updateCatalog } from '../api'
 import { SOURCE_TYPES, emptyCatalog } from '../examples'
+
+export type CatalogForm = ReturnType<typeof emptyCatalog>
+
+export type CatalogRecord = {
+  name: string
+  type: string
+  host?: string
+  port?: number
+  database?: string
+  username?: string
+  password?: string
+  url?: string
+  extra?: string
+  tls?: boolean
+  [key: string]: unknown
+}
+
+export type CatalogFormOptions = {
+  onSaved?: () => void | Promise<void>
+  flashError?: (message: string) => void
+  clearMenu?: () => void
+  openCatalogs?: Ref<Record<string, boolean>>
+}
 
 /**
  * Catalog create/edit form state and actions.
  * Inject loaders and side-effects so the view stays the orchestrator.
  */
-export function useCatalogForm({ onSaved, flashError, clearMenu, openCatalogs }) {
+export function useCatalogForm({ onSaved, flashError, clearMenu, openCatalogs }: CatalogFormOptions) {
   const showForm = ref(false)
   const editing = ref(false)
-  const form = reactive(emptyCatalog())
+  const form = reactive(emptyCatalog()) as CatalogForm
   const formMessage = ref('')
   const formError = ref('')
   const saving = ref(false)
 
-  function onTypeChange(type) {
+  function onTypeChange(type?: string) {
     if (type) {
       form.type = type
     }
@@ -32,7 +55,7 @@ export function useCatalogForm({ onSaved, flashError, clearMenu, openCatalogs })
     showForm.value = true
   }
 
-  function openEdit(catalog) {
+  function openEdit(catalog: CatalogRecord) {
     clearMenu?.()
     Object.assign(form, emptyCatalog(), {
       name: catalog.name,
@@ -52,7 +75,7 @@ export function useCatalogForm({ onSaved, flashError, clearMenu, openCatalogs })
     showForm.value = true
   }
 
-  function payload(source = form) {
+  function payload(source: CatalogForm = form) {
     return {
       name: source.name.trim(),
       type: source.type,
@@ -68,29 +91,29 @@ export function useCatalogForm({ onSaved, flashError, clearMenu, openCatalogs })
     }
   }
 
-  function applyDraft(draft) {
+  function applyDraft(draft?: Partial<CatalogForm> | null) {
     if (draft) {
       Object.assign(form, emptyCatalog(), draft)
     }
   }
 
-  async function testConnection(draft) {
+  async function testConnection(draft?: Partial<CatalogForm> | null) {
     applyDraft(draft)
     formMessage.value = ''
     formError.value = ''
     try {
-      const data = await testCatalog(payload())
+      const data = (await testCatalog(payload())) as { success?: boolean; message?: string }
       if (data.success) {
-        formMessage.value = data.message
+        formMessage.value = data.message || ''
       } else {
         formError.value = data.message || '连接失败'
       }
     } catch (e) {
-      formError.value = e.message || '连接失败'
+      formError.value = (e instanceof Error ? e.message : String(e)) || '连接失败'
     }
   }
 
-  async function saveCatalog(draft) {
+  async function saveCatalog(draft?: Partial<CatalogForm> | null) {
     applyDraft(draft)
     formMessage.value = ''
     formError.value = ''
@@ -108,13 +131,13 @@ export function useCatalogForm({ onSaved, flashError, clearMenu, openCatalogs })
       }
       await onSaved?.()
     } catch (e) {
-      formError.value = e.message || '保存失败'
+      formError.value = (e instanceof Error ? e.message : String(e)) || '保存失败'
     } finally {
       saving.value = false
     }
   }
 
-  async function removeCatalog(catalog) {
+  async function removeCatalog(catalog: CatalogRecord) {
     clearMenu?.()
     if (!confirm(`删除数据源 ${catalog.name}？`)) {
       return
@@ -123,7 +146,7 @@ export function useCatalogForm({ onSaved, flashError, clearMenu, openCatalogs })
       await deleteCatalog(catalog.name)
       await onSaved?.()
     } catch (e) {
-      flashError?.(e.message || '删除失败')
+      flashError?.((e instanceof Error ? e.message : String(e)) || '删除失败')
     }
   }
 

@@ -1,5 +1,6 @@
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, type ComputedRef, type Ref } from 'vue'
 import { deleteEntity, saveEntity } from '../api'
+import type { OntologyBundle, OntologyEntity } from './useOntologyDraft'
 
 export const KINDS = [
   { key: 'concept', list: 'concepts', label: '概念' },
@@ -7,7 +8,10 @@ export const KINDS = [
   { key: 'relation', list: 'relations', label: '关系' },
   { key: 'code', list: 'codes', label: '码值' },
   { key: 'defined', list: 'definedConcepts', label: '派生概念' }
-]
+] as const
+
+export type KindKey = (typeof KINDS)[number]['key']
+export type KindDef = (typeof KINDS)[number]
 
 export const DATATYPES = ['string', 'integer', 'long', 'decimal', 'double', 'boolean', 'date', 'dateTime']
 export const OPERATORS = ['=', '>', '>=', '<', '<=']
@@ -17,9 +21,17 @@ export const COMMON = [
   { key: 'labelZh', label: '中文名', type: 'text' },
   { key: 'labelEn', label: '英文名', type: 'text' },
   { key: 'aliases', label: '中文别名（逗号分隔）', type: 'list' }
-]
+] as const
 
-export const FIELDS = {
+export type FieldDef = {
+  key: string
+  label: string
+  type: string
+  options?: string
+  of?: string
+}
+
+export const FIELDS: Record<KindKey, FieldDef[]> = {
   concept: [
     { key: 'subject', label: '主题域（只有同主题域的概念能关联）', type: 'subject' },
     { key: 'parent', label: '父概念', type: 'select', options: 'concepts' },
@@ -55,9 +67,27 @@ export const FIELDS = {
   ]
 }
 
-function blank(kind) {
-  const base = { name: '', labelZh: '', labelEn: '', aliases: [], comment: '' }
-  const extra = {
+export type EditorForm = Record<string, unknown> & {
+  name?: string
+  aliasText?: string
+  aliases?: string[]
+  comment?: string
+  table?: string
+  conditions?: Array<{ attribute?: string; value?: string; [key: string]: unknown }>
+}
+
+export type OntologyEditorOptions = {
+  everything: Ref<OntologyBundle>
+  subject: Ref<string>
+  snapshot: ComputedRef<OntologyBundle>
+  conceptNames: ComputedRef<string[]>
+  columnsByTable: ComputedRef<Record<string, string[]>>
+  fresh: Ref<string[]>
+}
+
+function blank(kind: KindKey): EditorForm {
+  const base: EditorForm = { name: '', labelZh: '', labelEn: '', aliases: [], comment: '' }
+  const extra: Record<KindKey, EditorForm> = {
     concept: { subject: '', parent: '', table: '', timeColumn: '', largeTable: false },
     attribute: { domain: '', datatype: 'string', column: '', unit: '', identifier: false, codeList: '' },
     relation: { domain: '', range: '', joinFrom: '', joinTo: '', inverse: '', transitive: false, functional: false },
@@ -67,20 +97,12 @@ function blank(kind) {
   return { ...base, ...extra[kind] }
 }
 
-function emptyToNull(value) {
+function emptyToNull(value: unknown): unknown {
   return typeof value === 'string' && !value.trim() ? null : value
 }
 
 /**
  * Entity create/edit form state and save/delete actions.
- * @param {{
- *   everything: import('vue').Ref,
- *   subject: import('vue').Ref<string>,
- *   snapshot: import('vue').ComputedRef,
- *   conceptNames: import('vue').ComputedRef<string[]>,
- *   columnsByTable: import('vue').ComputedRef<Record<string, string[]>>,
- *   fresh: import('vue').Ref<string[]>
- * }} opts
  */
 export function useOntologyEditor({
   everything,
@@ -89,63 +111,71 @@ export function useOntologyEditor({
   conceptNames,
   columnsByTable,
   fresh
-}) {
-  const selected = ref(null)
-  const form = reactive({})
+}: OntologyEditorOptions) {
+  const selected = ref<{ kind: KindKey; label: string } | null>(null)
+  const form = reactive<EditorForm>({})
   const isNew = ref(false)
   const message = ref('')
   const error = ref('')
   const saving = ref(false)
-  const pendingDelete = ref(null)
+  const pendingDelete = ref<{ name: string; note: string } | null>(null)
 
   const fields = computed(() => (selected.value ? [...COMMON, ...FIELDS[selected.value.kind]] : []))
 
-  function fill(values) {
+  function fill(values: EditorForm) {
     for (const key of Object.keys(form)) {
       delete form[key]
     }
-    Object.assign(form, JSON.parse(JSON.stringify(values)))
+    Object.assign(form, JSON.parse(JSON.stringify(values)) as EditorForm)
     form.aliasText = (form.aliases || []).join('，')
     message.value = ''
     error.value = ''
   }
 
-  function open(kind, item) {
+  function open(kind: KindDef, item: OntologyEntity) {
     selected.value = { kind: kind.key, label: kind.label }
     isNew.value = false
     fill({ ...blank(kind.key), ...item })
   }
 
-  function create(kind, preset = {}) {
+  function create(kind: KindDef, preset: Record<string, unknown> = {}) {
     selected.value = { kind: kind.key, label: kind.label }
     isNew.value = true
     fill({ ...blank(kind.key), ...(kind.key === 'concept' ? { subject: subject.value } : {}), ...preset })
   }
 
-  function createKind(key, preset) {
-    create(KINDS.find((kind) => kind.key === key), preset)
+  function createKind(key: KindKey, preset?: Record<string, unknown>) {
+    const kind = KINDS.find((item) => item.key === key)
+    if (kind) {
+      create(kind, preset)
+    }
   }
 
-  function kindOf(name) {
-    return KINDS.find((kind) => snapshot.value[kind.list].some((item) => item.name === name))
+  function kindOf(name: string) {
+    return KINDS.find((kind) =>
+      (snapshot.value[kind.list] as OntologyEntity[] | undefined)?.some((item) => item.name === name)
+    )
   }
 
-  function options(field) {
+  function options(field: FieldDef) {
     if (field.options === 'datatypes') {
       return DATATYPES
     }
     if (field.options === 'codeLists') {
-      const lists = (snapshot.value?.attributes || []).map((attribute) => attribute.codeList).filter(Boolean)
+      const lists = (snapshot.value?.attributes || [])
+        .map((attribute) => attribute.codeList)
+        .filter((value): value is string => typeof value === 'string' && !!value)
       return [...new Set(lists)].sort()
     }
     return conceptNames.value.filter((name) => name !== form.name)
   }
 
-  function columnsFor(field) {
-    const table = field.of === 'table'
-      ? form.table
-      : snapshot.value.concepts.find((c) => c.name === form[field.of])?.table
-    return table ? columnsByTable.value[table.toLowerCase()] || [] : []
+  function columnsFor(field: FieldDef) {
+    const table =
+      field.of === 'table'
+        ? form.table
+        : snapshot.value.concepts.find((c) => c.name === form[field.of as string])?.table
+    return table ? columnsByTable.value[String(table).toLowerCase()] || [] : []
   }
 
   async function save() {
@@ -153,21 +183,28 @@ export function useOntologyEditor({
     message.value = ''
     error.value = ''
     try {
-      const body = {}
+      const body: Record<string, unknown> = {}
       for (const field of fields.value) {
-        body[field.key] = field.type === 'list'
-          ? form.aliasText.split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
-          : emptyToNull(form[field.key])
+        body[field.key] =
+          field.type === 'list'
+            ? String(form.aliasText || '')
+                .split(/[,，、]/)
+                .map((s) => s.trim())
+                .filter(Boolean)
+            : emptyToNull(form[field.key])
       }
       body.comment = emptyToNull(form.comment)
-      if (selected.value.kind === 'defined') {
+      if (selected.value?.kind === 'defined') {
         body.conditions = (form.conditions || []).filter((c) => c.attribute && c.value !== '')
       }
       const kind = selected.value
-      const name = form.name
-      everything.value = await saveEntity(kind.kind, name, body)
-      if (kind.kind === 'concept' && (body.subject || '') !== subject.value) {
-        subject.value = body.subject || ''
+      if (!kind) {
+        return
+      }
+      const name = String(form.name || '')
+      everything.value = (await saveEntity(kind.kind, name, body)) as OntologyBundle
+      if (kind.kind === 'concept' && String(body.subject || '') !== subject.value) {
+        subject.value = String(body.subject || '')
         await nextTick()
         const entity = snapshot.value.concepts.find((item) => item.name === name)
         const conceptKind = KINDS.find((item) => item.key === 'concept')
@@ -178,19 +215,19 @@ export function useOntologyEditor({
       isNew.value = false
       message.value = '已保存'
     } catch (e) {
-      error.value = e.message
+      error.value = e instanceof Error ? e.message : String(e)
     } finally {
       saving.value = false
     }
   }
 
-  function removeNamed(name) {
+  function removeNamed(name: string) {
     const kind = kindOf(name)
-    const notes = {
+    const notes: Partial<Record<KindKey, string>> = {
       concept: '它的属性、码值、关系和派生概念会一起删除。',
       attribute: '它独有的码值会一起删除。'
     }
-    pendingDelete.value = { name, note: notes[kind?.key] || '' }
+    pendingDelete.value = { name, note: (kind && notes[kind.key]) || '' }
   }
 
   async function confirmDelete() {
@@ -200,19 +237,19 @@ export function useOntologyEditor({
     }
     pendingDelete.value = null
     try {
-      everything.value = await deleteEntity(name)
+      everything.value = (await deleteEntity(name)) as OntologyBundle
       fresh.value = fresh.value.filter((item) => item !== name)
       if (form.name === name) {
         selected.value = null
       }
       error.value = ''
     } catch (e) {
-      error.value = e.message
+      error.value = e instanceof Error ? e.message : String(e)
     }
   }
 
   function remove() {
-    return removeNamed(form.name)
+    return removeNamed(String(form.name || ''))
   }
 
   function closeEditor() {

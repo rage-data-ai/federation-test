@@ -1,44 +1,79 @@
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, type Ref } from 'vue'
 
 const TABLE_CAP = 80
 
-function columnHits(item, q) {
+export type MetadataColumn = {
+  name: string
+  type?: string
+  [key: string]: unknown
+}
+
+export type MetadataTable = {
+  catalog: string
+  schema: string
+  table: string
+  columns?: MetadataColumn[]
+  [key: string]: unknown
+}
+
+export type CatalogItem = {
+  name: string
+  [key: string]: unknown
+}
+
+export type MetadataTreeOptions = {
+  catalogs: Ref<CatalogItem[]>
+  snapshots: Ref<MetadataTable[]>
+  sql: Ref<string>
+  sqlBox: Ref<HTMLTextAreaElement | HTMLInputElement | null>
+  clearMenu?: () => void
+}
+
+function columnHits(item: MetadataTable, q: string): MetadataColumn[] {
   return (item.columns || []).filter(
     (col) => col.name.toLowerCase().includes(q) || String(col.type || '').toLowerCase().includes(q)
   )
 }
 
-export function quoteIdent(name) {
+export function quoteIdent(name: string): string {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `"${String(name).replaceAll('"', '""')}"`
 }
 
-export function tableKey(item) {
+export function tableKey(item: Pick<MetadataTable, 'catalog' | 'schema' | 'table'>): string {
   return `${item.catalog}.${item.schema}.${item.table}`
 }
 
-export function schemaKey(catalog, schema) {
+export function schemaKey(catalog: string, schema: string): string {
   return `${catalog}.${schema}`
 }
 
-export function qualifiedTable(item) {
+export function qualifiedTable(item: Pick<MetadataTable, 'catalog' | 'schema' | 'table'>): string {
   return `${quoteIdent(item.catalog)}.${quoteIdent(item.schema)}.${quoteIdent(item.table)}`
 }
 
 /**
  * Metadata tree: filter/cap, open-state toggles, and SQL insert helpers.
- * @param {{ catalogs: import('vue').Ref, snapshots: import('vue').Ref, sql: import('vue').Ref, sqlBox: import('vue').Ref, clearMenu?: () => void }} opts
  */
-export function useMetadataTree({ catalogs, snapshots, sql, sqlBox, clearMenu }) {
-  const openCatalogs = ref({})
-  const openSchemas = ref({})
-  const openTables = ref({})
+export function useMetadataTree({ catalogs, snapshots, sql, sqlBox, clearMenu }: MetadataTreeOptions) {
+  const openCatalogs = ref<Record<string, boolean>>({})
+  const openSchemas = ref<Record<string, boolean>>({})
+  const openTables = ref<Record<string, boolean>>({})
   const metaQuery = ref('')
 
   const tree = computed(() => {
     const q = metaQuery.value.trim().toLowerCase()
-    const byCatalog = {}
-    const order = []
-    const ensure = (name, source) => {
+    const byCatalog: Record<
+      string,
+      {
+        name: string
+        source: CatalogItem | null
+        schemas: Record<string, { name: string; tables: MetadataTable[] }>
+        tableCount: number
+        matched: number
+      }
+    > = {}
+    const order: string[] = []
+    const ensure = (name: string, source: CatalogItem | null) => {
       if (!byCatalog[name]) {
         byCatalog[name] = { name, source, schemas: {}, tableCount: 0, matched: 0 }
         order.push(name)
@@ -80,18 +115,18 @@ export function useMetadataTree({ catalogs, snapshots, sql, sqlBox, clearMenu })
       }))
   })
 
-  function isCatalogOpen(name) {
+  function isCatalogOpen(name: string) {
     if (metaQuery.value.trim()) {
       return true
     }
     return openCatalogs.value[name] !== false
   }
 
-  function isSchemaOpen(catalog, schema) {
+  function isSchemaOpen(catalog: string, schema: string) {
     return !!metaQuery.value.trim() || !!openSchemas.value[schemaKey(catalog, schema)]
   }
 
-  function isTableOpen(item) {
+  function isTableOpen(item: MetadataTable) {
     if (openTables.value[tableKey(item)]) {
       return true
     }
@@ -99,21 +134,21 @@ export function useMetadataTree({ catalogs, snapshots, sql, sqlBox, clearMenu })
     return !!q && columnHits(item, q).length > 0
   }
 
-  function toggleCatalogNode(name) {
+  function toggleCatalogNode(name: string) {
     openCatalogs.value = { ...openCatalogs.value, [name]: !isCatalogOpen(name) }
   }
 
-  function toggleSchema(catalog, schema) {
+  function toggleSchema(catalog: string, schema: string) {
     const key = schemaKey(catalog, schema)
     openSchemas.value = { ...openSchemas.value, [key]: !isSchemaOpen(catalog, schema) }
   }
 
-  function toggleTable(item) {
+  function toggleTable(item: MetadataTable) {
     const key = tableKey(item)
     openTables.value = { ...openTables.value, [key]: !openTables.value[key] }
   }
 
-  function insertAtCursor(text) {
+  function insertAtCursor(text: string) {
     const el = sqlBox.value
     const current = sql.value || ''
     if (!el) {
@@ -133,17 +168,17 @@ export function useMetadataTree({ catalogs, snapshots, sql, sqlBox, clearMenu })
     })
   }
 
-  function useTable(item) {
+  function useTable(item: MetadataTable) {
     const cols = item.columns?.length ? item.columns.map((col) => quoteIdent(col.name)).join(', ') : '*'
     sql.value = `SELECT ${cols}\nFROM ${qualifiedTable(item)}\nLIMIT 20`
   }
 
-  function insertTable(item) {
+  function insertTable(item: MetadataTable) {
     clearMenu?.()
     insertAtCursor(qualifiedTable(item))
   }
 
-  function insertColumn(item, name) {
+  function insertColumn(item: MetadataTable, name: string) {
     insertAtCursor(`${quoteIdent(item.table)}.${quoteIdent(name)}`)
   }
 

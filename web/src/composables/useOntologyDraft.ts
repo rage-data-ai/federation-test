@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import { draftOntology } from '../api'
 
 export const DRAFT_STEPS = [
@@ -8,13 +8,58 @@ export const DRAFT_STEPS = [
   { key: 'codes', label: '起草码值' },
   { key: 'relations', label: '起草关系' },
   { key: 'defined', label: '起草派生概念' }
-]
+] as const
 
-export function qualified(table) {
+export type OntologyTableRef = {
+  catalog: string
+  schema: string
+  table: string
+  [key: string]: unknown
+}
+
+export type OntologyCatalogRef = {
+  name: string
+  type?: string
+  [key: string]: unknown
+}
+
+export type OntologyEntity = {
+  name: string
+  subject?: string
+  table?: string
+  [key: string]: unknown
+}
+
+export type OntologyBundle = {
+  concepts: OntologyEntity[]
+  attributes: OntologyEntity[]
+  relations: OntologyEntity[]
+  codes: OntologyEntity[]
+  definedConcepts: OntologyEntity[]
+  [key: string]: unknown
+}
+
+export type DraftLogEntry = {
+  status: string
+  text: string
+  notes: unknown[]
+}
+
+export type OntologyDraftOptions = {
+  tables: Ref<OntologyTableRef[]>
+  catalogs: Ref<OntologyCatalogRef[]>
+  everything: Ref<OntologyBundle>
+  subject: Ref<string>
+  subjects: ComputedRef<Array<{ name: string; [key: string]: unknown }>>
+  load: () => Promise<void>
+  fresh: Ref<string[]>
+}
+
+export function qualified(table: Pick<OntologyTableRef, 'catalog' | 'schema' | 'table'>): string {
   return `${table.catalog}.${table.schema}.${table.table}`
 }
 
-function entityNames(data) {
+function entityNames(data: OntologyBundle): Set<string> {
   return new Set([
     ...(data.concepts || []).map((item) => item.name),
     ...(data.attributes || []).map((item) => item.name),
@@ -24,21 +69,12 @@ function entityNames(data) {
   ])
 }
 
-function subjectOf(concept) {
+function subjectOf(concept: OntologyEntity): string {
   return (concept.subject || '').trim()
 }
 
 /**
  * LLM ontology draft modal state and run/progress helpers.
- * @param {{
- *   tables: import('vue').Ref,
- *   catalogs: import('vue').Ref,
- *   everything: import('vue').Ref,
- *   subject: import('vue').Ref<string>,
- *   subjects: import('vue').ComputedRef,
- *   load: () => Promise<void>,
- *   fresh: import('vue').Ref<string[]>
- * }} opts
  */
 export function useOntologyDraft({
   tables,
@@ -48,27 +84,29 @@ export function useOntologyDraft({
   subjects,
   load,
   fresh
-}) {
+}: OntologyDraftOptions) {
   const showDraft = ref(false)
-  const draftTables = ref([])
+  const draftTables = ref<string[]>([])
   const draftQuery = ref('')
   const draftNote = ref('')
   const draftSubject = ref('')
   const drafting = ref(false)
-  const draftResult = ref(null)
+  const draftResult = ref<unknown>(null)
   const draftError = ref('')
   const draftStep = ref('')
   const draftDetail = ref('')
-  const draftLog = ref([])
+  const draftLog = ref<DraftLogEntry[]>([])
   const draftStartedAt = ref(0)
   const draftClock = ref(0)
   let draftClockTimer = 0
 
-  const draftElapsed = computed(() => draftStartedAt.value
-    ? Math.max(0, Math.round((draftClock.value - draftStartedAt.value) / 1000))
-    : 0)
+  const draftElapsed = computed(() =>
+    draftStartedAt.value ? Math.max(0, Math.round((draftClock.value - draftStartedAt.value) / 1000)) : 0
+  )
 
-  const kafka = computed(() => new Set(catalogs.value.filter((c) => c.type === 'kafka').map((c) => c.name)))
+  const kafka = computed(
+    () => new Set(catalogs.value.filter((c) => c.type === 'kafka').map((c) => c.name))
+  )
   const draftable = computed(() => tables.value.filter((t) => !kafka.value.has(t.catalog)))
   const draftCandidates = computed(() => {
     const q = draftQuery.value.trim().toLowerCase()
@@ -78,7 +116,7 @@ export function useOntologyDraft({
 
   /** 表已经属于哪个主题域的哪个概念：一张表只能属于一个主题域 */
   const tableOwner = computed(() => {
-    const map = {}
+    const map: Record<string, { subject: string; concept: string }> = {}
     for (const concept of everything.value.concepts) {
       if (concept.table) {
         map[concept.table.toLowerCase()] = { subject: subjectOf(concept), concept: concept.name }
@@ -87,7 +125,7 @@ export function useOntologyDraft({
     return map
   })
 
-  function takenElsewhere(name) {
+  function takenElsewhere(name: string) {
     const owner = tableOwner.value[name.toLowerCase()]
     return owner && owner.subject !== draftSubject.value.trim() ? owner : null
   }
@@ -104,7 +142,7 @@ export function useOntologyDraft({
     draftDetail.value = ''
   }
 
-  function toggleDraftTable(name) {
+  function toggleDraftTable(name: string) {
     const index = draftTables.value.indexOf(name)
     if (index >= 0) {
       draftTables.value.splice(index, 1)
@@ -113,7 +151,7 @@ export function useOntologyDraft({
     }
   }
 
-  function draftReached(key) {
+  function draftReached(key: string) {
     if (draftStep.value === 'done') {
       return true
     }
@@ -139,23 +177,27 @@ export function useOntologyDraft({
     const target = draftSubject.value.trim()
     let failed = ''
     try {
-      await draftOntology({ tables: draftTables.value, instructions: draftNote.value || null, subject: target }, (event, data) => {
-        if (event === 'phase') {
-          draftStep.value = data.phase
-          draftDetail.value = data.message
-          draftLog.value.push({
-            status: data.status || 'start',
-            text: data.message,
-            notes: data.notes || []
-          })
-        } else if (event === 'result') {
-          draftResult.value = data
-          draftStep.value = 'done'
-          draftDetail.value = ''
-        } else if (event === 'error') {
-          failed = data.message || '起草失败'
+      await draftOntology(
+        { tables: draftTables.value, instructions: draftNote.value || null, subject: target },
+        (event, data) => {
+          const payload = data && typeof data === 'object' ? (data as Record<string, unknown>) : {}
+          if (event === 'phase') {
+            draftStep.value = String(payload.phase ?? '')
+            draftDetail.value = String(payload.message ?? '')
+            draftLog.value.push({
+              status: String(payload.status || 'start'),
+              text: String(payload.message ?? ''),
+              notes: Array.isArray(payload.notes) ? payload.notes : []
+            })
+          } else if (event === 'result') {
+            draftResult.value = data
+            draftStep.value = 'done'
+            draftDetail.value = ''
+          } else if (event === 'error') {
+            failed = String(payload.message || '起草失败')
+          }
         }
-      })
+      )
       if (failed) {
         throw new Error(failed)
       }
@@ -167,7 +209,7 @@ export function useOntologyDraft({
       if (subjects.value.some((item) => item.name === target)) {
         subject.value = target
       }
-      draftError.value = e.message
+      draftError.value = e instanceof Error ? e.message : String(e)
       if (draftStep.value !== 'done') {
         draftStep.value = ''
       }
