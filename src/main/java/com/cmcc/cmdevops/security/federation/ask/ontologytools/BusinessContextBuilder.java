@@ -34,11 +34,21 @@ public final class BusinessContextBuilder {
     private final OntologyRepository repository;
     private final OntologyPathFinder pathFinder;
     private final OntologyEntityViews views;
+    private final TermEmbedder termEmbedder;
 
     public BusinessContextBuilder(OntologyRepository repository, OntologyPathFinder pathFinder, OntologyEntityViews views) {
+        this(repository, pathFinder, views, new HashingTermEmbedder());
+    }
+
+    public BusinessContextBuilder(
+            OntologyRepository repository,
+            OntologyPathFinder pathFinder,
+            OntologyEntityViews views,
+            TermEmbedder termEmbedder) {
         this.repository = repository;
         this.pathFinder = pathFinder;
         this.views = views;
+        this.termEmbedder = termEmbedder == null ? new HashingTermEmbedder() : termEmbedder;
     }
 
     public BusinessContext businessContext(String question, Set<String> extraEntities) {
@@ -50,6 +60,10 @@ public final class BusinessContextBuilder {
         return build(null, entities, true);
     }
 
+    public TermEmbedder termEmbedder() {
+        return termEmbedder;
+    }
+
     private BusinessContext build(String question, Set<String> extraEntities, boolean exclusive) {
         Snapshot snapshot = repository.snapshot();
         OntologyIndex index = new OntologyIndex(snapshot);
@@ -59,7 +73,7 @@ public final class BusinessContextBuilder {
                 : match(question == null ? "" : question, lexicon, warnings);
         if (!exclusive && question != null && matches.isEmpty()) {
             // 无字面命中时：先本地哈希嵌入召回，再 n-gram 补漏（无需 pgvector / EMBED API）
-            matches.addAll(EmbeddingTermRetriever.retrieve(question, lexicon, 5));
+            matches.addAll(EmbeddingTermRetriever.retrieve(question, lexicon, termEmbedder, 5));
             if (matches.isEmpty()) {
                 matches.addAll(NgramTermRetriever.retrieve(question, lexicon, 5));
             }

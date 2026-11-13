@@ -70,7 +70,18 @@ federation:
     max-path-depth: 4
     sample-rows: 3
     result-preview-rows: 50
+    # 可选：OpenAI 兼容 embeddings（NIM）。空则本地哈希嵌入。
+    embed-endpoint: ${FEDERATION_ASK_EMBED_ENDPOINT:}
+    embed-api-key: ${FEDERATION_ASK_EMBED_API_KEY:}
+    embed-model: ${FEDERATION_ASK_EMBED_MODEL:}
   kafka-mappings: {}
   vector:
     default-k: 10
     milvus-uri: ${MILVUS_URI:}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+

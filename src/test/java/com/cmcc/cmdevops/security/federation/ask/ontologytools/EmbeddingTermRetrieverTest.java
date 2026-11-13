@@ -1,6 +1,5 @@
 package com.cmcc.cmdevops.security.federation.ask.ontologytools;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -30,6 +29,6 @@ class EmbeddingTermRetrieverTest {
         List<Match> hits = EmbeddingTermRetriever.retrieve("高危告警有多少", lexicon, 5);
 
         assertTrue(hits.stream().anyMatch(m -> m.entity().equals("HighRiskAlert")));
-        assertEquals("embed", hits.get(0).source());
+        assertTrue(hits.get(0).source().startsWith("embed:"));
     }
 }

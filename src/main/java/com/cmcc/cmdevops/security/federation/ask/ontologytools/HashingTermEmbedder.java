@@ -7,7 +7,7 @@ import java.util.Locale;
  * 本地特征哈希词嵌入：将字符 n-gram / 词片映射到固定维 L2 归一化向量。
  * 对齐 Auto Ontology「embedding 术语检索」的工程形态，无需外部 EMBED API / pgvector。
  */
-public final class HashingTermEmbedder {
+public final class HashingTermEmbedder implements TermEmbedder {
 
     public static final int DEFAULT_DIM = 256;
 
@@ -24,6 +24,12 @@ public final class HashingTermEmbedder {
         this.dim = dim;
     }
 
+    @Override
+    public String name() {
+        return "hashing";
+    }
+
+    @Override
     public float[] embed(String text) {
         float[] vector = new float[dim];
         if (text == null || text.isBlank()) {

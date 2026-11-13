@@ -92,7 +92,7 @@ docker compose up -d --build
 | `demo` | `FEDERATION_DEMO_TOKEN` | `QUERY,ADMIN` |
 | `reader` | `FEDERATION_READER_TOKEN` | `QUERY`（只读查询/问数） |
 
-写入数据源、元数据、本体、模型配置需要 `ADMIN`。可选 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出 tracing。多实例吊销可配 `FEDERATION_SECURITY_REVOCATION_REDIS_URI`（或 `federation.security.revocation-redis-uri`）。
+写入数据源、元数据、本体、模型配置需要 `ADMIN`。可选 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出 tracing。多实例吊销可配 `FEDERATION_SECURITY_REVOCATION_REDIS_URI`（或 `federation.security.revocation-redis-uri`）。问数术语嵌入可配 `FEDERATION_ASK_EMBED_ENDPOINT` / `FEDERATION_ASK_EMBED_API_KEY` / `FEDERATION_ASK_EMBED_MODEL`（OpenAI 兼容，含 NVIDIA NIM）；未配置时用本地哈希嵌入。API 文档：`/swagger-ui.html`、`/v3/api-docs`。
 
 ## 示例
 

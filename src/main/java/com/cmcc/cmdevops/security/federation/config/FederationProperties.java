@@ -467,6 +467,13 @@ public class FederationProperties {
         private int maxPathDepth = 4;
         private int sampleRows = 3;
         private int resultPreviewRows = 50;
+        /**
+         * OpenAI 兼容 embeddings 端点（NIM / 自建）。空则使用本地哈希嵌入。
+         * 例：{@code https://integrate.api.nvidia.com/v1} 或完整 {@code .../v1/embeddings}
+         */
+        private String embedEndpoint = "";
+        private String embedApiKey = "";
+        private String embedModel = "";
 
         public double getMinConfidence() {
             return minConfidence;
@@ -498,6 +505,30 @@ public class FederationProperties {
 
         public void setResultPreviewRows(int resultPreviewRows) {
             this.resultPreviewRows = resultPreviewRows;
+        }
+
+        public String getEmbedEndpoint() {
+            return embedEndpoint;
+        }
+
+        public void setEmbedEndpoint(String embedEndpoint) {
+            this.embedEndpoint = embedEndpoint == null ? "" : embedEndpoint;
+        }
+
+        public String getEmbedApiKey() {
+            return embedApiKey;
+        }
+
+        public void setEmbedApiKey(String embedApiKey) {
+            this.embedApiKey = embedApiKey == null ? "" : embedApiKey;
+        }
+
+        public String getEmbedModel() {
+            return embedModel;
+        }
+
+        public void setEmbedModel(String embedModel) {
+            this.embedModel = embedModel == null ? "" : embedModel;
         }
     }
 

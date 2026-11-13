@@ -14,7 +14,9 @@ import org.springframework.stereotype.Component;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.BusinessContextBuilder;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.BusinessContextBuilder.Term;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.HashingTermEmbedder;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.HttpTermEmbedder;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.NgramTermRetriever;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.TermEmbedder;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyEntityViews;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyIndex;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyPathFinder;
@@ -45,14 +47,26 @@ public class OntologyTools {
 
     @Autowired
     public OntologyTools(OntologyRepository repository, OntologyQueryService queryService, FederationProperties properties) {
-        this(repository, queryService, properties.getAsk().getMaxPathDepth());
+        this(repository, queryService, properties.getAsk().getMaxPathDepth(), termEmbedderOf(properties));
     }
 
     OntologyTools(OntologyRepository repository, OntologyQueryService queryService, int maxDepth) {
+        this(repository, queryService, maxDepth, new HashingTermEmbedder());
+    }
+
+    OntologyTools(OntologyRepository repository, OntologyQueryService queryService, int maxDepth, TermEmbedder embedder) {
         this.repository = repository;
         this.pathFinder = new OntologyPathFinder(maxDepth);
         this.views = new OntologyEntityViews(queryService);
-        this.contextBuilder = new BusinessContextBuilder(repository, pathFinder, views);
+        this.contextBuilder = new BusinessContextBuilder(repository, pathFinder, views, embedder);
+    }
+
+    static TermEmbedder termEmbedderOf(FederationProperties properties) {
+        String endpoint = properties.getAsk().getEmbedEndpoint();
+        if (endpoint == null || endpoint.isBlank()) {
+            return new HashingTermEmbedder();
+        }
+        return new HttpTermEmbedder(endpoint, properties.getAsk().getEmbedApiKey(), properties.getAsk().getEmbedModel());
     }
 
     @Tool("列出本体中全部业务概念（类）的名称、中文名、别名和映射的表，用于了解有哪些对象可以分析")
@@ -80,7 +94,7 @@ public class OntologyTools {
                 // 轻量模糊召回（编辑距离 ≤1），弥补无向量检索时的近邻词
                 score = term.quality() * 0.35;
             } else {
-                HashingTermEmbedder embedder = new HashingTermEmbedder();
+                TermEmbedder embedder = contextBuilder.termEmbedder();
                 double embedSim = HashingTermEmbedder.cosine(embedder.embed(needle), embedder.embed(term.text()));
                 if (embedSim >= 0.45) {
                     score = term.quality() * (0.35 + 0.45 * embedSim);
