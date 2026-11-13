@@ -2,9 +2,12 @@
 
 评估基准：Trino / Spring Boot / Apache Calcite 等成熟开源项目的工程与架构实践。  
 初评日期：2026-11-13（Asia/Shanghai）  
-复评轮次：第 2 轮（同日）
+复评轮次：第 3 轮（同日）
 
-代码规模：主源约 8.6k+ LOC；`OntologyDraftService` 已从 2432 行降至约 834 行编排器 + `ontology.draft.*` 协作类。
+代码规模：主源约 8.6k+ LOC。God Class 拆分进展：
+- `OntologyDraftService` 2432 → ~834 + `ontology.draft.*`
+- `OntologyTools` 722 → ~235 + Context/Path/Index/Views
+- `OntologyRepository` 821 → ~443 + `OntologyNaming` / `OntologyRdfIO`
 
 ## 优点
 
@@ -29,11 +32,12 @@
 | 无网关镜像 / Compose 不完整 | ✅ Dockerfile 多阶段 + Compose（mysql/trino/gateway） |
 | CORS 写死 | ✅ 可配置 `FEDERATION_CORS_ORIGINS` |
 
-## 第二轮增量
+## 第二 / 三轮增量
 
 - Prometheus：`/actuator/prometheus`，业务指标 `federation.query` / `federation.query.latency`
 - 前端 Vitest：`api.js` 请求错误与 SSE 解析
 - Compose 一键：`mysql` + `trino` + `gateway`（含 UI）
+- 继续拆分 `OntologyTools`、`OntologyRepository`
 
 ## 仍待达到顶尖开源水准的差距
 
@@ -41,11 +45,11 @@
 
 | # | 问题 | 建议 |
 |---|------|------|
-| 1 | `OntologyTools`（~722）、`OntologyRepository`（~821）仍偏大 | 按查询面 / 写入面或 RDF 适配层再拆 |
-| 2 | 鉴权仅为共享 Bearer，无 RBAC / OAuth2 | 引入 Spring Security 资源服务器或网关前置 IdP |
-| 3 | 尚无分布式 tracing | OpenTelemetry / Micrometer Tracing |
-| 4 | 前端无 ESLint/TS；巨型 SFC | ESLint + 渐进 TS；拆 Datasource/Ontology 视图 |
-| 5 | 无集成测试（MockMvc / Testcontainers） | 对鉴权与 `/query` `/explain` 加切片测试 |
+| 1 | 鉴权仅为共享 Bearer，无 RBAC / OAuth2 | 引入 Spring Security 资源服务器或网关前置 IdP |
+| 2 | 尚无分布式 tracing | OpenTelemetry / Micrometer Tracing |
+| 3 | 前端无 ESLint/TS；巨型 SFC | ESLint + 渐进 TS；拆 Datasource/Ontology 视图 |
+| 4 | 缺 Testcontainers / 端到端契约测试 | 对鉴权与 `/query` 加切片 + 容器化回归 |
+| 5 | 静态分析与覆盖率门槛 | Spotless / SpotBugs / JaCoCo |
 
 ### P2
 

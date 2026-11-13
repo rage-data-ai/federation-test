@@ -27,10 +27,6 @@ const rowWidth = computed(() => Math.max(900, Math.round(hostWidth.value / 0.75 
 const model = computed(() => layout(props.snapshot, expanded.value, rowWidth.value))
 const freshSet = computed(() => new Set(props.fresh))
 
-function isOpen(key) {
-  return expanded.value.has(key)
-}
-
 function toggle(key) {
   const next = new Set(expanded.value)
   if (next.has(key)) {
