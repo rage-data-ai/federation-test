@@ -20,6 +20,8 @@ public class FederationProperties {
     private Map<String, String> kafkaMappings = new LinkedHashMap<>();
     private int maxRows = 10_000;
     private String ontologyStore = "data/tdb2";
+    /** 本体版本快照目录；空则默认为 ontologyStore 同级 ontology-versions */
+    private String ontologyVersions = "";
     private final Repository repository = new Repository();
 
     public Trino getTrino() {
@@ -84,6 +86,14 @@ public class FederationProperties {
 
     public void setOntologyStore(String ontologyStore) {
         this.ontologyStore = ontologyStore;
+    }
+
+    public String getOntologyVersions() {
+        return ontologyVersions;
+    }
+
+    public void setOntologyVersions(String ontologyVersions) {
+        this.ontologyVersions = ontologyVersions == null ? "" : ontologyVersions;
     }
 
     public Repository getRepository() {

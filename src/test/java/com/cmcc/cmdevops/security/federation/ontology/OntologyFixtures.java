@@ -42,8 +42,10 @@ public final class OntologyFixtures {
 
         repository.saveDefinedConcept(new DefinedConcept("HighRiskAlert", "高危告警", "high risk alert",
                 List.of("高风险告警"), "级别不低于 3 的告警", "Alert",
-                List.of(new Condition("alertLevel", ">=", "3")), null));
+                List.of(new Condition("alertLevel", ">=", "3")), null, null));
         repository.saveDefinedConcept(new DefinedConcept("CompromisedHost", "失陷主机", "compromised host",
-                List.of(), null, "Asset", List.of(), "近 24 小时高危告警数不少于 3 条的资产"));
+                List.of(), null, "Asset", List.of(), "近 24 小时高危告警数不少于 3 条的资产", null));
+        repository.saveDefinedConcept(new DefinedConcept("AlertCount", "告警数量", "alert count",
+                List.of("告警数", "条数"), "告警计数度量", "Alert", List.of(), null, "COUNT(*)"));
     }
 }

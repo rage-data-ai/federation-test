@@ -304,7 +304,8 @@ public final class DraftApplier {
                 warnings.add("派生概念名 " + drafted.name() + " 已用于 " + clash.base() + "，本条改名为 " + definedName);
             }
             DefinedConcept defined = new DefinedConcept(definedName, drafted.labelZh(), drafted.labelEn(),
-                    drafted.aliases(), drafted.comment(), base, conditions, drafted.definitionText());
+                    drafted.aliases(), drafted.comment(), base, conditions, drafted.definitionText(),
+                    drafted.sqlExpression());
             savedDefined += save(warnings, "派生概念 " + defined.name(), () -> repository.saveDefinedConcept(defined));
         }
         return new DraftResult(savedConcepts, savedAttributes, savedRelations, savedCodes, savedDefined, warnings);

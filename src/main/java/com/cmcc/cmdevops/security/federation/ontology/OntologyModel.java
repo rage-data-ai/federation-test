@@ -87,7 +87,22 @@ public final class OntologyModel {
             String comment,
             String base,
             List<Condition> conditions,
-            String definitionText) {
+            String definitionText,
+            /** 可复用 SQL 表达式（对齐 Auto Ontology SQL attributes），如 COUNT(*) / SUM(amount)；非过滤条件 */
+            String sqlExpression) {
+
+        /** 兼容旧调用：无度量表达式 */
+        public DefinedConcept(
+                String name,
+                String labelZh,
+                String labelEn,
+                List<String> aliases,
+                String comment,
+                String base,
+                List<Condition> conditions,
+                String definitionText) {
+            this(name, labelZh, labelEn, aliases, comment, base, conditions, definitionText, null);
+        }
     }
 
     public record Snapshot(

@@ -65,7 +65,8 @@ public class AskService {
             3. 只用元数据 tables 中列出的表和列；表名必须写 catalog.schema.table；
                列名含大写字母时用双引号，如 "assetId"。
             4. 码值过滤必须用码值的 value，禁止把中文名写进 WHERE；派生概念有 sqlCondition 时必须直接复用该条件，
-               不要自行改写阈值。只有 definitionText 时才按其文字定义实现。
+               不要自行改写阈值。派生概念有 sqlExpression 时必须作为 SELECT 度量表达式复用（SQL attributes），
+               不要另写不等价的聚合。只有 definitionText 时才按其文字定义实现。
             5. 跨概念用关系路径给出的 join 条件，不要自己猜 join 列。
             6. 元数据里 timeColumn 不为空的表是大表，WHERE 中必须对该列做范围过滤。
             7. 写入等值过滤前，对有码表的列调用 validateFilterValues；结果为空时调用 scanFilterLiterals 检查字面量。
@@ -269,6 +270,9 @@ public class AskService {
             steps.add("复用派生口径：" + context.definedConcepts().stream()
                     .map(d -> {
                         String label = d.labelZh() == null || d.labelZh().isBlank() ? d.name() : d.labelZh();
+                        if (d.sqlExpression() != null && !d.sqlExpression().isBlank()) {
+                            return label + " expr=[" + d.sqlExpression() + "]";
+                        }
                         return d.sqlCondition() == null || d.sqlCondition().isBlank()
                                 ? label
                                 : label + " [" + d.sqlCondition() + "]";

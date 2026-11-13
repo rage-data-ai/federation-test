@@ -18,6 +18,7 @@ import static com.cmcc.cmdevops.security.federation.ontology.OntologyRdfIO.value
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.CODE_LIST;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.CODE_VALUE;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.DEFINITION_TEXT;
+import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.SQL_EXPRESSION;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.IDENTIFIER;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.JOIN_FROM;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.JOIN_TO;
@@ -424,7 +425,32 @@ public class OntologyRepository {
                     .addProperty(OWL2.intersectionOf, model.createList(members.iterator()));
             r.addProperty(OWL2.equivalentClass, intersection);
             addString(r, DEFINITION_TEXT, defined.definitionText());
+            addString(r, SQL_EXPRESSION, defined.sqlExpression());
         });
+    }
+
+
+    /** 用快照整体替换当前本体（先清空再写入）。用于版本回滚。 */
+    public void replaceSnapshot(Snapshot snapshot) {
+        if (snapshot == null) {
+            throw new IllegalArgumentException("快照不能为空");
+        }
+        store.clear();
+        for (Concept concept : snapshot.concepts() == null ? List.<Concept>of() : snapshot.concepts()) {
+            saveConcept(concept);
+        }
+        for (Attribute attribute : snapshot.attributes() == null ? List.<Attribute>of() : snapshot.attributes()) {
+            saveAttribute(attribute);
+        }
+        for (Code code : snapshot.codes() == null ? List.<Code>of() : snapshot.codes()) {
+            saveCode(code);
+        }
+        for (Relation relation : snapshot.relations() == null ? List.<Relation>of() : snapshot.relations()) {
+            saveRelation(relation);
+        }
+        for (DefinedConcept defined : snapshot.definedConcepts() == null ? List.<DefinedConcept>of() : snapshot.definedConcepts()) {
+            saveDefinedConcept(defined);
+        }
     }
 
     public void delete(String name) {

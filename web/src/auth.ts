@@ -54,18 +54,69 @@ export function readOidcConfig(): OidcConfig | null {
   return { authority: authority.replace(/\/$/, ''), clientId, redirectUri, scope }
 }
 
-function authorizeUrl(authority: string): string {
+type OidcDiscovery = {
+  authorization_endpoint?: string
+  token_endpoint?: string
+  end_session_endpoint?: string
+}
+
+const discoveryCache = new Map<string, Promise<OidcDiscovery | null>>()
+
+/** 拉取 OpenID Provider Metadata（RFC 8414 / OIDC Discovery）。 */
+export async function fetchOidcDiscovery(authority: string): Promise<OidcDiscovery | null> {
+  const base = authority.replace(/\/$/, '')
+  let pending = discoveryCache.get(base)
+  if (!pending) {
+    pending = (async () => {
+      try {
+        const response = await fetch(`${base}/.well-known/openid-configuration`)
+        if (!response.ok) {
+          return null
+        }
+        return (await response.json()) as OidcDiscovery
+      } catch {
+        return null
+      }
+    })()
+    discoveryCache.set(base, pending)
+  }
+  return pending
+}
+
+function fallbackAuthorizeUrl(authority: string): string {
   if (authority.includes('/realms/')) {
     return `${authority}/protocol/openid-connect/auth`
   }
   return `${authority}/oauth2/v1/authorize`
 }
 
-function tokenUrl(authority: string): string {
+function fallbackTokenUrl(authority: string): string {
   if (authority.includes('/realms/')) {
     return `${authority}/protocol/openid-connect/token`
   }
   return `${authority}/oauth2/v1/token`
+}
+
+function fallbackEndSessionUrl(authority: string): string {
+  if (authority.includes('/realms/')) {
+    return `${authority}/protocol/openid-connect/logout`
+  }
+  return `${authority}/oauth2/v1/logout`
+}
+
+async function authorizeUrl(authority: string): Promise<string> {
+  const discovery = await fetchOidcDiscovery(authority)
+  return discovery?.authorization_endpoint || fallbackAuthorizeUrl(authority)
+}
+
+async function tokenUrl(authority: string): Promise<string> {
+  const discovery = await fetchOidcDiscovery(authority)
+  return discovery?.token_endpoint || fallbackTokenUrl(authority)
+}
+
+async function endSessionUrl(authority: string): Promise<string> {
+  const discovery = await fetchOidcDiscovery(authority)
+  return discovery?.end_session_endpoint || fallbackEndSessionUrl(authority)
 }
 
 function toBase64Url(bytes: ArrayBuffer | Uint8Array): string {
@@ -98,7 +149,7 @@ export async function beginOidcLogin(config: OidcConfig | null = readOidcConfig(
   const challenge = await sha256Base64Url(verifier)
   sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier)
   sessionStorage.setItem(PKCE_STATE_KEY, state)
-  const authorize = new URL(authorizeUrl(config.authority))
+  const authorize = new URL(await authorizeUrl(config.authority))
   authorize.searchParams.set('client_id', config.clientId)
   authorize.searchParams.set('redirect_uri', config.redirectUri)
   authorize.searchParams.set('response_type', 'code')
@@ -136,7 +187,7 @@ export async function completeOidcCallback(
     redirect_uri: config.redirectUri,
     code_verifier: verifier
   })
-  const response = await fetch(tokenUrl(config.authority), {
+  const response = await fetch(await tokenUrl(config.authority), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body
@@ -175,12 +226,6 @@ function storeTokenResponse(data: Record<string, unknown>): void {
   }
 }
 
-function endSessionUrl(authority: string): string {
-  if (authority.includes('/realms/')) {
-    return `${authority}/protocol/openid-connect/logout`
-  }
-  return `${authority}/oauth2/v1/logout`
-}
 
 /** 清除本地令牌并跳转 IdP 注销（若已配置 OIDC）。 */
 export function beginOidcLogout(config: OidcConfig | null = readOidcConfig()): void {
@@ -188,10 +233,12 @@ export function beginOidcLogout(config: OidcConfig | null = readOidcConfig()): v
   if (!config) {
     return
   }
-  const url = new URL(endSessionUrl(config.authority))
-  url.searchParams.set('client_id', config.clientId)
-  url.searchParams.set('post_logout_redirect_uri', config.redirectUri)
-  window.location.assign(url.toString())
+  void (async () => {
+    const url = new URL(await endSessionUrl(config.authority))
+    url.searchParams.set('client_id', config.clientId)
+    url.searchParams.set('post_logout_redirect_uri', config.redirectUri)
+    window.location.assign(url.toString())
+  })()
 }
 
 /** 使用 refresh_token 换取新的 access_token；失败时清除本地令牌。 */
@@ -210,7 +257,7 @@ export async function refreshAccessToken(
     client_id: config.clientId,
     refresh_token: refresh
   })
-  const response = await fetch(tokenUrl(config.authority), {
+  const response = await fetch(await tokenUrl(config.authority), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body

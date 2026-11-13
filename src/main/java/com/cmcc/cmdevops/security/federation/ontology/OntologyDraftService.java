@@ -53,6 +53,7 @@ public class OntologyDraftService {
             每个字段必须写成 "键": 值。不能写成 "键", 值，也不能省略冒号。
             aliases 必须填业务同义词（至少 1～3 个中文或英文别名），便于问数词表命中；码值也要给常用别名。
             派生概念优先写可用的 conditions（可编译为 sqlCondition），少用纯自然语言 definitionText。
+            对可复用的度量（计数、求和等）可填 sqlExpression（如 COUNT(*)、SUM(amount)），作为问数 SQL attributes。
             """;
 
     private final LlmClient llm;

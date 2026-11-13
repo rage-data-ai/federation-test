@@ -42,6 +42,7 @@ import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Relation;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Snapshot;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyRepository;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyStore;
+import com.cmcc.cmdevops.security.federation.ontology.OntologyVersionService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.RoleAuthorizationInterceptor;
@@ -62,6 +63,9 @@ class OntologyControllerWebTest {
 
     @MockitoBean
     private OntologyStore store;
+
+    @MockitoBean
+    private OntologyVersionService versions;
 
     private final Snapshot empty = new Snapshot(List.of(), List.of(), List.of(), List.of(), List.of());
 

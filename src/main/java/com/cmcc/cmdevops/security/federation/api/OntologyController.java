@@ -2,6 +2,7 @@ package com.cmcc.cmdevops.security.federation.api;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -29,6 +30,7 @@ import com.cmcc.cmdevops.security.federation.ontology.OntologyDraftService.Draft
 import com.cmcc.cmdevops.security.federation.ontology.OntologyDraftService.DraftResult;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyRepository;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyStore;
+import com.cmcc.cmdevops.security.federation.ontology.OntologyVersionService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.RequireRole;
@@ -44,11 +46,14 @@ public class OntologyController {
     private final OntologyRepository repository;
     private final OntologyDraftService draftService;
     private final OntologyStore store;
+    private final OntologyVersionService versions;
 
-    public OntologyController(OntologyRepository repository, OntologyDraftService draftService, OntologyStore store) {
+    public OntologyController(OntologyRepository repository, OntologyDraftService draftService,
+            OntologyStore store, OntologyVersionService versions) {
         this.repository = repository;
         this.draftService = draftService;
         this.store = store;
+        this.versions = versions;
     }
 
     @GetMapping
@@ -106,7 +111,7 @@ public class OntologyController {
     @PutMapping("/defined/{name}")
     public Snapshot saveDefined(@PathVariable("name") String name, @RequestBody DefinedConcept body) {
         repository.saveDefinedConcept(new DefinedConcept(name, body.labelZh(), body.labelEn(), body.aliases(),
-                body.comment(), body.base(), body.conditions(), body.definitionText()));
+                body.comment(), body.base(), body.conditions(), body.definitionText(), body.sqlExpression()));
         return repository.snapshot();
     }
 
@@ -118,6 +123,26 @@ public class OntologyController {
         return Map.of("inferredTriples", store.inferredSize(), "elapsedMs", System.currentTimeMillis() - started);
     }
 
+
+    @GetMapping("/versions")
+    public List<OntologyVersionService.VersionInfo> listVersions() {
+        return versions.list();
+    }
+
+    @RequireRole(GatewayRole.ADMIN)
+    @PostMapping("/versions")
+    public OntologyVersionService.VersionInfo createVersion(@RequestBody(required = false) Map<String, String> body) {
+        String label = body == null ? null : body.get("label");
+        return versions.create(label);
+    }
+
+    @RequireRole(GatewayRole.ADMIN)
+    @PostMapping("/versions/{id}/restore")
+    public Snapshot restoreVersion(@PathVariable("id") String id) {
+        versions.restore(id);
+        return repository.snapshot();
+    }
+
     @RequireRole(GatewayRole.ADMIN)
     @PostMapping(value = "/draft", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter draft(@RequestBody DraftRequest body) {
@@ -126,6 +151,18 @@ public class OntologyController {
         Thread.ofVirtual().name("draft-", 0).start(() -> {
             GatewayUser.set(user);
             try {
+                try {
+                    OntologyVersionService.VersionInfo checkpoint =
+                            versions.create(body != null && body.subject() != null ? "pre-draft-" + body.subject() : "pre-draft");
+                    if (checkpoint != null) {
+                        send(emitter, "phase", Map.of(
+                                "name", "checkpoint",
+                                "message", "已保存回滚点 " + checkpoint.id(),
+                                "versionId", checkpoint.id()));
+                    }
+                } catch (RuntimeException checkpointError) {
+                    log.warn("起草前自动版本失败: {}", checkpointError.getMessage());
+                }
                 DraftResult result = draftService.draft(body, phase -> send(emitter, "phase", phase));
                 send(emitter, "result", result);
             } catch (RuntimeException e) {

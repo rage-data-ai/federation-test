@@ -140,7 +140,7 @@ public final class DraftJson {
 
     private static final Pattern MISSING_COLON = Pattern.compile(
             "([\\{,]\\s*\"(?:\\\\.|[^\"\\\\])*\")\\s*,(?=\\s*(?:\"(?!(?:"
-                    + "name|labelZh|labelEn|aliases|comment|parent|table|timeColumn|largeTable|domain|datatype|column|unit|identifier|codeList|value|range|joinFrom|joinTo|inverse|transitive|functional|base|definitionText|attribute|operator|conditions|concepts|attributes|relations|codes|definedConcepts"
+                    + "name|labelZh|labelEn|aliases|comment|parent|table|timeColumn|largeTable|domain|datatype|column|unit|identifier|codeList|value|range|joinFrom|joinTo|inverse|transitive|functional|base|definitionText|sqlExpression|attribute|operator|conditions|concepts|attributes|relations|codes|definedConcepts"
                     + ")\")|\\d|true|false|null|[\\{\\[-]))");
 
     /** 模型常把 column、中文名等字符串字段写成单元素数组，先收成字符串，避免整段属性被丢弃。 */
@@ -172,7 +172,7 @@ public final class DraftJson {
     private static final Set<String> STRING_FIELDS = Set.of(
             "name", "labelZh", "labelEn", "comment", "parent", "table", "timeColumn", "domain", "datatype",
             "column", "unit", "codeList", "value", "range", "joinFrom", "joinTo", "inverse", "base",
-            "definitionText", "attribute", "operator");
+            "definitionText", "sqlExpression", "attribute", "operator");
     private static final Set<String> BOOL_FIELDS = Set.of("largeTable", "identifier", "transitive", "functional");
 
     private static String firstScalar(JsonNode array) {

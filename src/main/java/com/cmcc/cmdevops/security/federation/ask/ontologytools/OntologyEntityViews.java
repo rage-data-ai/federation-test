@@ -98,6 +98,6 @@ public final class OntologyEntityViews {
         Concept base = index.concepts.get(defined.base());
         return new DefinedView(defined.name(), defined.labelZh(), defined.aliases(), defined.comment(), defined.base(),
                 base == null ? null : base.table(), readable,
-                sql.isEmpty() ? null : String.join(" AND ", sql), defined.definitionText());
+                sql.isEmpty() ? null : String.join(" AND ", sql), defined.definitionText(), defined.sqlExpression());
     }
 }

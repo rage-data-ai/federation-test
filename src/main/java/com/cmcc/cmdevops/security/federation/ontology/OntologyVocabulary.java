@@ -40,6 +40,8 @@ public final class OntologyVocabulary {
     public static final Resource VALUE_SET = ResourceFactory.createResource(FED + "ValueSet");
     /** 派生概念中规则推理器无法表达的部分，例如聚合条件，用自然语言描述 */
     public static final Property DEFINITION_TEXT = property(FED, "definitionText");
+    /** 可复用度量 / SQL 表达式（SELECT 片段），非 WHERE 条件 */
+    public static final Property SQL_EXPRESSION = property(FED, "sqlExpression");
 
     private OntologyVocabulary() {
     }

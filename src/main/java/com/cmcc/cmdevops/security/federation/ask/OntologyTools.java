@@ -225,7 +225,8 @@ public class OntologyTools {
             String baseTable,
             List<String> conditions,
             String sqlCondition,
-            String definitionText) {
+            String definitionText,
+            String sqlExpression) {
     }
 
     public record PathStep(String relation, String labelZh, String from, String to, String join, boolean reversed) {

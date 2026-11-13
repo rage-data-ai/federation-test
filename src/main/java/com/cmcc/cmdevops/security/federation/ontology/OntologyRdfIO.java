@@ -4,6 +4,7 @@ import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.CODE_LIST;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.CODE_VALUE;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.DEFINITION_TEXT;
+import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.SQL_EXPRESSION;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.IDENTIFIER;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.JOIN_FROM;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.JOIN_TO;
@@ -137,7 +138,7 @@ final class OntologyRdfIO {
             }
         }
         return new DefinedConcept(localName(r.getURI()), label(r, "zh"), label(r, "en"), aliases(r), comment(r),
-                base, conditions, string(r, DEFINITION_TEXT));
+                base, conditions, string(r, DEFINITION_TEXT), string(r, SQL_EXPRESSION));
     }
 
     private static Condition readRestriction(Resource restriction) {

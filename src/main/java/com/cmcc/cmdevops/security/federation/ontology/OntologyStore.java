@@ -71,6 +71,15 @@ public class OntologyStore {
         invalidate();
     }
 
+    /** 清空断言图与推理图（用于版本回滚导入）。 */
+    public void clear() {
+        dataset.executeWrite(() -> {
+            dataset.getDefaultModel().removeAll();
+            dataset.getNamedModel(INFERRED_GRAPH).removeAll();
+        });
+        invalidate();
+    }
+
     /** 推理图中的三元组数量（不含断言）。 */
     public long inferredSize() {
         return dataset.calculateRead(() -> dataset.getNamedModel(INFERRED_GRAPH).size());
