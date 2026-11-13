@@ -1,7 +1,18 @@
 <script setup>
-import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { collectMetadata, createCatalog, deleteCatalog, deleteMetadata, explainQuery, listCatalogs, listExamples, listMetadata, runQuery, testCatalog, updateCatalog } from './api'
-import { SOURCE_TYPES, emptyCatalog, typeLabel } from './examples'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
+import {
+  collectMetadata,
+  deleteMetadata,
+  explainQuery,
+  listCatalogs,
+  listExamples,
+  listMetadata,
+  runQuery
+} from './api'
+import { typeLabel } from './examples'
+import CatalogFormModal from './components/datasource/CatalogFormModal.vue'
+import { useCatalogForm } from './composables/useCatalogForm'
+import { useMetadataTree } from './composables/useMetadataTree'
 
 const catalogs = ref([])
 const examples = ref([])
@@ -12,75 +23,105 @@ const result = ref(null)
 const sideError = ref('')
 const gatewayOk = ref(null)
 
-const showForm = ref(false)
-const editing = ref(false)
-const form = reactive(emptyCatalog())
-const formMessage = ref('')
-const formError = ref('')
-const saving = ref(false)
 const showRewritten = ref(false)
 const preview = ref('')
 const snapshots = ref([])
 const collecting = ref('')
-const openCatalogs = ref({})
-const openSchemas = ref({})
-const openTables = ref({})
-const metaQuery = ref('')
 const menu = ref('')
 const sideOpen = ref(false)
 const sqlBox = ref(null)
-const TABLE_CAP = 80
 let errorTimer = 0
 
 const hasRows = computed(() => !!result.value?.columns?.length)
 
-function columnHits(item, q) {
-  return (item.columns || []).filter((col) => col.name.toLowerCase().includes(q) || String(col.type || '').toLowerCase().includes(q))
+function closeMenu() {
+  menu.value = ''
 }
 
-const tree = computed(() => {
-  const q = metaQuery.value.trim().toLowerCase()
-  const byCatalog = {}
-  const order = []
-  const ensure = (name, source) => {
-    if (!byCatalog[name]) {
-      byCatalog[name] = { name, source, schemas: {}, tableCount: 0, matched: 0 }
-      order.push(name)
+function flashError(message) {
+  sideError.value = message
+  window.clearTimeout(errorTimer)
+  errorTimer = window.setTimeout(() => {
+    sideError.value = ''
+  }, 4000)
+}
+
+async function loadExamples() {
+  try {
+    examples.value = await listExamples()
+    if (examples.value.length && sql.value === 'SHOW CATALOGS') {
+      sql.value = examples.value[0].sql
     }
-    return byCatalog[name]
+  } catch {
+    examples.value = []
   }
-  for (const item of catalogs.value) {
-    ensure(item.name, item)
+}
+
+async function loadCatalogs() {
+  try {
+    catalogs.value = await listCatalogs()
+    gatewayOk.value = true
+  } catch (e) {
+    gatewayOk.value = false
+    flashError(e.message || '无法加载数据源')
   }
-  for (const item of snapshots.value) {
-    const cat = ensure(item.catalog, null)
-    cat.tableCount += 1
-    const hits = q ? columnHits(item, q) : []
-    const selfHit = !q
-      || item.catalog.toLowerCase().includes(q)
-      || item.schema.toLowerCase().includes(q)
-      || item.table.toLowerCase().includes(q)
-    if (!selfHit && !hits.length) {
-      continue
-    }
-    const sch = cat.schemas[item.schema] || (cat.schemas[item.schema] = { name: item.schema, tables: [] })
-    sch.tables.push({ ...item, columns: q && hits.length && !selfHit ? hits : item.columns || [] })
-    cat.matched += 1
+}
+
+async function loadMetadata() {
+  try {
+    snapshots.value = await listMetadata()
+  } catch {
+    snapshots.value = []
   }
-  const cap = q ? 200 : TABLE_CAP
-  return order
-    .map((name) => byCatalog[name])
-    .filter((cat) => !q || cat.matched || cat.name.toLowerCase().includes(q))
-    .map((cat) => ({
-      name: cat.name,
-      source: cat.source,
-      tableCount: cat.tableCount,
-      schemas: Object.values(cat.schemas).map((sch) => ({
-        name: sch.name,
-        tables: sch.tables.slice(0, cap),
-        hidden: Math.max(0, sch.tables.length - cap)
-      }))
-    }))
+}
+
+async function refreshAfterCatalogChange() {
+  await loadCatalogs()
+  await loadMetadata()
+}
+
+const {
+  openCatalogs,
+  metaQuery,
+  tree,
+  isCatalogOpen,
+  isSchemaOpen,
+  isTableOpen,
+  toggleCatalogNode,
+  toggleSchema,
+  toggleTable,
+  useTable,
+  insertTable,
+  insertColumn,
+  tableKey,
+  schemaKey,
+  qualifiedTable
+} = useMetadataTree({
+  catalogs,
+  snapshots,
+  sql,
+  sqlBox,
+  clearMenu: closeMenu
+})
+
+const {
+  showForm,
+  editing,
+  form,
+  formMessage,
+  formError,
+  saving,
+  onTypeChange,
+  openCreate,
+  openEdit,
+  testConnection,
+  saveCatalog,
+  removeCatalog
+} = useCatalogForm({
+  onSaved: refreshAfterCatalogChange,
+  flashError,
+  clearMenu: closeMenu,
+  openCatalogs
 })
 
 const gatewayLabel = computed(() => (gatewayOk.value === false ? '网关离线' : gatewayOk.value ? '网关在线' : '检测中'))
@@ -125,47 +166,6 @@ function toggleMenu(key) {
   menu.value = menu.value === key ? '' : key
 }
 
-function closeMenu() {
-  menu.value = ''
-}
-
-function flashError(message) {
-  sideError.value = message
-  window.clearTimeout(errorTimer)
-  errorTimer = window.setTimeout(() => {
-    sideError.value = ''
-  }, 4000)
-}
-
-async function loadExamples() {
-  try {
-    examples.value = await listExamples()
-    if (examples.value.length && sql.value === 'SHOW CATALOGS') {
-      sql.value = examples.value[0].sql
-    }
-  } catch {
-    examples.value = []
-  }
-}
-
-async function loadCatalogs() {
-  try {
-    catalogs.value = await listCatalogs()
-    gatewayOk.value = true
-  } catch (e) {
-    gatewayOk.value = false
-    flashError(e.message || '无法加载数据源')
-  }
-}
-
-async function loadMetadata() {
-  try {
-    snapshots.value = await listMetadata()
-  } catch {
-    snapshots.value = []
-  }
-}
-
 function refreshAll() {
   loadCatalogs()
   loadMetadata()
@@ -174,91 +174,6 @@ function refreshAll() {
 function useExample(item) {
   sql.value = item.sql
   menu.value = ''
-}
-
-function quoteIdent(name) {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `"${String(name).replaceAll('"', '""')}"`
-}
-
-function tableKey(item) {
-  return `${item.catalog}.${item.schema}.${item.table}`
-}
-
-function schemaKey(catalog, schema) {
-  return `${catalog}.${schema}`
-}
-
-function qualifiedTable(item) {
-  return `${quoteIdent(item.catalog)}.${quoteIdent(item.schema)}.${quoteIdent(item.table)}`
-}
-
-function isCatalogOpen(name) {
-  if (metaQuery.value.trim()) {
-    return true
-  }
-  return openCatalogs.value[name] !== false
-}
-
-function isSchemaOpen(catalog, schema) {
-  return !!metaQuery.value.trim() || !!openSchemas.value[schemaKey(catalog, schema)]
-}
-
-function isTableOpen(item) {
-  if (openTables.value[tableKey(item)]) {
-    return true
-  }
-  const q = metaQuery.value.trim().toLowerCase()
-  return !!q && columnHits(item, q).length > 0
-}
-
-function toggleCatalogNode(name) {
-  openCatalogs.value = { ...openCatalogs.value, [name]: !isCatalogOpen(name) }
-}
-
-function toggleSchema(catalog, schema) {
-  const key = schemaKey(catalog, schema)
-  openSchemas.value = { ...openSchemas.value, [key]: !isSchemaOpen(catalog, schema) }
-}
-
-function toggleTable(item) {
-  const key = tableKey(item)
-  openTables.value = { ...openTables.value, [key]: !openTables.value[key] }
-}
-
-function insertAtCursor(text) {
-  const el = sqlBox.value
-  const current = sql.value || ''
-  if (!el) {
-    sql.value = current && !/\s$/.test(current) ? `${current} ${text}` : `${current}${text}`
-    return
-  }
-  const start = el.selectionStart ?? current.length
-  const end = el.selectionEnd ?? current.length
-  const before = current.slice(0, start)
-  const after = current.slice(end)
-  const pad = before && !/\s$/.test(before) ? ' ' : ''
-  sql.value = `${before}${pad}${text}${after}`
-  const pos = start + pad.length + text.length
-  nextTick(() => {
-    el.focus()
-    el.setSelectionRange(pos, pos)
-  })
-}
-
-function useTable(item) {
-  const cols = item.columns?.length
-    ? item.columns.map((col) => quoteIdent(col.name)).join(', ')
-    : '*'
-  sql.value = `SELECT ${cols}\nFROM ${qualifiedTable(item)}\nLIMIT 20`
-}
-
-function insertTable(item) {
-  menu.value = ''
-  insertAtCursor(qualifiedTable(item))
-}
-
-function insertColumn(item, name) {
-  insertAtCursor(`${quoteIdent(item.table)}.${quoteIdent(name)}`)
 }
 
 async function collectCatalog(name) {
@@ -316,108 +231,6 @@ async function submit(explainOnly) {
     error.value = e.message || '请求失败'
   } finally {
     loading.value = false
-  }
-}
-
-function onTypeChange() {
-  const found = SOURCE_TYPES.find((item) => item.value === form.type)
-  if (found) {
-    form.port = found.port
-  }
-}
-
-function openCreate() {
-  Object.assign(form, emptyCatalog())
-  editing.value = false
-  formMessage.value = ''
-  formError.value = ''
-  showForm.value = true
-}
-
-function openEdit(catalog) {
-  menu.value = ''
-  Object.assign(form, emptyCatalog(), {
-    name: catalog.name,
-    type: catalog.type,
-    host: catalog.host || '127.0.0.1',
-    port: catalog.port || SOURCE_TYPES.find((item) => item.value === catalog.type)?.port || 3306,
-    database: catalog.database || '',
-    username: catalog.username || '',
-    password: '',
-    url: catalog.url || '',
-    extra: catalog.extra || '',
-    tls: !!catalog.tls
-  })
-  editing.value = true
-  formMessage.value = ''
-  formError.value = ''
-  showForm.value = true
-}
-
-function payload() {
-  return {
-    name: form.name.trim(),
-    type: form.type,
-    route: 'TRINO',
-    host: form.host.trim(),
-    port: Number(form.port),
-    database: form.database.trim(),
-    username: form.username.trim(),
-    password: form.password,
-    url: form.url.trim(),
-    extra: form.extra.trim(),
-    tls: !!form.tls
-  }
-}
-
-async function testConnection() {
-  formMessage.value = ''
-  formError.value = ''
-  try {
-    const data = await testCatalog(payload())
-    if (data.success) {
-      formMessage.value = data.message
-    } else {
-      formError.value = data.message || '连接失败'
-    }
-  } catch (e) {
-    formError.value = e.message || '连接失败'
-  }
-}
-
-async function saveCatalog() {
-  formMessage.value = ''
-  formError.value = ''
-  saving.value = true
-  try {
-    const body = payload()
-    if (editing.value) {
-      await updateCatalog(body.name, body)
-    } else {
-      await createCatalog(body)
-    }
-    showForm.value = false
-    openCatalogs.value = { ...openCatalogs.value, [body.name]: true }
-    await loadCatalogs()
-    await loadMetadata()
-  } catch (e) {
-    formError.value = e.message || '保存失败'
-  } finally {
-    saving.value = false
-  }
-}
-
-async function removeCatalog(catalog) {
-  menu.value = ''
-  if (!confirm(`删除数据源 ${catalog.name}？`)) {
-    return
-  }
-  try {
-    await deleteCatalog(catalog.name)
-    await loadCatalogs()
-    await loadMetadata()
-  } catch (e) {
-    flashError(e.message || '删除失败')
   }
 }
 
@@ -612,63 +425,18 @@ function catalogEndpoint(item) {
       </div>
     </div>
 
-    <div v-if="showForm" class="mask" @click.self="showForm = false">
-      <form class="dialog" @submit.prevent="saveCatalog">
-        <h3>{{ editing ? '编辑数据源' : '添加数据源' }}</h3>
-        <label>
-          名称（SQL 里的 catalog）
-          <input v-model="form.name" :disabled="editing" required placeholder="例如 mysql70 或 es81" />
-        </label>
-        <label>
-          类型
-          <select v-model="form.type" @change="onTypeChange">
-            <option v-for="item in SOURCE_TYPES" :key="item.value" :value="item.value">{{ item.label }}</option>
-          </select>
-        </label>
-        <div class="pair">
-          <label>
-            主机
-            <input v-model="form.host" required placeholder="127.0.0.1" />
-          </label>
-          <label>
-            端口
-            <input v-model.number="form.port" type="number" required />
-          </label>
-        </div>
-        <label>
-          {{ form.type === 'elasticsearch' ? '默认 Schema' : form.type === 'kafka' ? 'Kafka Schema' : '数据库 / Schema' }}
-          <input v-model="form.database" :placeholder="form.type === 'kafka' || form.type === 'elasticsearch' ? 'default' : '例如 shop'" />
-        </label>
-        <label v-if="form.type === 'kafka'">
-          Topic 列表（逗号分隔，可后补）
-          <input v-model="form.extra" placeholder="orders,my-topic" />
-        </label>
-        <label v-if="form.type === 'elasticsearch'" class="check">
-          <input v-model="form.tls" type="checkbox" />
-          启用 TLS
-        </label>
-        <div class="pair">
-          <label>
-            用户名
-            <input v-model="form.username" />
-          </label>
-          <label>
-            密码
-            <input v-model="form.password" type="password" :placeholder="editing ? '留空则不修改' : ''" />
-          </label>
-        </div>
-        <p class="hint">
-          保存后由 Trino 动态加载，无需重启。Kafka 填用户名密码即 SASL_PLAINTEXT/PLAIN。
-        </p>
-        <p v-if="formMessage" class="ok">{{ formMessage }}</p>
-        <p v-if="formError" class="err">{{ formError }}</p>
-        <div class="actions">
-          <button type="button" @click="testConnection">测试连接</button>
-          <button type="button" @click="showForm = false">取消</button>
-          <button class="primary" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button>
-        </div>
-      </form>
-    </div>
+    <CatalogFormModal
+      :show="showForm"
+      :editing="editing"
+      :form="form"
+      :form-message="formMessage"
+      :form-error="formError"
+      :saving="saving"
+      @close="showForm = false"
+      @save="saveCatalog"
+      @test="testConnection"
+      @type-change="onTypeChange"
+    />
   </div>
 </template>
 
