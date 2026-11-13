@@ -39,7 +39,7 @@
 | # | 问题 | 建议 |
 |---|------|------|
 | 1 | 非完整 OAuth2/OIDC | Spring Authorization Server / 外部 IdP 资源服务器 |
-| 2 | 无 Testcontainers 端到端 | MySQL +（可选）Trino 容器化回归 |
+| 2 | Testcontainers 仅覆盖配置库 CatalogStore | 扩展到元数据 / 启动切片与 Trino |
 | 3 | 前端仍有大 SFC、无 TypeScript | 继续拆 AskView/OntologyGraph；渐进 TS |
 | 4 | 覆盖率阈值可再抬高 | 补 MetadataService / FederalDataSource 测试后提到 70%+ |
 | 5 | 统一 Problem Details | RFC 7807 替换异构错误体 |
