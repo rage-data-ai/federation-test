@@ -71,6 +71,8 @@ docker compose up -d --build
 | POST | `/api/v1/ask` | 智能问数（SSE） |
 | POST | `/api/v1/ontology/draft` | 按表起草本体 |
 | GET/POST/PUT/DELETE | `/api/v1/ontology/**` | 本体读写与推理 |
+| PUT | `/api/v1/ontology/{name}/certified` | 审定概念/派生概念（问数优先） |
+| GET/POST | `/api/v1/ontology/versions/**` | 本体快照与回滚 |
 
 请求体：
 

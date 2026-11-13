@@ -597,6 +597,7 @@ function ensureConditions() {
               <span class="node-line">
                 <i class="tag" :class="row.kind">{{ row.kind ? KIND_TAG[row.kind] : '' }}</i>
                 <span class="node-label">{{ row.kind === 'code' ? (row.item?.labelZh || row.item?.value) : (row.item?.labelZh || row.item?.name) }}</span>
+                <em v-if="row.item?.certified" class="certified" title="已审定">审</em>
                 <em v-if="row.count" class="count">{{ row.count }}</em>
               </span>
               <small>{{ rowSub(row) }}</small>
@@ -927,6 +928,16 @@ function ensureConditions() {
 }
 
 .section-label em,
+.certified {
+  flex: none;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-style: normal;
+  color: #1f6f4a;
+  background: #e6f4ec;
+}
 .count {
   font-style: normal;
   font-weight: 400;

@@ -54,8 +54,17 @@ public final class BusinessContextBuilder {
         Snapshot snapshot = repository.snapshot();
         OntologyIndex index = new OntologyIndex(snapshot);
         List<String> warnings = new ArrayList<>();
+        List<Term> lexicon = lexicon(snapshot);
         List<Match> matches = exclusive ? new ArrayList<>()
-                : match(question == null ? "" : question, lexicon(snapshot), warnings);
+                : match(question == null ? "" : question, lexicon, warnings);
+        if (!exclusive && question != null && matches.size() < 2) {
+            // 字面命中不足时用字符 n-gram 余弦召回补候选（无外部向量库）
+            for (Match soft : NgramTermRetriever.retrieve(question, lexicon, 5)) {
+                if (matches.stream().noneMatch(m -> m.entity().equals(soft.entity()))) {
+                    matches.add(soft);
+                }
+            }
+        }
         for (String entity : extraEntities) {
             String kind = index.kindOf(entity);
             if (kind == null) {

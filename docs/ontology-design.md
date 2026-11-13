@@ -126,19 +126,22 @@
 | filter value validation | 工具 `validateFilterValues` / `scanFilterLiterals`；空结果自动扫字面量 |
 | Chat steps 溯源 | `answer.steps`（解析术语 / 派生口径 / 关联 / 元数据 / 过滤校验） |
 | 语义编译同义词 | 起草规则要求 aliases；码值别名利于词表命中 |
+| certify 审定 | `certified` 字段 + `PUT /api/v1/ontology/{name}/certified` + 控制台勾选；问数优先已审定 |
+| SQL attributes | `definedConcept.sqlExpression`（度量）与 `sqlCondition`（过滤） |
+| embedding 术语检索 | 无外部向量库时用字符 n-gram 余弦召回（`NgramTermRetriever`）+ 编辑距离模糊 |
 
-未搬迁（体量大 / 依赖不同）：embedding 检索、pgvector、认证式 certify 标志、Redis 语义目录。
+未搬迁（体量大 / 依赖不同）：真 embedding / pgvector、Redis 语义目录。
 
 ### 7.7 后续再做
 
-- 治理 SQL 模板快速通道（Part 3 的 `analytics-spec`）与可复用度量表达式（SQL attributes）。
+- 治理 SQL 模板快速通道（Part 3 的 `analytics-spec`）。
 - Kafka 数据源的本体映射。
-- 可选：向量检索术语召回。
+- 可选：外部 embedding / pgvector 替换 n-gram 召回。
 
 ## 8. 已知风险
 
 - 只用已映射的表，所以问到本体里还没起草的表时，系统会直接说答不了。
-- 起草即生效，又没有版本管理。大模型起草出错或被人误改时没有回滚手段，只能重新起草那批表。
+- 起草即生效；已提供版本快照/回滚，但误改后仍依赖运维主动恢复。
 - 当前环境中资产主表 `mysql70.tsoc.asset` 是 0 行，告警—资产 Join 查不出结果。资产以哪张表为准，到起草时由人来定。
 
 ## 9. 告警—资产域已知事实（2026-10-20 采集）

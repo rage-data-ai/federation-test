@@ -159,6 +159,7 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <!-- Error Prone：当前 JDK 镜像下 -Xplugin 初始化失败（javac 模块导出），暂不入主构建；保留为 P1 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>

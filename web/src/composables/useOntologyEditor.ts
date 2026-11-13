@@ -37,7 +37,8 @@ export const FIELDS: Record<KindKey, FieldDef[]> = {
     { key: 'parent', label: '父概念', type: 'select', options: 'concepts' },
     { key: 'table', label: '映射表 catalog.schema.table', type: 'table' },
     { key: 'timeColumn', label: '时间列', type: 'column', of: 'table' },
-    { key: 'largeTable', label: '大表（查询必须带时间范围）', type: 'check' }
+    { key: 'largeTable', label: '大表（查询必须带时间范围）', type: 'check' },
+    { key: 'certified', label: '已审定（问数优先采用）', type: 'check' }
   ],
   attribute: [
     { key: 'domain', label: '所属概念', type: 'select', options: 'concepts' },
@@ -63,7 +64,9 @@ export const FIELDS: Record<KindKey, FieldDef[]> = {
   defined: [
     { key: 'base', label: '基础概念', type: 'select', options: 'concepts' },
     { key: 'conditions', label: '条件（全部满足）', type: 'conditions' },
-    { key: 'definitionText', label: '文字定义（条件表达不了时填写）', type: 'textarea' }
+    { key: 'definitionText', label: '文字定义（条件表达不了时填写）', type: 'textarea' },
+    { key: 'sqlExpression', label: 'SQL 度量表达式（如 COUNT(*)）', type: 'text' },
+    { key: 'certified', label: '已审定（问数优先采用）', type: 'check' }
   ]
 }
 
@@ -89,11 +92,11 @@ export type OntologyEditorOptions = {
 function blank(kind: KindKey): EditorForm {
   const base: EditorForm = { name: '', labelZh: '', labelEn: '', aliases: [], comment: '' }
   const extra: Record<KindKey, EditorForm> = {
-    concept: { subject: '', parent: '', table: '', timeColumn: '', largeTable: false },
+    concept: { subject: '', parent: '', table: '', timeColumn: '', largeTable: false, certified: false },
     attribute: { domain: '', datatype: 'string', column: '', unit: '', identifier: false, codeList: '' },
     relation: { domain: '', range: '', joinFrom: '', joinTo: '', inverse: '', transitive: false, functional: false },
     code: { codeList: '', value: '' },
-    defined: { base: '', conditions: [], definitionText: '' }
+    defined: { base: '', conditions: [], definitionText: '', sqlExpression: '', certified: false }
   }
   return { ...base, ...extra[kind] }
 }
@@ -186,13 +189,16 @@ export function useOntologyEditor({
     try {
       const body: Record<string, unknown> = {}
       for (const field of fields.value) {
-        body[field.key] =
-          field.type === 'list'
-            ? String(form.aliasText || '')
-                .split(/[,，、]/)
-                .map((s) => s.trim())
-                .filter(Boolean)
-            : emptyToNull(form[field.key])
+        if (field.type === 'list') {
+          body[field.key] = String(form.aliasText || '')
+            .split(/[,，、]/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+        } else if (field.type === 'check') {
+          body[field.key] = !!form[field.key]
+        } else {
+          body[field.key] = emptyToNull(form[field.key])
+        }
       }
       body.comment = emptyToNull(form.comment)
       if (selected.value?.kind === 'defined') {

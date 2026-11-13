@@ -102,6 +102,7 @@ export type OntologyEntity = {
   table?: string
   timeColumn?: string
   largeTable?: boolean
+  certified?: boolean
   domain?: string
   range?: string
   datatype?: string
@@ -119,6 +120,7 @@ export type OntologyEntity = {
   conditions?: OntologyCondition[]
   definitionText?: string
   sqlCondition?: string
+  sqlExpression?: string
   [key: string]: unknown
 }
 
