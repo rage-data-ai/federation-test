@@ -43,6 +43,7 @@ final class InsightSession {
     private int attempts;
     private String degenerate;
     private int afterDegenerate;
+    private int filterValidations;
     private final Map<String, QueryResponse> results = new LinkedHashMap<>();
 
     InsightSession(
@@ -68,6 +69,28 @@ final class InsightSession {
         this.listener = listener;
         this.objectMapper = objectMapper;
         this.previewRows = previewRows;
+    }
+
+    @Tool("校验过滤值是否与本体码表一致。传入属性名或物理列名及拟写入 WHERE 的值；"
+            + "若命中中文标签会返回 suggestedValue（应改用码值 value）")
+    public String validateFilterValues(
+            @P("属性名或物理列名，例如 alertLevel 或 level") String attributeOrColumn,
+            @P("拟使用的过滤值") String value) {
+        filterValidations++;
+        Map<String, Object> result = FilterValueValidator.validate(context, attributeOrColumn, value);
+        listener.emit("filter_check", result);
+        return objectMapper.writeValueAsString(result);
+    }
+
+    @Tool("扫描 SQL 中的字符串字面量，对照本体码表给出修正建议；结果为空或怀疑用了中文名过滤时调用")
+    public String scanFilterLiterals(@P("待检查的完整 SQL") String sql) {
+        filterValidations++;
+        List<Map<String, Object>> findings = FilterValueValidator.scanSqlLiterals(context, sql);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("findings", findings);
+        result.put("ok", findings.isEmpty());
+        listener.emit("filter_check", result);
+        return objectMapper.writeValueAsString(result);
     }
 
     @Tool("执行一条只读 Trino SQL 并返回结果预览。SQL 会先经过只读、表范围、大表时间过滤和 Trino 预校验，"
@@ -106,6 +129,10 @@ final class InsightSession {
         if (shape != null && degenerate == null) {
             degenerate = shape;
         }
+        List<Map<String, Object>> literalHints = List.of();
+        if ("为空".equals(shape) || "全为 0".equals(shape)) {
+            literalHints = FilterValueValidator.scanSqlLiterals(context, normalized);
+        }
         List<List<Object>> preview = preview(response.rows());
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("sql", normalized);
@@ -115,6 +142,9 @@ final class InsightSession {
         event.put("rowCount", response.rowCount());
         event.put("elapsedMs", response.elapsedMs());
         event.put("degenerate", shape);
+        if (!literalHints.isEmpty()) {
+            event.put("filterHints", literalHints);
+        }
         listener.emit("result", event);
 
         Map<String, Object> reply = new LinkedHashMap<>();
@@ -128,7 +158,15 @@ final class InsightSession {
                     ? "结果是退化形态，可以追加 1 次 diagnostic SQL 排查（如去掉部分条件看分布、核对码值），然后作答"
                     : "请直接作答并说明结果" + shape + "的可能原因");
         }
+        if (!literalHints.isEmpty()) {
+            reply.put("filterHints", literalHints);
+            reply.put("filterHint", "SQL 字面量可能与码表不一致，请按 filterHints 修正 value 后重试");
+        }
         return objectMapper.writeValueAsString(reply);
+    }
+
+    int filterValidations() {
+        return filterValidations;
     }
 
     @Tool("本体恢复（每次请求最多 1 次）：业务上下文缺少需要的概念、属性或关系时，用业务词补充检索本体，返回新的业务上下文和元数据")

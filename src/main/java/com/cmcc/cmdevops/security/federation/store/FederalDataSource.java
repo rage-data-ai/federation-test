@@ -35,6 +35,10 @@ public class FederalDataSource {
 
     public FederalDataSource(FederationProperties properties, ObjectMapper objectMapper) {
         FederationProperties.Repository repository = properties.getRepository();
+        if (repository.getUrl() == null || repository.getUrl().isBlank()) {
+            throw new IllegalStateException(
+                    "未配置联邦配置库 JDBC URL。请设置环境变量 FEDERAL_DB_URL，或启用 spring.profiles.active=dev 并编辑 application-dev.yml");
+        }
         String password = repository.getPassword();
         if (password == null || password.isBlank()) {
             password = readPassword(Path.of("data/federal.password"));
@@ -119,6 +123,15 @@ public class FederalDataSource {
                   base_url VARCHAR(512) NOT NULL,
                   api_key VARCHAR(512) NULL,
                   model VARCHAR(128) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_ontology_embedding (
+                  fingerprint VARCHAR(32) NOT NULL,
+                  embedder VARCHAR(64) NOT NULL,
+                  payload LONGBLOB NOT NULL,
+                  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  PRIMARY KEY (fingerprint, embedder)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
     }

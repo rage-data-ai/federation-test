@@ -1,5 +1,12 @@
 /** Models this agent can configure on the public xAI OpenAI-compatible API. */
-export const AGENT_MODELS = [
+export type AgentModel = {
+  id: string
+  label: string
+  protocol: string
+  baseUrl: string
+}
+
+export const AGENT_MODELS: AgentModel[] = [
   {
     id: 'grok-4.7',
     label: 'Grok 4.7',
@@ -22,6 +29,6 @@ export const AGENT_MODELS = [
 
 export const DEFAULT_MODEL = AGENT_MODELS[0]
 
-export function findModel(id) {
-  return AGENT_MODELS.find((item) => item.id === id) || null
+export function findModel(id: string) {
+  return AGENT_MODELS.find((item) => item.id === id)
 }

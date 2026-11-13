@@ -1,6 +1,6 @@
 # 本体驱动的智能问数：设计决策
 
-状态：设计已确认，待实现（2026-10-20）
+状态：设计已确认并已落地（控制台 + API + 单测）；持续按 `docs/design-review.md` 迭代工程化（2026-11-13）
 
 参考文章（同一系列，务必先读原文）：
 
@@ -34,7 +34,7 @@
   - 码值个体，例如 `level=3` 表示高危；
   - 本体到物理 `catalog.schema.table` / 列的映射，以及 Join 路径。
 - **不存的内容**：业务数据实例。抽样行只在起草时临时使用，不入库。
-- **指标处理"角色中立"**：本体不写聚合公式，只写属性含义、单位、是否唯一标识这类事实。比如可以写"`alert.id` 唯一标识一条告警"，至于怎么聚合由 DataInsight 判断。
+- **指标**：属性仍角色中立；派生概念可选 `sqlExpression`（可复用 SELECT 度量，对齐 Auto Ontology SQL attributes），过滤仍用 conditions/`sqlCondition`。
 - **映射规则**：参照 Part 2 第 1.2 节：
 
   | 关系型 | OWL |
@@ -70,7 +70,8 @@
 1. 用户在控制台勾选表，按业务域分批起草。
 2. 网关为每张表取列名、类型和少量抽样行（抽样行可以发给大模型），由大模型按第 3 节的映射规则起草三元组，直接写入 TDB2。
 3. **起草即生效**：不区分草稿和正式版，人可以在控制台随时修改。
-4. **不做版本管理**。
+4. **审定（certify）**：概念/派生概念可标记 `certified`；问数优先采用已审定口径，未审定会告警。
+5. **版本快照**：起草前自动写入 `federation.ontology-versions`（默认 `data/ontology-versions`）；可用 `GET/POST /api/v1/ontology/versions` 与 `POST .../versions/{id}/restore` 回滚。
 5. 标签要求中英文 label，加多个中文别名和 comment。
 6. 支持的数据源：MySQL、ClickHouse、Elasticsearch。**Kafka 这次不做**，因为 topic 在 Trino 里只有 `_message` 原始字段。
 
@@ -114,15 +115,33 @@
 - 通常直接执行。**口径缺失或有歧义时停下来问用户**，不自己编门槛（参照 Part 3 第 9.2 节）。
 - 前端通过 SSE 流式展示每个子智能体的过程：命中的本体概念、核对过的表和列、SQL。最后给出结果表、结论和口径来源，口径来源要区分"本体定义"和"推断"。
 
-### 7.6 后续再做
+### 7.6 借鉴 NVIDIA Auto Ontology 的工程加固（2026-11-14）
+
+参考 [NVIDIA/auto-ontology](https://github.com/NVIDIA/auto-ontology) 的公开流程（Discover → Ground → Validate → Answer），在不引入 pgvector/NIM 的前提下落地：
+
+| Auto Ontology | 本网关落地 |
+|---|---|
+| `check_answerable` | `POST /api/v1/ask/answerable` + SSE `answerability` + 工具 `checkAnswerable` |
+| 强制复用 SQL attributes | Insight 提示强制复用 `definedConcept.sqlCondition` |
+| filter value validation | 工具 `validateFilterValues` / `scanFilterLiterals`；空结果自动扫字面量 |
+| Chat steps 溯源 | `answer.steps`（解析术语 / 派生口径 / 关联 / 元数据 / 过滤校验） |
+| 语义编译同义词 | 起草规则要求 aliases；码值别名利于词表命中 |
+| certify 审定 | `certified` 字段 + `PUT /api/v1/ontology/{name}/certified` + 控制台勾选；问数优先已审定 |
+| SQL attributes | `definedConcept.sqlExpression`（度量）与 `sqlCondition`（过滤） |
+| embedding 术语检索 | `TermEmbedder` + `OntologyEmbeddingIndex`（词表指纹落盘缓存）；HTTP/NIM 可选；失败回退哈希；辅 n-gram / 编辑距离。见 [ADR 0001](adr/0001-term-embedding.md) |
+
+未搬迁（体量大 / 依赖不同）：真 pgvector 后端、Redis 语义目录。
+
+### 7.7 后续再做
 
 - 治理 SQL 模板快速通道（Part 3 的 `analytics-spec`）。
 - Kafka 数据源的本体映射。
+- 可选：用 pgvector 替换落盘 `.bin` 索引格式。
 
 ## 8. 已知风险
 
 - 只用已映射的表，所以问到本体里还没起草的表时，系统会直接说答不了。
-- 起草即生效，又没有版本管理。大模型起草出错或被人误改时没有回滚手段，只能重新起草那批表。
+- 起草即生效；已提供版本快照/回滚，但误改后仍依赖运维主动恢复。
 - 当前环境中资产主表 `mysql70.tsoc.asset` 是 0 行，告警—资产 Join 查不出结果。资产以哪张表为准，到起草时由人来定。
 
 ## 9. 告警—资产域已知事实（2026-10-20 采集）
@@ -161,7 +180,7 @@
 | `LLM_API_KEY` | 密钥 |
 | `LLM_MODEL` | 模型名 |
 
-`federation.ask.*` 可调：`min-confidence`（默认 0.5，低于它转多轮工具探索）、`max-path-depth`（关系路径最大跳数，默认 4）、`sample-rows`（起草时每表样例行数，默认 3）、`result-preview-rows`（返回给大模型和页面的结果行数，默认 50）。
+`federation.ask.*` 可调：`min-confidence`（默认 0.5，低于它转多轮工具探索）、`max-path-depth`（关系路径最大跳数，默认 4）、`sample-rows`（起草时每表样例行数，默认 3）、`result-preview-rows`（返回给大模型和页面的结果行数，默认 50）、`embed-endpoint` / `embed-store`（`file` | `jdbc` | `both`，默认 `both`：联邦库 `fed_ontology_embedding` + 落盘术语索引）、`pgvector-url`（可选；空或不可达则自动禁用并回退本地索引）、`pgvector-index`（`hnsw` 默认 / `ivfflat` / `none`；建索引失败则精确扫描）。
 
 ### 11.2 与上文设计的差异
 

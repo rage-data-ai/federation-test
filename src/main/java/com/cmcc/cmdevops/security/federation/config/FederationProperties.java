@@ -15,10 +15,13 @@ public class FederationProperties {
     private final Vector vector = new Vector();
     private final Llm llm = new Llm();
     private final Ask ask = new Ask();
+    private final Cors cors = new Cors();
     private Map<String, Catalog> catalogs = new LinkedHashMap<>();
     private Map<String, String> kafkaMappings = new LinkedHashMap<>();
     private int maxRows = 10_000;
     private String ontologyStore = "data/tdb2";
+    /** 本体版本快照目录；空则默认为 ontologyStore 同级 ontology-versions */
+    private String ontologyVersions = "";
     private final Repository repository = new Repository();
 
     public Trino getTrino() {
@@ -47,6 +50,10 @@ public class FederationProperties {
 
     public Ask getAsk() {
         return ask;
+    }
+
+    public Cors getCors() {
+        return cors;
     }
 
     public Map<String, Catalog> getCatalogs() {
@@ -81,15 +88,22 @@ public class FederationProperties {
         this.ontologyStore = ontologyStore;
     }
 
+    public String getOntologyVersions() {
+        return ontologyVersions;
+    }
+
+    public void setOntologyVersions(String ontologyVersions) {
+        this.ontologyVersions = ontologyVersions == null ? "" : ontologyVersions;
+    }
+
     public Repository getRepository() {
         return repository;
     }
 
-    /** 网关自己的配置库，替代 data/*.json。 */
+    /** 网关自己的配置库，替代 data/*.json。须通过 FEDERAL_DB_URL 等环境变量或配置文件提供。 */
     public static class Repository {
-        private String url = "jdbc:mysql://192.168.19.70:3308/federal"
-                + "?sslMode=DISABLED&allowPublicKeyRetrieval=true&characterEncoding=utf8";
-        private String username = "tsoc";
+        private String url = "";
+        private String username = "";
         private String password = "";
 
         public String getUrl() {
@@ -176,7 +190,35 @@ public class FederationProperties {
 
     public static class Security {
         private boolean enabled = false;
+        /** 用户名 → Bearer token（兼容旧配置；未单独配 roles 时默认 QUERY+ADMIN） */
         private Map<String, String> tokens = new LinkedHashMap<>();
+        /** 用户名 → 逗号分隔角色，如 QUERY 或 QUERY,ADMIN */
+        private Map<String, String> roles = new LinkedHashMap<>();
+        /**
+         * 用户名 → 可访问 catalog（逗号分隔或 {@code *}）。非空时启用资源 ACL；
+         * 未列出的用户无任何 catalog；ADMIN 角色绕过。
+         */
+        private Map<String, String> catalogs = new LinkedHashMap<>();
+        /**
+         * 用户名 → 行级规则，逗号分隔 {@code catalog.schema.table: predicate}。
+         * 例：{@code reader: mysql_shop.public.orders:tenant_id = 'acme'}
+         */
+        private Map<String, String> rowFilters = new LinkedHashMap<>();
+        /**
+         * 吊销 denylist 持久化路径。空则仅进程内存；非空则读写该文件（多实例可挂共享卷）。
+         * 例：{@code /var/lib/federation/revoked-tokens.tsv}
+         */
+        private String revocationStorePath = "";
+        /**
+         * Redis URI 优先于文件 denylist（多实例推荐）。例：{@code redis://localhost:6379/0}
+         */
+        private String revocationRedisUri = "";
+        /**
+         * OIDC back-channel logout 共享密钥。非空时 {@code POST /api/v1/auth/backchannel-logout}
+         * 可用 {@code X-Backchannel-Secret} 头代替 ADMIN Bearer。
+         */
+        private String backchannelLogoutSecret = "";
+        private final Jwt jwt = new Jwt();
 
         public boolean isEnabled() {
             return enabled;
@@ -192,6 +234,84 @@ public class FederationProperties {
 
         public void setTokens(Map<String, String> tokens) {
             this.tokens = tokens;
+        }
+
+        public Map<String, String> getRoles() {
+            return roles;
+        }
+
+        public void setRoles(Map<String, String> roles) {
+            this.roles = roles == null ? new LinkedHashMap<>() : roles;
+        }
+
+        public Map<String, String> getCatalogs() {
+            return catalogs;
+        }
+
+        public void setCatalogs(Map<String, String> catalogs) {
+            this.catalogs = catalogs == null ? new LinkedHashMap<>() : catalogs;
+        }
+
+        public Map<String, String> getRowFilters() {
+            return rowFilters;
+        }
+
+        public void setRowFilters(Map<String, String> rowFilters) {
+            this.rowFilters = rowFilters == null ? new LinkedHashMap<>() : rowFilters;
+        }
+
+        public String getRevocationStorePath() {
+            return revocationStorePath;
+        }
+
+        public void setRevocationStorePath(String revocationStorePath) {
+            this.revocationStorePath = revocationStorePath == null ? "" : revocationStorePath;
+        }
+
+        public String getRevocationRedisUri() {
+            return revocationRedisUri;
+        }
+
+        public void setRevocationRedisUri(String revocationRedisUri) {
+            this.revocationRedisUri = revocationRedisUri == null ? "" : revocationRedisUri;
+        }
+
+        public String getBackchannelLogoutSecret() {
+            return backchannelLogoutSecret;
+        }
+
+        public void setBackchannelLogoutSecret(String backchannelLogoutSecret) {
+            this.backchannelLogoutSecret = backchannelLogoutSecret == null ? "" : backchannelLogoutSecret;
+        }
+
+        public Jwt getJwt() {
+            return jwt;
+        }
+    }
+
+    /** 可选：校验外部 IdP 签发的 JWT（issuer-uri 非空时启用）。 */
+    public static class Jwt {
+        private String issuerUri = "";
+        private String rolesClaim = "roles";
+
+        public String getIssuerUri() {
+            return issuerUri;
+        }
+
+        public void setIssuerUri(String issuerUri) {
+            this.issuerUri = issuerUri == null ? "" : issuerUri;
+        }
+
+        public String getRolesClaim() {
+            return rolesClaim;
+        }
+
+        public void setRolesClaim(String rolesClaim) {
+            this.rolesClaim = rolesClaim == null || rolesClaim.isBlank() ? "roles" : rolesClaim;
+        }
+
+        public boolean isEnabled() {
+            return !issuerUri.isBlank();
         }
     }
 
@@ -329,12 +449,55 @@ public class FederationProperties {
         }
     }
 
+    public static class Cors {
+        private String allowedOrigins = "http://localhost:5173,http://localhost:18080";
+
+        public String getAllowedOrigins() {
+            return allowedOrigins;
+        }
+
+        public void setAllowedOrigins(String allowedOrigins) {
+            this.allowedOrigins = allowedOrigins == null ? "" : allowedOrigins;
+        }
+    }
+
     public static class Ask {
         /** get_business_context 置信度低于该值时升级到多轮工具检索 */
         private double minConfidence = 0.5;
         private int maxPathDepth = 4;
         private int sampleRows = 3;
         private int resultPreviewRows = 50;
+        /**
+         * OpenAI 兼容 embeddings 端点（NIM / 自建）。空则使用本地哈希嵌入。
+         * 例：{@code https://integrate.api.nvidia.com/v1} 或完整 {@code .../v1/embeddings}
+         */
+        private String embedEndpoint = "";
+        private String embedApiKey = "";
+        private String embedModel = "";
+        /** 术语向量落盘目录；空则默认为 ontologyStore 同级 ontology-embeddings */
+        private String embedCacheDir = "";
+        /**
+         * 术语向量持久化后端：{@code file}（仅落盘）、{@code jdbc}（仅联邦库）、
+         * {@code both}（JDBC 优先加载，双写；对齐 Auto Ontology 共享索引）。
+         */
+        private String embedStore = "both";
+        /**
+         * 可选 Postgres + pgvector JDBC URL。空则禁用，问数回退本地/联邦库索引。
+         * 例：{@code jdbc:postgresql://localhost:5432/ontology}
+         */
+        private String pgvectorUrl = "";
+        private String pgvectorUsername = "";
+        private String pgvectorPassword = "";
+        /** pgvector 列维度；默认对齐 {@code HashingTermEmbedder.DEFAULT_DIM}。 */
+        private int pgvectorDimensions = 256;
+        /**
+         * ANN 索引：{@code none}/{@code exact}（精确扫描）、{@code ivfflat}、{@code hnsw}（默认）。
+         * 创建失败自动降级为精确扫描，不影响问数。
+         */
+        private String pgvectorIndex = "hnsw";
+        private int pgvectorIvfflatLists = 100;
+        private int pgvectorHnswM = 16;
+        private int pgvectorHnswEfConstruction = 64;
 
         public double getMinConfidence() {
             return minConfidence;
@@ -366,6 +529,110 @@ public class FederationProperties {
 
         public void setResultPreviewRows(int resultPreviewRows) {
             this.resultPreviewRows = resultPreviewRows;
+        }
+
+        public String getEmbedEndpoint() {
+            return embedEndpoint;
+        }
+
+        public void setEmbedEndpoint(String embedEndpoint) {
+            this.embedEndpoint = embedEndpoint == null ? "" : embedEndpoint;
+        }
+
+        public String getEmbedApiKey() {
+            return embedApiKey;
+        }
+
+        public void setEmbedApiKey(String embedApiKey) {
+            this.embedApiKey = embedApiKey == null ? "" : embedApiKey;
+        }
+
+        public String getEmbedModel() {
+            return embedModel;
+        }
+
+        public void setEmbedModel(String embedModel) {
+            this.embedModel = embedModel == null ? "" : embedModel;
+        }
+
+        public String getEmbedCacheDir() {
+            return embedCacheDir;
+        }
+
+        public void setEmbedCacheDir(String embedCacheDir) {
+            this.embedCacheDir = embedCacheDir == null ? "" : embedCacheDir;
+        }
+
+        public String getEmbedStore() {
+            return embedStore;
+        }
+
+        public void setEmbedStore(String embedStore) {
+            this.embedStore = embedStore == null || embedStore.isBlank() ? "both" : embedStore.trim();
+        }
+
+        public String getPgvectorUrl() {
+            return pgvectorUrl;
+        }
+
+        public void setPgvectorUrl(String pgvectorUrl) {
+            this.pgvectorUrl = pgvectorUrl == null ? "" : pgvectorUrl.trim();
+        }
+
+        public String getPgvectorUsername() {
+            return pgvectorUsername;
+        }
+
+        public void setPgvectorUsername(String pgvectorUsername) {
+            this.pgvectorUsername = pgvectorUsername == null ? "" : pgvectorUsername;
+        }
+
+        public String getPgvectorPassword() {
+            return pgvectorPassword;
+        }
+
+        public void setPgvectorPassword(String pgvectorPassword) {
+            this.pgvectorPassword = pgvectorPassword == null ? "" : pgvectorPassword;
+        }
+
+        public int getPgvectorDimensions() {
+            return pgvectorDimensions;
+        }
+
+        public void setPgvectorDimensions(int pgvectorDimensions) {
+            this.pgvectorDimensions = pgvectorDimensions <= 0 ? 256 : pgvectorDimensions;
+        }
+
+        public String getPgvectorIndex() {
+            return pgvectorIndex;
+        }
+
+        public void setPgvectorIndex(String pgvectorIndex) {
+            this.pgvectorIndex = pgvectorIndex == null || pgvectorIndex.isBlank() ? "hnsw" : pgvectorIndex.trim();
+        }
+
+        public int getPgvectorIvfflatLists() {
+            return pgvectorIvfflatLists;
+        }
+
+        public void setPgvectorIvfflatLists(int pgvectorIvfflatLists) {
+            this.pgvectorIvfflatLists = pgvectorIvfflatLists <= 0 ? 100 : pgvectorIvfflatLists;
+        }
+
+        public int getPgvectorHnswM() {
+            return pgvectorHnswM;
+        }
+
+        public void setPgvectorHnswM(int pgvectorHnswM) {
+            this.pgvectorHnswM = pgvectorHnswM <= 0 ? 16 : pgvectorHnswM;
+        }
+
+        public int getPgvectorHnswEfConstruction() {
+            return pgvectorHnswEfConstruction;
+        }
+
+        public void setPgvectorHnswEfConstruction(int pgvectorHnswEfConstruction) {
+            this.pgvectorHnswEfConstruction = pgvectorHnswEfConstruction <= 0 ? 64 : pgvectorHnswEfConstruction;
         }
     }
 

@@ -1,0 +1,13 @@
+# 本地开发示例：复制并按环境修改，或通过环境变量覆盖。
+# 启动：SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run
+
+federation:
+  repository:
+    url: jdbc:mysql://127.0.0.1:3306/federal?sslMode=DISABLED&allowPublicKeyRetrieval=true&characterEncoding=utf8
+    username: federation
+    password: federation
+  security:
+    enabled: false
+  trino:
+    url: jdbc:trino://localhost:8081
+    user: federation

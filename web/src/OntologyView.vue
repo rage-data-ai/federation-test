@@ -1,96 +1,87 @@
-<script setup>
-import { computed, inject, nextTick, onActivated, reactive, ref, watch } from 'vue'
-import { deleteEntity, draftOntology, getOntology, getOntologyTurtle, listCatalogs, listMetadata, llmConfig, renameSubject, saveEntity } from './api'
+<script setup lang="ts">
+import { computed, inject, onActivated, ref, watch, type Ref } from 'vue'
+import {
+  createOntologyVersion,
+  getOntology,
+  getOntologyTurtle,
+  listCatalogs,
+  listMetadata,
+  listOntologyVersions,
+  llmConfig,
+  renameSubject,
+  restoreOntologyVersion,
+  type OntologyVersionInfo
+} from './api'
 import OntologyGraph from './OntologyGraph.vue'
+import DraftDialog from './components/ontology/DraftDialog.vue'
+import { useFocusTrap } from './composables/useFocusTrap'
+import { qualified, useOntologyDraft } from './composables/useOntologyDraft'
+import { KINDS, OPERATORS, useOntologyEditor, type KindKey } from './composables/useOntologyEditor'
+import type { CatalogRecord, LlmConfig, MetadataTable, OntologyBundle, OntologyEntity } from './types'
+import { emptyOntology, errMessage } from './types'
 
-const tables = ref([])
-const catalogs = ref([])
+type TreeAdd = { kind: KindKey; preset?: Record<string, unknown> } | null
 
-const KINDS = [
-  { key: 'concept', list: 'concepts', label: '概念' },
-  { key: 'attribute', list: 'attributes', label: '属性' },
-  { key: 'relation', list: 'relations', label: '关系' },
-  { key: 'code', list: 'codes', label: '码值' },
-  { key: 'defined', list: 'definedConcepts', label: '派生概念' }
-]
-const DATATYPES = ['string', 'integer', 'long', 'decimal', 'double', 'boolean', 'date', 'dateTime']
-const OPERATORS = ['=', '>', '>=', '<', '<=']
-const COMMON = [
-  { key: 'name', label: '名称（英文标识，创建后不可改）', type: 'text' },
-  { key: 'labelZh', label: '中文名', type: 'text' },
-  { key: 'labelEn', label: '英文名', type: 'text' },
-  { key: 'aliases', label: '中文别名（逗号分隔）', type: 'list' }
-]
-const FIELDS = {
-  concept: [
-    { key: 'subject', label: '主题域（只有同主题域的概念能关联）', type: 'subject' },
-    { key: 'parent', label: '父概念', type: 'select', options: 'concepts' },
-    { key: 'table', label: '映射表 catalog.schema.table', type: 'table' },
-    { key: 'timeColumn', label: '时间列', type: 'column', of: 'table' },
-    { key: 'largeTable', label: '大表（查询必须带时间范围）', type: 'check' }
-  ],
-  attribute: [
-    { key: 'domain', label: '所属概念', type: 'select', options: 'concepts' },
-    { key: 'datatype', label: '数据类型', type: 'select', options: 'datatypes' },
-    { key: 'column', label: '映射列', type: 'column', of: 'domain' },
-    { key: 'unit', label: '单位', type: 'text' },
-    { key: 'codeList', label: '码表（填任意名字即标为码值列，系统按表名_列名命名）', type: 'text' },
-    { key: 'identifier', label: '标识列（主键）', type: 'check' }
-  ],
-  relation: [
-    { key: 'domain', label: '起点概念', type: 'select', options: 'concepts' },
-    { key: 'range', label: '终点概念', type: 'select', options: 'concepts' },
-    { key: 'joinFrom', label: '起点表的关联列', type: 'column', of: 'domain' },
-    { key: 'joinTo', label: '终点表的关联列', type: 'column', of: 'range' },
-    { key: 'inverse', label: '反向关系名（可选）', type: 'text' },
-    { key: 'functional', label: '函数性（一个起点最多对应一个终点）', type: 'check' },
-    { key: 'transitive', label: '传递性', type: 'check' }
-  ],
-  code: [
-    { key: 'codeList', label: '码表（属性上已有的码表）', type: 'select', options: 'codeLists' },
-    { key: 'value', label: '库中存储的值', type: 'text' }
-  ],
-  defined: [
-    { key: 'base', label: '基础概念', type: 'select', options: 'concepts' },
-    { key: 'conditions', label: '条件（全部满足）', type: 'conditions' },
-    { key: 'definitionText', label: '文字定义（条件表达不了时填写）', type: 'textarea' }
-  ]
+type TreeRow = {
+  type: 'section' | 'item'
+  key: string
+  depth: number
+  label?: string
+  count?: number
+  warn?: boolean
+  kind?: KindKey | string
+  item?: OntologyEntity
+  out?: boolean
+  toggle?: boolean
+  open?: boolean
+  add?: TreeAdd
 }
 
-const openLlmSettings = inject('openLlmSettings', () => {})
-const llmRevision = inject('llmRevision', ref(0))
+type SubjectTab = { name: string; label: string; count: number }
+type RenameState = { from: string; to: string; error: string }
+
+const tables = ref<MetadataTable[]>([])
+const catalogs = ref<CatalogRecord[]>([])
+
+const openLlmSettings = inject<() => void>('openLlmSettings', () => {})
+const llmRevision = inject<Ref<number>>('llmRevision', ref(0))
 /** 全部主题域的本体。页面上的树、画布和下拉选项都只用当前主题域的 snapshot。 */
-const everything = ref({ concepts: [], attributes: [], relations: [], codes: [], definedConcepts: [] })
+const everything = ref<OntologyBundle>(emptyOntology())
 /** 当前主题域；空串是"未分主题域" */
 const subject = ref('')
 const UNASSIGNED = '未分主题域'
-const subjectOf = (concept) => (concept.subject || '').trim()
+const subjectOf = (concept: OntologyEntity) => (concept.subject || '').trim()
 
 /** 只留一个主题域的概念，以及跟随它们的属性、关系、码值和派生概念。没有归属的实体算在未分主题域里。 */
-function scopeTo(data, name) {
+function scopeTo(data: OntologyBundle, name: string): OntologyBundle {
   const all = new Set(data.concepts.map((c) => c.name))
   const mine = new Set(data.concepts.filter((c) => subjectOf(c) === name).map((c) => c.name))
-  const stray = (owner) => name === '' && !all.has(owner)
-  const attributes = data.attributes.filter((a) => mine.has(a.domain) || stray(a.domain))
-  const ownedLists = new Set(data.attributes.filter((a) => all.has(a.domain) && a.codeList).map((a) => a.codeList))
-  const lists = new Set(attributes.filter((a) => a.codeList).map((a) => a.codeList))
+  const stray = (owner: string) => name === '' && !all.has(owner)
+  const attributes = data.attributes.filter((a) => mine.has(a.domain || '') || stray(a.domain || ''))
+  const ownedLists = new Set(
+    data.attributes.filter((a) => all.has(a.domain || '') && a.codeList).map((a) => a.codeList as string)
+  )
+  const lists = new Set(attributes.filter((a) => a.codeList).map((a) => a.codeList as string))
   return {
     concepts: data.concepts.filter((c) => mine.has(c.name)),
     attributes,
-    relations: data.relations.filter((r) => (mine.has(r.domain) && mine.has(r.range))
-      || (name === '' && !all.has(r.domain) && !all.has(r.range))),
-    codes: data.codes.filter((c) => lists.has(c.codeList) || (name === '' && !ownedLists.has(c.codeList))),
-    definedConcepts: data.definedConcepts.filter((d) => mine.has(d.base) || stray(d.base))
+    relations: data.relations.filter(
+      (r) =>
+        (mine.has(r.domain || '') && mine.has(r.range || '')) ||
+        (name === '' && !all.has(r.domain || '') && !all.has(r.range || ''))
+    ),
+    codes: data.codes.filter((c) => lists.has(c.codeList || '') || (name === '' && !ownedLists.has(c.codeList || ''))),
+    definedConcepts: data.definedConcepts.filter((d) => mine.has(d.base || '') || stray(d.base || ''))
   }
 }
 
 const subjects = computed(() => {
-  const counts = new Map()
+  const counts = new Map<string, number>()
   for (const concept of everything.value.concepts) {
     counts.set(subjectOf(concept), (counts.get(subjectOf(concept)) || 0) + 1)
   }
   const named = [...counts.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b, 'zh'))
-  const list = named.map((name) => ({ name, label: name, count: counts.get(name) }))
+  const list: SubjectTab[] = named.map((name) => ({ name, label: name, count: counts.get(name) || 0 }))
   const loose = scopeTo(everything.value, '')
   if (counts.has('') || loose.attributes.length || loose.relations.length || loose.codes.length || loose.definedConcepts.length) {
     list.push({ name: '', label: UNASSIGNED, count: counts.get('') || 0 })
@@ -100,78 +91,24 @@ const subjects = computed(() => {
 const subjectNames = computed(() => subjects.value.map((item) => item.name).filter(Boolean))
 const snapshot = computed(() => scopeTo(everything.value, subject.value))
 
-watch(subjects, (list) => {
-  if (list.length && !list.some((item) => item.name === subject.value)) {
-    subject.value = list[0].name
-  }
-}, { immediate: true })
-watch(subject, () => {
-  selected.value = null
-})
 const query = ref('')
-const selected = ref(null)
-const form = reactive({})
-const isNew = ref(false)
-const message = ref('')
-const error = ref('')
-const saving = ref(false)
-const llm = ref(null)
-
-const showDraft = ref(false)
-const pendingDelete = ref(null)
-const draftTables = ref([])
-const draftQuery = ref('')
-const draftNote = ref('')
-const draftSubject = ref('')
-const renaming = ref(null)
-const drafting = ref(false)
-const draftResult = ref(null)
-const draftError = ref('')
-const fresh = ref([])
-const draftStep = ref('')
-const draftDetail = ref('')
-const draftLog = ref([])
-const draftStartedAt = ref(0)
-const draftClock = ref(0)
-let draftClockTimer = 0
-const draftElapsed = computed(() => draftStartedAt.value
-  ? Math.max(0, Math.round((draftClock.value - draftStartedAt.value) / 1000))
-  : 0)
-const DRAFT_STEPS = [
-  { key: 'sample', label: '读取列和样例' },
-  { key: 'concepts', label: '起草概念' },
-  { key: 'attributes', label: '起草属性' },
-  { key: 'codes', label: '起草码值' },
-  { key: 'relations', label: '起草关系' },
-  { key: 'defined', label: '起草派生概念' }
-]
-
+const llm = ref<LlmConfig | null>(null)
+const fresh = ref<string[]>([])
+const renaming = ref<RenameState | null>(null)
 const turtle = ref('')
+const versionsOpen = ref(false)
+const versions = ref<OntologyVersionInfo[]>([])
+const versionsBusy = ref(false)
+const versionsNote = ref('')
+const openNodes = ref(new Set<string>())
 
-const kafka = computed(() => new Set(catalogs.value.filter((c) => c.type === 'kafka').map((c) => c.name)))
-const qualified = (t) => `${t.catalog}.${t.schema}.${t.table}`
-const draftable = computed(() => tables.value.filter((t) => !kafka.value.has(t.catalog)))
-const draftCandidates = computed(() => {
-  const q = draftQuery.value.trim().toLowerCase()
-  const list = q ? draftable.value.filter((t) => qualified(t).toLowerCase().includes(q)) : draftable.value
-  return list.slice(0, 200)
-})
-/** 表已经属于哪个主题域的哪个概念：一张表只能属于一个主题域 */
-const tableOwner = computed(() => {
-  const map = {}
-  for (const concept of everything.value.concepts) {
-    if (concept.table) {
-      map[concept.table.toLowerCase()] = { subject: subjectOf(concept), concept: concept.name }
-    }
-  }
-  return map
-})
-function takenElsewhere(name) {
-  const owner = tableOwner.value[name.toLowerCase()]
-  return owner && owner.subject !== draftSubject.value.trim() ? owner : null
-}
+const deleteDialog = ref<HTMLElement | null>(null)
+const renameDialog = ref<HTMLElement | null>(null)
+const versionsDialog = ref<HTMLElement | null>(null)
+const turtleDialog = ref<HTMLElement | null>(null)
+
 const columnsByTable = computed(() => {
-  const map = {}
+  const map: Record<string, string[]> = {}
   for (const t of tables.value) {
     map[qualified(t).toLowerCase()] = (t.columns || []).map((c) => c.name)
   }
@@ -180,21 +117,115 @@ const columnsByTable = computed(() => {
 const conceptNames = computed(() => snapshot.value.concepts.map((c) => c.name))
 const attributeNames = computed(() => snapshot.value.attributes.map((a) => a.name))
 
-const openNodes = ref(new Set())
+const {
+  selected,
+  form,
+  isNew,
+  message,
+  error,
+  saving,
+  pendingDelete,
+  fields,
+  open,
+  createKind,
+  options,
+  columnsFor,
+  save,
+  removeNamed,
+  confirmDelete,
+  remove,
+  closeEditor
+} = useOntologyEditor({
+  everything,
+  subject,
+  snapshot,
+  conceptNames,
+  columnsByTable,
+  fresh
+})
 
-function groupBy(items, key) {
-  const map = new Map()
+const deleteOpen = computed(() => pendingDelete.value != null)
+const renameOpen = computed(() => renaming.value != null)
+const turtleOpen = computed(() => !!turtle.value)
+useFocusTrap(deleteOpen, deleteDialog, () => {
+  pendingDelete.value = null
+})
+useFocusTrap(renameOpen, renameDialog, () => {
+  renaming.value = null
+})
+useFocusTrap(versionsOpen, versionsDialog, () => {
+  versionsOpen.value = false
+})
+useFocusTrap(turtleOpen, turtleDialog, () => {
+  turtle.value = ''
+})
+
+async function load() {
+  try {
+    everything.value = await getOntology()
+    error.value = ''
+  } catch (e) {
+    error.value = errMessage(e)
+  }
+}
+
+const {
+  showDraft,
+  draftTables,
+  draftQuery,
+  draftNote,
+  draftSubject,
+  drafting,
+  draftResult,
+  draftError,
+  draftStep,
+  draftDetail,
+  draftLog,
+  draftElapsed,
+  draftable,
+  draftCandidates,
+  openDraft,
+  toggleDraftTable,
+  draftReached,
+  runDraft,
+  finishDraft,
+  takenElsewhere
+} = useOntologyDraft({
+  tables,
+  catalogs,
+  everything,
+  subject,
+  subjects,
+  load,
+  fresh
+})
+
+watch(
+  subjects,
+  (list) => {
+    if (list.length && !list.some((item) => item.name === subject.value)) {
+      subject.value = list[0]!.name
+    }
+  },
+  { immediate: true }
+)
+watch(subject, () => {
+  selected.value = null
+})
+
+function groupBy<T>(items: T[] | undefined, key: (item: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>()
   for (const item of items || []) {
     const k = key(item)
     if (!map.has(k)) {
       map.set(k, [])
     }
-    map.get(k).push(item)
+    map.get(k)!.push(item)
   }
   return map
 }
 
-function toggleNode(key) {
+function toggleNode(key: string) {
   const next = new Set(openNodes.value)
   if (next.has(key)) {
     next.delete(key)
@@ -208,36 +239,43 @@ function toggleNode(key) {
 const tree = computed(() => {
   const s = snapshot.value
   const q = query.value.trim().toLowerCase()
-  const hit = (item) => !q
-    || item.name.toLowerCase().includes(q)
-    || (item.labelZh || '').toLowerCase().includes(q)
-    || (item.aliases || []).some((a) => a.toLowerCase().includes(q))
-    || (item.value != null && String(item.value).toLowerCase() === q)
+  const hit = (item: OntologyEntity) =>
+    !q ||
+    item.name.toLowerCase().includes(q) ||
+    (item.labelZh || '').toLowerCase().includes(q) ||
+    (item.aliases || []).some((a) => a.toLowerCase().includes(q)) ||
+    (item.value != null && String(item.value).toLowerCase() === q)
   const conceptSet = new Set(s.concepts.map((c) => c.name))
-  const attrsOf = groupBy(s.attributes, (a) => a.domain)
-  const codesOf = groupBy(s.codes, (c) => c.codeList)
-  const outOf = groupBy(s.relations, (r) => r.domain)
-  const inOf = groupBy(s.relations, (r) => r.range)
-  const definedOf = groupBy(s.definedConcepts, (d) => d.base)
-  const childrenOf = groupBy(s.concepts.filter((c) => c.parent && conceptSet.has(c.parent)), (c) => c.parent)
-  const codesFor = (attribute) => (attribute.codeList ? codesOf.get(attribute.codeList) || [] : [])
-  const isOpen = (key) => !!q || openNodes.value.has(key)
+  const attrsOf = groupBy(s.attributes, (a) => a.domain || '')
+  const codesOf = groupBy(s.codes, (c) => c.codeList || '')
+  const outOf = groupBy(s.relations, (r) => r.domain || '')
+  const inOf = groupBy(s.relations, (r) => r.range || '')
+  const definedOf = groupBy(s.definedConcepts, (d) => d.base || '')
+  const childrenOf = groupBy(
+    s.concepts.filter((c) => c.parent && conceptSet.has(c.parent)),
+    (c) => c.parent || ''
+  )
+  const codesFor = (attribute: OntologyEntity) => (attribute.codeList ? codesOf.get(attribute.codeList) || [] : [])
+  const isOpen = (key: string) => !!q || openNodes.value.has(key)
 
-  const memo = new Map()
-  const conceptHit = (concept) => {
+  const memo = new Map<string, boolean>()
+  const conceptHit = (concept: OntologyEntity): boolean => {
     if (!memo.has(concept.name)) {
       memo.set(concept.name, false)
-      memo.set(concept.name, hit(concept)
-        || (attrsOf.get(concept.name) || []).some((a) => hit(a) || codesFor(a).some(hit))
-        || (outOf.get(concept.name) || []).some(hit)
-        || (definedOf.get(concept.name) || []).some(hit)
-        || (childrenOf.get(concept.name) || []).some(conceptHit))
+      memo.set(
+        concept.name,
+        hit(concept) ||
+          (attrsOf.get(concept.name) || []).some((a) => hit(a) || codesFor(a).some(hit)) ||
+          (outOf.get(concept.name) || []).some(hit) ||
+          (definedOf.get(concept.name) || []).some(hit) ||
+          (childrenOf.get(concept.name) || []).some(conceptHit)
+      )
     }
-    return memo.get(concept.name)
+    return memo.get(concept.name)!
   }
 
-  const rows = []
-  const visit = (concept, depth) => {
+  const rows: TreeRow[] = []
+  const visit = (concept: OntologyEntity, depth: number) => {
     if (q && !conceptHit(concept)) {
       return
     }
@@ -256,16 +294,30 @@ const tree = computed(() => {
     const all = !q || hit(concept)
     const shownAttrs = all ? attrs : attrs.filter((a) => hit(a) || codesFor(a).some(hit))
     if (!q || shownAttrs.length) {
-      rows.push({ type: 'section', key: `${key}:attrs`, depth: depth + 1, label: '属性', count: attrs.length,
-        add: { kind: 'attribute', preset: { domain: concept.name } } })
+      rows.push({
+        type: 'section',
+        key: `${key}:attrs`,
+        depth: depth + 1,
+        label: '属性',
+        count: attrs.length,
+        add: { kind: 'attribute', preset: { domain: concept.name } }
+      })
     }
     for (const attribute of shownAttrs) {
       const codes = codesFor(attribute)
       const akey = `a:${attribute.name}`
       const aOpen = codes.length > 0 && (openNodes.value.has(akey) || (!!q && codes.some(hit) && !hit(attribute)))
-      rows.push({ type: 'item', kind: 'attribute', key: akey, depth: depth + 2, item: attribute,
-        toggle: codes.length > 0, open: aOpen, count: codes.length,
-        add: attribute.codeList ? { kind: 'code', preset: { codeList: attribute.codeList } } : null })
+      rows.push({
+        type: 'item',
+        kind: 'attribute',
+        key: akey,
+        depth: depth + 2,
+        item: attribute,
+        toggle: codes.length > 0,
+        open: aOpen,
+        count: codes.length,
+        add: attribute.codeList ? { kind: 'code', preset: { codeList: attribute.codeList } } : null
+      })
       if (aOpen) {
         const shownCodes = all || hit(attribute) ? codes : codes.filter(hit)
         for (const code of shownCodes) {
@@ -275,23 +327,41 @@ const tree = computed(() => {
     }
     const shownRelations = all ? relations : relations.filter(({ r }) => hit(r))
     if (!q || shownRelations.length) {
-      rows.push({ type: 'section', key: `${key}:rels`, depth: depth + 1, label: '关系', count: relations.length,
-        add: { kind: 'relation', preset: { domain: concept.name } } })
+      rows.push({
+        type: 'section',
+        key: `${key}:rels`,
+        depth: depth + 1,
+        label: '关系',
+        count: relations.length,
+        add: { kind: 'relation', preset: { domain: concept.name } }
+      })
     }
     for (const { r, out } of shownRelations) {
       rows.push({ type: 'item', kind: 'relation', key: `r:${concept.name}:${r.name}`, depth: depth + 2, item: r, out })
     }
     const shownDefined = all ? defined : defined.filter(hit)
     if (shownDefined.length) {
-      rows.push({ type: 'section', key: `${key}:defs`, depth: depth + 1, label: '派生概念', count: defined.length,
-        add: { kind: 'defined', preset: { base: concept.name } } })
+      rows.push({
+        type: 'section',
+        key: `${key}:defs`,
+        depth: depth + 1,
+        label: '派生概念',
+        count: defined.length,
+        add: { kind: 'defined', preset: { base: concept.name } }
+      })
       for (const item of shownDefined) {
         rows.push({ type: 'item', kind: 'defined', key: `d:${item.name}`, depth: depth + 2, item })
       }
     }
     if (children.length) {
-      rows.push({ type: 'section', key: `${key}:kids`, depth: depth + 1, label: '子概念', count: children.length,
-        add: { kind: 'concept', preset: { parent: concept.name } } })
+      rows.push({
+        type: 'section',
+        key: `${key}:kids`,
+        depth: depth + 1,
+        label: '子概念',
+        count: children.length,
+        add: { kind: 'concept', preset: { parent: concept.name } }
+      })
       for (const child of children) {
         visit(child, depth + 2)
       }
@@ -299,15 +369,26 @@ const tree = computed(() => {
   }
   s.concepts.filter((c) => !c.parent || !conceptSet.has(c.parent)).forEach((c) => visit(c, 0))
 
-  const ownedLists = new Set(s.attributes.filter((a) => conceptSet.has(a.domain) && a.codeList).map((a) => a.codeList))
-  const orphans = [
-    ...s.attributes.filter((a) => !conceptSet.has(a.domain)).map((item) => ({ kind: 'attribute', item })),
-    ...s.relations.filter((r) => !conceptSet.has(r.domain) && !conceptSet.has(r.range)).map((item) => ({ kind: 'relation', item, out: true })),
-    ...s.codes.filter((c) => !ownedLists.has(c.codeList)).map((item) => ({ kind: 'code', item })),
-    ...s.definedConcepts.filter((d) => !conceptSet.has(d.base)).map((item) => ({ kind: 'defined', item }))
+  const ownedLists = new Set(
+    s.attributes.filter((a) => conceptSet.has(a.domain || '') && a.codeList).map((a) => a.codeList as string)
+  )
+  const orphans: Array<{ kind: KindKey; item: OntologyEntity; out?: boolean }> = [
+    ...s.attributes.filter((a) => !conceptSet.has(a.domain || '')).map((item) => ({ kind: 'attribute' as const, item })),
+    ...s.relations
+      .filter((r) => !conceptSet.has(r.domain || '') && !conceptSet.has(r.range || ''))
+      .map((item) => ({ kind: 'relation' as const, item, out: true })),
+    ...s.codes.filter((c) => !ownedLists.has(c.codeList || '')).map((item) => ({ kind: 'code' as const, item })),
+    ...s.definedConcepts.filter((d) => !conceptSet.has(d.base || '')).map((item) => ({ kind: 'defined' as const, item }))
   ].filter(({ item }) => hit(item))
   if (orphans.length) {
-    rows.push({ type: 'section', key: 'orphans', depth: 0, label: '未归属（所属概念已不存在）', count: orphans.length, warn: true })
+    rows.push({
+      type: 'section',
+      key: 'orphans',
+      depth: 0,
+      label: '未归属（所属概念已不存在）',
+      count: orphans.length,
+      warn: true
+    })
     for (const { kind, item, out } of orphans) {
       rows.push({ type: 'item', kind, key: `o:${kind}:${item.name}`, depth: 1, item, out })
     }
@@ -315,43 +396,59 @@ const tree = computed(() => {
   return rows
 })
 
-const KIND_TAG = { concept: '概念', attribute: '属性', code: '码值', relation: '关系', defined: '派生' }
+const KIND_TAG: Record<string, string> = {
+  concept: '概念',
+  attribute: '属性',
+  code: '码值',
+  relation: '关系',
+  defined: '派生'
+}
 
-function rowSub(row) {
+function rowSub(row: TreeRow) {
   const item = row.item
+  if (!item) {
+    return ''
+  }
   switch (row.kind) {
-    case 'concept': return item.table || '未映射表'
-    case 'attribute': return [item.column || '未映射列', item.datatype, item.identifier ? '主键' : ''].filter(Boolean).join('  ')
-    case 'code': return `取值 ${item.value}`
+    case 'concept':
+      return item.table || '未映射表'
+    case 'attribute':
+      return [item.column || '未映射列', item.datatype, item.identifier ? '主键' : ''].filter(Boolean).join('  ')
+    case 'code':
+      return `取值 ${item.value}`
     case 'relation': {
       const other = row.out ? item.range : item.domain
       const label = snapshot.value.concepts.find((c) => c.name === other)?.labelZh || other || '?'
       const join = item.joinFrom && item.joinTo ? `  ${item.joinFrom} = ${item.joinTo}` : ''
       return `${row.out ? '→' : '←'} ${label}${join}`
     }
-    default: return (item.conditions || []).map((c) => `${c.attribute} ${c.operator} ${c.value}`).join(' 且 ') || item.definitionText || ''
+    default:
+      return (
+        (item.conditions || []).map((c) => `${c.attribute} ${c.operator} ${c.value}`).join(' 且 ') ||
+        item.definitionText ||
+        ''
+      )
   }
 }
 
-function openRow(row) {
-  open(KINDS.find((kind) => kind.key === row.kind), row.item)
-}
-
-function kindOf(name) {
-  return KINDS.find((kind) => snapshot.value[kind.list].some((item) => item.name === name))
+function openRow(row: TreeRow) {
+  const kind = KINDS.find((k) => k.key === row.kind)
+  if (kind && row.item) {
+    open(kind, row.item)
+  }
 }
 
 /** 选中实体时把它在树里的上级都展开。 */
-function revealInTree(kindKey, item) {
+function revealInTree(kindKey: string, item: OntologyEntity) {
   const s = snapshot.value
   const next = new Set(openNodes.value)
-  const addConcept = (name) => {
+  const addConcept = (name?: string) => {
     let current = s.concepts.find((c) => c.name === name)
-    const seen = new Set()
+    const seen = new Set<string>()
     while (current && !seen.has(current.name)) {
       seen.add(current.name)
       next.add(`c:${current.name}`)
-      current = s.concepts.find((c) => c.name === current.parent)
+      current = s.concepts.find((c) => c.name === current!.parent)
     }
   }
   if (kindKey === 'concept') {
@@ -371,7 +468,6 @@ function revealInTree(kindKey, item) {
   }
   openNodes.value = next
 }
-const fields = computed(() => (selected.value ? [...COMMON, ...FIELDS[selected.value.kind]] : []))
 
 watch(llmRevision, refreshLlm)
 onActivated(async () => {
@@ -396,236 +492,9 @@ async function loadSources() {
   }
 }
 
-async function load() {
-  try {
-    everything.value = await getOntology()
-    error.value = ''
-  } catch (e) {
-    error.value = e.message
-  }
-}
-
-function blank(kind) {
-  const base = { name: '', labelZh: '', labelEn: '', aliases: [], comment: '' }
-  const extra = {
-    concept: { subject: '', parent: '', table: '', timeColumn: '', largeTable: false },
-    attribute: { domain: '', datatype: 'string', column: '', unit: '', identifier: false, codeList: '' },
-    relation: { domain: '', range: '', joinFrom: '', joinTo: '', inverse: '', transitive: false, functional: false },
-    code: { codeList: '', value: '' },
-    defined: { base: '', conditions: [], definitionText: '' }
-  }
-  return { ...base, ...extra[kind] }
-}
-
-function fill(values) {
-  for (const key of Object.keys(form)) {
-    delete form[key]
-  }
-  Object.assign(form, JSON.parse(JSON.stringify(values)))
-  form.aliasText = (form.aliases || []).join('，')
-  message.value = ''
-  error.value = ''
-}
-
-function open(kind, item) {
-  selected.value = { kind: kind.key, label: kind.label }
-  isNew.value = false
-  fill({ ...blank(kind.key), ...item })
-}
-
-function create(kind, preset = {}) {
-  selected.value = { kind: kind.key, label: kind.label }
-  isNew.value = true
-  fill({ ...blank(kind.key), ...(kind.key === 'concept' ? { subject: subject.value } : {}), ...preset })
-}
-
-function createKind(key, preset) {
-  create(KINDS.find((kind) => kind.key === key), preset)
-}
-
-function options(field) {
-  if (field.options === 'datatypes') {
-    return DATATYPES
-  }
-  if (field.options === 'codeLists') {
-    const lists = (snapshot.value?.attributes || []).map((attribute) => attribute.codeList).filter(Boolean)
-    return [...new Set(lists)].sort()
-  }
-  return conceptNames.value.filter((name) => name !== form.name)
-}
-
-function columnsFor(field) {
-  const table = field.of === 'table'
-    ? form.table
-    : snapshot.value.concepts.find((c) => c.name === form[field.of])?.table
-  return table ? columnsByTable.value[table.toLowerCase()] || [] : []
-}
-
-function emptyToNull(value) {
-  return typeof value === 'string' && !value.trim() ? null : value
-}
-
-async function save() {
-  saving.value = true
-  message.value = ''
-  error.value = ''
-  try {
-    const body = {}
-    for (const field of fields.value) {
-      body[field.key] = field.type === 'list'
-        ? form.aliasText.split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
-        : emptyToNull(form[field.key])
-    }
-    body.comment = emptyToNull(form.comment)
-    if (selected.value.kind === 'defined') {
-      body.conditions = (form.conditions || []).filter((c) => c.attribute && c.value !== '')
-    }
-    const kind = selected.value
-    const name = form.name
-    everything.value = await saveEntity(kind.kind, name, body)
-    if (kind.kind === 'concept' && (body.subject || '') !== subject.value) {
-      subject.value = body.subject || ''
-      await nextTick()
-      onPick({ kind: 'concept', name })
-    }
-    isNew.value = false
-    message.value = '已保存'
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    saving.value = false
-  }
-}
-
-function removeNamed(name) {
-  const kind = kindOf(name)
-  const notes = {
-    concept: '它的属性、码值、关系和派生概念会一起删除。',
-    attribute: '它独有的码值会一起删除。'
-  }
-  pendingDelete.value = { name, note: notes[kind?.key] || '' }
-}
-
-async function confirmDelete() {
-  const name = pendingDelete.value?.name
-  if (!name) {
-    return
-  }
-  pendingDelete.value = null
-  try {
-    everything.value = await deleteEntity(name)
-    fresh.value = fresh.value.filter((item) => item !== name)
-    if (form.name === name) {
-      selected.value = null
-    }
-    error.value = ''
-  } catch (e) {
-    error.value = e.message
-  }
-}
-
-function remove() {
-  return removeNamed(form.name)
-}
-
-function openDraft() {
-  showDraft.value = true
-  if (!draftSubject.value.trim()) {
-    draftSubject.value = subject.value
-  }
-  draftResult.value = null
-  draftError.value = ''
-  draftLog.value = []
-  draftStep.value = ''
-  draftDetail.value = ''
-}
-
-function toggleDraftTable(name) {
-  const index = draftTables.value.indexOf(name)
-  if (index >= 0) {
-    draftTables.value.splice(index, 1)
-  } else {
-    draftTables.value.push(name)
-  }
-}
-
-function entityNames(data) {
-  return new Set([
-    ...(data.concepts || []).map((item) => item.name),
-    ...(data.attributes || []).map((item) => item.name),
-    ...(data.relations || []).map((item) => item.name),
-    ...(data.codes || []).map((item) => item.name),
-    ...(data.definedConcepts || []).map((item) => item.name)
-  ])
-}
-
-function draftReached(key) {
-  if (draftStep.value === 'done') {
-    return true
-  }
-  const current = DRAFT_STEPS.findIndex((step) => step.key === draftStep.value)
-  const target = DRAFT_STEPS.findIndex((step) => step.key === key)
-  return current >= 0 && target >= 0 && current >= target
-}
-
-async function runDraft() {
-  drafting.value = true
-  draftStep.value = 'sample'
-  draftDetail.value = '读取列和样例'
-  draftError.value = ''
-  draftResult.value = null
-  draftLog.value = []
-  draftStartedAt.value = Date.now()
-  draftClock.value = draftStartedAt.value
-  window.clearInterval(draftClockTimer)
-  draftClockTimer = window.setInterval(() => {
-    draftClock.value = Date.now()
-  }, 1000)
-  const before = entityNames(everything.value)
-  const target = draftSubject.value.trim()
-  let failed = ''
-  try {
-    await draftOntology({ tables: draftTables.value, instructions: draftNote.value || null, subject: target }, (event, data) => {
-      if (event === 'phase') {
-        draftStep.value = data.phase
-        draftDetail.value = data.message
-        draftLog.value.push({
-          status: data.status || 'start',
-          text: data.message,
-          notes: data.notes || []
-        })
-      } else if (event === 'result') {
-        draftResult.value = data
-        draftStep.value = 'done'
-        draftDetail.value = ''
-      } else if (event === 'error') {
-        failed = data.message || '起草失败'
-      }
-    })
-    if (failed) {
-      throw new Error(failed)
-    }
-    await load()
-    subject.value = target
-    fresh.value = [...entityNames(everything.value)].filter((name) => !before.has(name))
-  } catch (e) {
-    await load()
-    if (subjects.value.some((item) => item.name === target)) {
-      subject.value = target
-    }
-    draftError.value = e.message
-    if (draftStep.value !== 'done') {
-      draftStep.value = ''
-    }
-  } finally {
-    window.clearInterval(draftClockTimer)
-    drafting.value = false
-  }
-}
-
-function onPick(target) {
+function onPick(target: { kind: string; name: string }) {
   const kind = KINDS.find((item) => item.key === target.kind)
-  const entity = kind && snapshot.value[kind.list].find((item) => item.name === target.name)
+  const entity = kind && (snapshot.value[kind.list] as OntologyEntity[]).find((item) => item.name === target.name)
   if (kind && entity) {
     open(kind, entity)
   }
@@ -633,23 +502,22 @@ function onPick(target) {
 
 watch(selected, () => {
   if (selected.value && !isNew.value) {
-    const kind = KINDS.find((item) => item.key === selected.value.kind)
-    const entity = kind && snapshot.value[kind.list].find((item) => item.name === form.name)
-    if (entity) {
+    const kind = KINDS.find((item) => item.key === selected.value!.kind)
+    const entity = kind && (snapshot.value[kind.list] as OntologyEntity[]).find((item) => item.name === form.name)
+    if (kind && entity) {
       revealInTree(kind.key, entity)
     }
   }
 })
-
-function finishDraft() {
-  showDraft.value = false
-}
 
 function openRename() {
   renaming.value = { from: subject.value, to: subject.value, error: '' }
 }
 
 async function confirmRename() {
+  if (!renaming.value) {
+    return
+  }
   const { from, to } = renaming.value
   const target = to.trim()
   if (!target || target === from) {
@@ -661,7 +529,9 @@ async function confirmRename() {
     subject.value = target
     renaming.value = null
   } catch (e) {
-    renaming.value.error = e.message
+    if (renaming.value) {
+      renaming.value.error = errMessage(e)
+    }
   }
 }
 
@@ -669,7 +539,55 @@ async function showTurtle() {
   try {
     turtle.value = await getOntologyTurtle()
   } catch (e) {
-    error.value = e.message
+    error.value = errMessage(e)
+  }
+}
+
+async function openVersions() {
+  versionsOpen.value = true
+  versionsNote.value = ''
+  await refreshVersions()
+}
+
+async function refreshVersions() {
+  versionsBusy.value = true
+  try {
+    versions.value = await listOntologyVersions()
+  } catch (e) {
+    error.value = errMessage(e)
+  } finally {
+    versionsBusy.value = false
+  }
+}
+
+async function snapshotVersion() {
+  versionsBusy.value = true
+  versionsNote.value = ''
+  try {
+    const created = await createOntologyVersion('manual')
+    versionsNote.value = `已保存 ${created.id}`
+    await refreshVersions()
+  } catch (e) {
+    versionsNote.value = errMessage(e)
+  } finally {
+    versionsBusy.value = false
+  }
+}
+
+async function restoreVersion(id: string) {
+  if (!window.confirm(`确认回滚到版本 ${id}？当前本体将被覆盖。`)) {
+    return
+  }
+  versionsBusy.value = true
+  versionsNote.value = ''
+  try {
+    everything.value = await restoreOntologyVersion(id)
+    versionsNote.value = `已回滚到 ${id}`
+    await refreshVersions()
+  } catch (e) {
+    versionsNote.value = errMessage(e)
+  } finally {
+    versionsBusy.value = false
   }
 }
 
@@ -681,17 +599,25 @@ function downloadTurtle() {
   link.click()
   URL.revokeObjectURL(url)
 }
+
+function ensureConditions() {
+  if (!form.conditions) {
+    form.conditions = []
+  }
+  return form.conditions
+}
 </script>
 
 <template>
-  <section class="onto">
+  <section class="onto" aria-labelledby="onto-title">
     <header class="module-head">
-      <h1>本体建模</h1>
+      <h1 id="onto-title">本体建模</h1>
       <div class="head-side">
         <span class="head-note">
           <template v-if="subjects.length">{{ subject || UNASSIGNED }}：</template>
           概念 {{ snapshot.concepts.length }}，属性 {{ snapshot.attributes.length }}，码值 {{ snapshot.codes.length }}，关系 {{ snapshot.relations.length }}
         </span>
+        <button type="button" @click="openVersions">版本</button>
         <button type="button" @click="showTurtle">导出 Turtle</button>
         <button v-if="llm && (!llm.configured || !llm.apiKeySet)" type="button" @click="openLlmSettings">配置大模型</button>
         <button v-else class="primary" type="button" @click="openDraft">大模型起草</button>
@@ -729,7 +655,7 @@ function downloadTurtle() {
           v-for="row in tree"
           :key="row.key"
           class="tree-row"
-          :class="[row.type, row.kind, { active: row.type === 'item' && selected && !isNew && form.name === row.item.name, warn: row.warn }]"
+          :class="[row.type, row.kind, { active: row.type === 'item' && selected && !isNew && form.name === row.item?.name, warn: row.warn }]"
           :style="{ paddingLeft: `${6 + row.depth * 14}px` }"
         >
           <template v-if="row.type === 'section'">
@@ -755,8 +681,9 @@ function downloadTurtle() {
             <span v-else class="caret-gap" />
             <button class="node-btn" type="button" @click="openRow(row)">
               <span class="node-line">
-                <i class="tag" :class="row.kind">{{ KIND_TAG[row.kind] }}</i>
-                <span class="node-label">{{ row.kind === 'code' ? (row.item.labelZh || row.item.value) : (row.item.labelZh || row.item.name) }}</span>
+                <i class="tag" :class="row.kind">{{ row.kind ? KIND_TAG[row.kind] : '' }}</i>
+                <span class="node-label">{{ row.kind === 'code' ? (row.item?.labelZh || row.item?.value) : (row.item?.labelZh || row.item?.name) }}</span>
+                <em v-if="row.item?.certified" class="certified" title="已审定">审</em>
                 <em v-if="row.count" class="count">{{ row.count }}</em>
               </span>
               <small>{{ rowSub(row) }}</small>
@@ -768,7 +695,7 @@ function downloadTurtle() {
               :title="`新建${KIND_TAG[row.add.kind]}`"
               @click="createKind(row.add.kind, row.add.preset)"
             >＋</button>
-            <button class="icon sm danger ghost" type="button" title="删除" @click="removeNamed(row.item.name)">✕</button>
+            <button v-if="row.item" class="icon sm danger ghost" type="button" title="删除" @click="removeNamed(row.item.name)">✕</button>
           </template>
         </div>
       </div>
@@ -843,7 +770,7 @@ function downloadTurtle() {
           </label>
           <div v-else-if="field.type === 'conditions'" class="conditions">
             <span class="cond-label">{{ field.label }}</span>
-            <div v-for="(cond, cidx) in form.conditions" :key="cidx" class="cond">
+            <div v-for="(cond, cidx) in ensureConditions()" :key="cidx" class="cond">
               <select v-model="cond.attribute">
                 <option v-for="name in attributeNames" :key="name" :value="name">{{ name }}</option>
               </select>
@@ -851,9 +778,9 @@ function downloadTurtle() {
                 <option v-for="op in OPERATORS" :key="op" :value="op">{{ op }}</option>
               </select>
               <input v-model="cond.value" placeholder="值" />
-              <button class="icon sm" type="button" title="删除条件" @click="form.conditions.splice(cidx, 1)">✕</button>
+              <button class="icon sm" type="button" title="删除条件" @click="ensureConditions().splice(cidx, 1)">✕</button>
             </div>
-            <button class="link" type="button" @click="form.conditions.push({ attribute: attributeNames[0] || '', operator: '>=', value: '' })">＋ 添加条件</button>
+            <button class="link" type="button" @click="ensureConditions().push({ attribute: attributeNames[0] || '', operator: '>=', value: '' })">＋ 添加条件</button>
           </div>
         </template>
         <label>
@@ -864,7 +791,7 @@ function downloadTurtle() {
         <p v-if="error" class="err">{{ error }}</p>
         <div class="actions">
           <button v-if="!isNew" class="danger" type="button" @click="remove">删除</button>
-          <button type="button" @click="selected = null">关闭</button>
+          <button type="button" @click="closeEditor">关闭</button>
           <button class="primary" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button>
         </div>
     </form>
@@ -877,7 +804,13 @@ function downloadTurtle() {
     </div>
 
     <div v-if="pendingDelete" class="mask" @click.self="pendingDelete = null">
-      <div class="dialog confirm" role="alertdialog" aria-labelledby="delete-title">
+      <div
+        ref="deleteDialog"
+        class="dialog confirm"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-title"
+      >
         <h3 id="delete-title">删除 {{ pendingDelete.name }}？</h3>
         <p v-if="pendingDelete.note">{{ pendingDelete.note }}</p>
         <div class="actions">
@@ -888,8 +821,15 @@ function downloadTurtle() {
     </div>
 
     <div v-if="renaming" class="mask" @click.self="renaming = null">
-      <form class="dialog confirm" @submit.prevent="confirmRename">
-        <h3>重命名主题域</h3>
+      <form
+        ref="renameDialog"
+        class="dialog confirm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rename-title"
+        @submit.prevent="confirmRename"
+      >
+        <h3 id="rename-title">重命名主题域</h3>
         <label>
           新名字
           <input v-model="renaming.to" required />
@@ -903,66 +843,73 @@ function downloadTurtle() {
       </form>
     </div>
 
-    <div v-if="showDraft" class="mask" @click.self="!drafting && (showDraft = false)">
-      <div class="dialog draft">
-        <h3>大模型起草</h3>
-        <ol class="steps">
-          <li v-for="step in DRAFT_STEPS" :key="step.key" :class="{ on: draftReached(step.key) }">{{ step.label }}</li>
-        </ol>
-        <template v-if="!drafting && !draftLog.length">
-          <label>
-            主题域（必填）
-            <input v-model="draftSubject" list="onto-subjects" placeholder="选一个已有的主题域，或输入新名字，例如 安全日志" />
-          </label>
-          <p class="hint">本次勾选的表都归到这个主题域，起草时只会和这个主题域里已有的概念建立关系。</p>
-          <input v-model="draftQuery" type="search" placeholder="过滤表名" />
-          <div class="picker">
-            <label v-for="t in draftCandidates" :key="qualified(t)" class="check" :class="{ off: takenElsewhere(qualified(t)) }">
-              <input
-                type="checkbox"
-                :checked="draftTables.includes(qualified(t))"
-                :disabled="!!takenElsewhere(qualified(t)) && !draftTables.includes(qualified(t))"
-                @change="toggleDraftTable(qualified(t))"
-              />
-              {{ qualified(t) }} <em>{{ (t.columns || []).length }} 列</em>
-              <em v-if="takenElsewhere(qualified(t))" class="taken">已在{{ takenElsewhere(qualified(t)).subject ? `主题域 ${takenElsewhere(qualified(t)).subject}` : UNASSIGNED }}</em>
-            </label>
-            <p v-if="!draftCandidates.length" class="hint">没有可选的表，请先在左侧数据源中采集元数据。</p>
-          </div>
-          <p class="hint">已选 {{ draftTables.length }} 张：{{ draftTables.join('，') }}</p>
-          <label>
-            补充说明（可选，如业务背景、哪些列是码值）
-            <textarea v-model="draftNote" rows="3" />
-          </label>
-          <p class="hint">开始后会逐步列出每一段：读了哪些表、写入了几个概念和属性、哪一段被跳过。</p>
-        </template>
-        <p v-else class="hint">主题域 {{ draftSubject.trim() }}，已选 {{ draftTables.length }} 张：{{ draftTables.join('，') }}</p>
-        <ol v-if="draftLog.length" class="draft-log">
-          <li v-for="(line, index) in draftLog" :key="index" :class="line.status">
-            <span>{{ line.text }}</span>
-            <ul v-if="line.notes.length">
-              <li v-for="note in line.notes" :key="note">{{ note }}</li>
-            </ul>
+    <DraftDialog
+      :show="showDraft"
+      :drafting="drafting"
+      :draft-reached="draftReached"
+      :draft-subject="draftSubject"
+      :draft-query="draftQuery"
+      :draft-note="draftNote"
+      :draft-tables="draftTables"
+      :draft-candidates="draftCandidates"
+      :draft-log="draftLog"
+      :draft-error="draftError"
+      :draft-result="draftResult"
+      :draft-step="draftStep"
+      :draft-detail="draftDetail"
+      :draft-elapsed="draftElapsed"
+      :taken-elsewhere="takenElsewhere"
+      :unassigned-label="UNASSIGNED"
+      @close="showDraft = false"
+      @update:draft-subject="draftSubject = $event"
+      @update:draft-query="draftQuery = $event"
+      @update:draft-note="draftNote = $event"
+      @toggle-table="toggleDraftTable"
+      @reselect="openDraft"
+      @finish="finishDraft"
+      @run="runDraft"
+    />
+
+    <div v-if="versionsOpen" class="mask" @click.self="versionsOpen = false">
+      <div
+        ref="versionsDialog"
+        class="dialog preview"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="versions-title"
+      >
+        <h3 id="versions-title">本体版本</h3>
+        <p class="hint">起草前会自动打 checkpoint；也可手动快照或回滚。</p>
+        <p v-if="versionsNote" class="head-note">{{ versionsNote }}</p>
+        <div class="actions" style="margin-bottom: 10px">
+          <button type="button" :disabled="versionsBusy" @click="snapshotVersion">保存快照</button>
+          <button type="button" :disabled="versionsBusy" @click="refreshVersions">刷新</button>
+          <button class="primary" type="button" @click="versionsOpen = false">关闭</button>
+        </div>
+        <ul class="version-list">
+          <li v-if="!versions.length" class="hint">暂无版本</li>
+          <li v-for="item in versions" :key="item.id" class="version-row">
+            <div>
+              <strong>{{ item.id }}</strong>
+              <span class="hint">
+                {{ item.note || '' }} · 概念 {{ item.concepts ?? 0 }} / 属性 {{ item.attributes ?? 0 }} / 派生 {{ item.definedConcepts ?? 0 }}
+              </span>
+            </div>
+            <button type="button" :disabled="versionsBusy" @click="restoreVersion(item.id)">回滚</button>
           </li>
-        </ol>
-        <p v-if="draftError" class="err">{{ draftError }}</p>
-        <div v-if="draftResult" class="ok">
-          已写入：概念 {{ draftResult.concepts }}、属性 {{ draftResult.attributes }}、关系 {{ draftResult.relations }}、
-          码值 {{ draftResult.codes }}、派生概念 {{ draftResult.definedConcepts }}
-        </div>
-        <div class="actions">
-          <button v-if="!drafting && draftLog.length" type="button" @click="openDraft">重新选择表</button>
-          <button type="button" :disabled="drafting" @click="finishDraft">{{ draftStep === 'done' ? '在图中查看' : '关闭' }}</button>
-          <button class="primary" type="button" :disabled="drafting || !draftTables.length || !draftSubject.trim()" @click="runDraft">
-            {{ drafting ? `${draftDetail || '起草中…'} · ${draftElapsed}s` : '开始起草' }}
-          </button>
-        </div>
+        </ul>
       </div>
     </div>
 
     <div v-if="turtle" class="mask" @click.self="turtle = ''">
-      <div class="dialog preview">
-        <h3>本体 Turtle</h3>
+      <div
+        ref="turtleDialog"
+        class="dialog preview"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="turtle-title"
+      >
+        <h3 id="turtle-title">本体 Turtle</h3>
         <pre>{{ turtle }}</pre>
         <div class="actions">
           <button type="button" @click="downloadTurtle">下载 .ttl</button>
@@ -979,6 +926,32 @@ function downloadTurtle() {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+.version-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.version-row .hint {
+  display: block;
+  margin-top: 2px;
 }
 
 .onto-body {
@@ -1030,14 +1003,6 @@ function downloadTurtle() {
   margin-left: auto;
   color: var(--muted);
   font-size: 12px;
-}
-
-.picker .check.off {
-  color: var(--muted);
-}
-
-.picker .taken {
-  color: var(--warn);
 }
 
 .canvas {
@@ -1103,36 +1068,6 @@ function downloadTurtle() {
   font-size: 13px;
 }
 
-.steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.steps li {
-  padding: 3px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.steps li.on {
-  color: var(--text);
-  border-color: var(--accent);
-  background: var(--panel-2);
-}
-
-.entity {
-  min-height: 0;
-  overflow: auto;
-  padding: 16px;
-  border-left: 1px solid var(--line);
-}
-
 .list {
   display: flex;
   flex-direction: column;
@@ -1154,8 +1089,17 @@ function downloadTurtle() {
   padding: 0 12px;
 }
 
-.picker em,
 .section-label em,
+.certified {
+  flex: none;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-style: normal;
+  color: #1f6f4a;
+  background: #e6f4ec;
+}
 .count {
   font-style: normal;
   font-weight: 400;
@@ -1313,6 +1257,10 @@ function downloadTurtle() {
 }
 
 .entity {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1342,73 +1290,6 @@ function downloadTurtle() {
 
 .conditions .link {
   align-self: flex-start;
-}
-
-.draft {
-  width: min(680px, 100%);
-  max-height: 88vh;
-  overflow: auto;
-}
-
-.draft > * {
-  flex-shrink: 0;
-}
-
-.draft .hint {
-  margin: 0;
-}
-
-.picker {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: 120px;
-  max-height: 34vh;
-  overflow: auto;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
-.picker .check {
-  color: var(--text);
-  font-size: 13px;
-  gap: 8px;
-}
-
-.draft-log {
-  margin: 0;
-  padding: 8px 10px;
-  max-height: 42vh;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  list-style: none;
-  font-size: 13px;
-}
-
-.draft-log li {
-  padding: 4px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.draft-log li:last-child {
-  border-bottom: 0;
-}
-
-.draft-log li.start {
-  color: var(--text);
-}
-
-.draft-log li.done {
-  color: var(--muted);
-}
-
-.draft-log ul {
-  margin: 4px 0 0;
-  padding-left: 18px;
-  color: var(--warn);
-  font-size: 12px;
 }
 
 .warnings {

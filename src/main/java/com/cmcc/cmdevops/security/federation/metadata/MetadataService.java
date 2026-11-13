@@ -11,6 +11,8 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import com.cmcc.cmdevops.security.federation.catalog.CatalogRecord;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogRegistry;
 import com.cmcc.cmdevops.security.federation.catalog.KafkaTopicLister;
@@ -92,6 +94,9 @@ public class MetadataService {
         return groupRows(catalog, data, 0, 1, 2, 3);
     }
 
+    @SuppressFBWarnings(
+            value = "SQL_NONCONSTANT_STRING_PASSED_TO_EXECUTE",
+            justification = "Trino discovery SQL has no bind API here; catalog/schema/table are sanitized by quote()/escapeLiteral()")
     private List<TableSnapshot> collectFromInformationSchema(String catalog, String schema, String table) {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT table_schema, table_name, column_name, data_type FROM ")

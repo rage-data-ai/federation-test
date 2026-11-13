@@ -2,6 +2,7 @@ package com.cmcc.cmdevops.security.federation.ask;
 
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -45,9 +46,10 @@ public class AskService {
 
     static final String EXPLORER_PROMPT = """
             你是安全运营本体的检索助手，只负责把用户问题对应到本体实体，不写 SQL。
-            用工具 listConcepts、searchEntities、describeEntity、findPaths、listDefinedConcepts 探索本体，
+            用工具 listConcepts、searchEntities、describeEntity、findPaths、listDefinedConcepts、checkAnswerable 探索本体，
             找出回答问题需要的概念、属性、码值、关系和派生概念（用实体 name，区分大小写）。
-            有歧义时优先结合问题上下文消解；确实无法判断，或本体里没有问题需要的业务对象时，向用户澄清。
+            可先 checkAnswerable 看覆盖率；有歧义时优先结合问题上下文消解；
+            确实无法判断，或本体里没有问题需要的业务对象时，向用户澄清（说明能答什么、不能答什么）。
             最后只输出一个 JSON 对象，不要其它文字：
             {"entities": ["Alert", "alertLevel"], "clarify": null}
             或
@@ -62,12 +64,16 @@ public class AskService {
             2. 从业务上下文中找到对应的概念、属性、码值、派生概念和关系路径。
             3. 只用元数据 tables 中列出的表和列；表名必须写 catalog.schema.table；
                列名含大写字母时用双引号，如 "assetId"。
-            4. 码值过滤用码值的 value，不用中文名；派生概念有 sqlCondition 时直接使用，只有 definitionText 时按其文字定义实现。
+            4. 码值过滤必须用码值的 value，禁止把中文名写进 WHERE；派生概念有 sqlCondition 时必须直接复用该条件，
+               不要自行改写阈值。派生概念有 sqlExpression 时必须作为 SELECT 度量表达式复用（SQL attributes），
+               不要另写不等价的聚合。只有 definitionText 时才按其文字定义实现。
+               多个口径候选时优先使用 certified=true 的派生概念/概念。
             5. 跨概念用关系路径给出的 join 条件，不要自己猜 join 列。
             6. 元数据里 timeColumn 不为空的表是大表，WHERE 中必须对该列做范围过滤。
+            7. 写入等值过滤前，对有码表的列调用 validateFilterValues；结果为空时调用 scanFilterLiterals 检查字面量。
 
             口径规则：
-            - 问题缺少必要口径（例如大表查询没有给时间范围、"高危"等阈值在本体中没有定义、有多种合理理解）时，
+            - 问题缺少必要口径（例如大表查询没有给时间范围、"高危"等短语在本体中没有定义、有多种合理理解）时，
               不要自己编门槛，直接用 clarify 询问用户，并给出 2~4 个选项。
             - 使用了本体定义的口径记 source=ontology；你自己推断的（如排序方式、取前几名）记 source=inferred；
               用户在对话中明确说的记 source=user。
@@ -76,6 +82,7 @@ public class AskService {
             - 用 runSql 执行，被拒绝或失败时根据原因修正后重试。
             - Trino 报表或列不存在时可调用一次 recoverMetadata；业务上下文缺概念时可调用一次 recoverOntology。
             - 结果为空、全 0 等退化形态时，最多追加 1 次 diagnostic 查询排查原因，然后作答。
+            - 若本体覆盖明显不足（缺少关键业务对象），用 clarify 说明能答什么、不能答什么，而不是编造 SQL。
 
             最后只输出一个 JSON 对象，不要其它文字：
             {"status": "answered", "answer": "结论（中文，引用关键数字）", "sql": "最终回答所依据的 SQL",
@@ -149,6 +156,22 @@ public class AskService {
                         List<String> options) {
     }
 
+    /** 公开的廉价可回答性预检，供 API / 控制台在发问前调用。 */
+    public AnswerabilityChecker.Answerability answerability(String question) {
+        BusinessContext context = ontologyTools.businessContext(question, Set.of());
+        AnswerabilityChecker.Answerability result =
+                AnswerabilityChecker.check(context, ontologyTools.listConcepts(), config.getMinConfidence());
+        List<String> uncovered = AnswerabilityChecker.uncoveredPhrases(question, context);
+        if (!uncovered.isEmpty() && !result.answerable()) {
+            List<String> gaps = new ArrayList<>(result.gaps());
+            gaps.add("可能未覆盖：" + String.join("、", uncovered));
+            return new AnswerabilityChecker.Answerability(
+                    result.answerable(), result.coverage(), result.status(),
+                    result.matchedTerms(), gaps, result.suggestion());
+        }
+        return result;
+    }
+
     public void ask(AskRequest request, AskListener listener) {
         if (request == null || request.question() == null || request.question().isBlank()) {
             throw new IllegalArgumentException("问题不能为空");
@@ -159,6 +182,10 @@ public class AskService {
 
         listener.emit("stage", stage("ontology", "Ontology 智能体：检索业务语义"));
         BusinessContext context = ontologyTools.businessContext(userText(request), Set.of());
+        AnswerabilityChecker.Answerability answerability =
+                AnswerabilityChecker.check(context, ontologyTools.listConcepts(), config.getMinConfidence());
+        listener.emit("answerability", answerability);
+
         boolean escalated = false;
         if (!OntologyTools.STATUS_OK.equals(context.status()) || context.confidence() < config.getMinConfidence()) {
             listener.emit("ontology", Map.of("mode", "deterministic", "context", context));
@@ -170,10 +197,15 @@ public class AskService {
             }
             context = ontologyTools.contextOf(new LinkedHashSet<>(reply.entities() == null ? List.of() : reply.entities()));
             escalated = true;
+            answerability = AnswerabilityChecker.check(context, ontologyTools.listConcepts(), config.getMinConfidence());
+            listener.emit("answerability", answerability);
         }
         listener.emit("ontology", Map.of("mode", escalated ? "explored" : "deterministic", "context", context));
         if (context.concepts().isEmpty()) {
-            listener.emit("clarify", new Clarify("没有在本体中找到问题涉及的业务对象，你想分析的是哪一类？",
+            String clarifyQuestion = answerability.suggestion() == null || answerability.suggestion().isBlank()
+                    ? "没有在本体中找到问题涉及的业务对象，你想分析的是哪一类？"
+                    : "本体覆盖不足：" + answerability.suggestion();
+            listener.emit("clarify", new Clarify(clarifyQuestion,
                     ontologyTools.listConcepts().stream().map(ConceptSummary::labelZh).limit(6).toList()));
             return;
         }
@@ -198,7 +230,7 @@ public class AskService {
                 .chatModel(llm.model())
                 .tools(session)
                 .systemMessageProvider(memoryId -> INSIGHT_PROMPT)
-                .maxSequentialToolsInvocations(InsightSession.MAX_SQL_ATTEMPTS + 4)
+                .maxSequentialToolsInvocations(InsightSession.MAX_SQL_ATTEMPTS + 8)
                 .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.sendExceptionMessageToLlm())
                 .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
                 .build();
@@ -213,12 +245,55 @@ public class AskService {
         answer.put("answer", reply.answer());
         answer.put("sql", reply.sql());
         answer.put("caliber", reply.caliber() == null ? List.of() : reply.caliber());
+        answer.put("steps", provenanceSteps(context, report, session, reply));
         if (result != null) {
             answer.put("columns", result.columns());
             answer.put("rows", session.preview(result.rows()));
             answer.put("rowCount", result.rowCount());
         }
         listener.emit("answer", answer);
+    }
+
+    /** 回答步骤溯源（对齐 Auto Ontology Chat steps：Resolved / Joined / Validated）。 */
+    static List<String> provenanceSteps(
+            BusinessContext context,
+            MetadataReport report,
+            InsightSession session,
+            AnalystReply reply) {
+        List<String> steps = new ArrayList<>();
+        if (!context.matches().isEmpty()) {
+            steps.add("解析术语：" + context.matches().stream()
+                    .map(hit -> hit.matchedText() + "→" + hit.name())
+                    .distinct()
+                    .collect(Collectors.joining("，")));
+        }
+        if (!context.definedConcepts().isEmpty()) {
+            steps.add("复用派生口径：" + context.definedConcepts().stream()
+                    .map(d -> {
+                        String label = d.labelZh() == null || d.labelZh().isBlank() ? d.name() : d.labelZh();
+                        if (d.sqlExpression() != null && !d.sqlExpression().isBlank()) {
+                            return label + " expr=[" + d.sqlExpression() + "]";
+                        }
+                        return d.sqlCondition() == null || d.sqlCondition().isBlank()
+                                ? label
+                                : label + " [" + d.sqlCondition() + "]";
+                    })
+                    .collect(Collectors.joining("；")));
+        }
+        if (!context.paths().isEmpty()) {
+            steps.add("关联路径：" + context.paths().stream()
+                    .map(p -> p.from() + "→" + p.to() + "（" + p.steps().size() + " 跳）")
+                    .collect(Collectors.joining("，")));
+        }
+        steps.add("元数据核对：" + report.tables().size() + " 张表"
+                + (report.issues().isEmpty() ? "" : "，问题 " + report.issues().size() + " 项"));
+        if (session.filterValidations() > 0) {
+            steps.add("过滤值校验：" + session.filterValidations() + " 次");
+        }
+        if (reply.sql() != null && !reply.sql().isBlank()) {
+            steps.add("执行 SQL 并汇总结果");
+        }
+        return steps;
     }
 
     private static QueryResponse execute(QueryService queryService, String sql) {

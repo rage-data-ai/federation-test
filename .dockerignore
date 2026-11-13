@@ -1,0 +1,9 @@
+.git
+.github
+web/node_modules
+web/dist
+target
+data
+*.docx
+.env
+**/__pycache__

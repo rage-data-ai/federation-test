@@ -24,7 +24,7 @@
   --panel-2: #f3f4f6;
   --line: #e5e7eb;
   --text: #1f2328;
-  --muted: #6b7280;
+  --muted: #595f6b;
   --accent: #2563eb;
   --accent-2: #1d4ed8;
   --ok: #1a7f37;
@@ -57,9 +57,38 @@ input {
 button:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
-input:focus-visible {
+input:focus-visible,
+a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -40px;
+  z-index: 1000;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 8px;
 }
 
 /* ---------- 通用：结果表、控件、弹窗（各页面共用） ---------- */
