@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, provide, reactive, ref, type Component } from 'vue'
 import { authLogout, authMe, llmConfig, llmStatus, saveLlm, testLlm } from './api'
+import { useFocusTrap } from './composables/useFocusTrap'
 import {
   beginOidcLogin,
   beginOidcLogout,
@@ -37,7 +38,11 @@ const active = ref(MODULES.some((item) => item.key === saved) ? (saved as string
 const current = computed(() => MODULES.find((item) => item.key === active.value)?.component ?? DatasourceView)
 
 const showLlm = ref(false)
+const llmDialog = ref<HTMLElement | null>(null)
 const llm = ref<LlmStatus | LlmConfig | null>(null)
+useFocusTrap(showLlm, llmDialog, () => {
+  showLlm.value = false
+})
 const llmRevision = ref(0)
 const llmForm = reactive({ protocol: 'openai', baseUrl: '', apiKey: '', model: '' })
 const llmMessage = ref('')
@@ -47,10 +52,14 @@ provide('openLlmSettings', openLlm)
 provide('llmRevision', llmRevision)
 
 const showAuth = ref(false)
+const authDialog = ref<HTMLElement | null>(null)
 const authForm = reactive({ token: getAccessToken() })
 const authUser = ref<AuthMe | null>(null)
 const authError = ref('')
 const authBusy = ref(false)
+useFocusTrap(showAuth, authDialog, () => {
+  showAuth.value = false
+})
 const oidcEnabled = !!readOidcConfig()
 const authLabel = computed(() => {
   if (authUser.value?.name) {
@@ -298,7 +307,14 @@ function cycleTheme() {
     </main>
 
     <div v-if="showAuth" class="mask" @click.self="showAuth = false">
-      <form class="dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title" @submit.prevent="saveAuthToken">
+      <form
+        ref="authDialog"
+        class="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-title"
+        @submit.prevent="saveAuthToken"
+      >
         <h3 id="auth-title">访问身份</h3>
         <p v-if="authUser" class="hint">
           当前用户 {{ authUser.name }} · 角色 {{ (authUser.roles || []).join(', ') || '无' }}
@@ -324,7 +340,14 @@ function cycleTheme() {
     </div>
 
     <div v-if="showLlm" class="mask" @click.self="showLlm = false">
-      <form class="dialog" role="dialog" aria-modal="true" aria-labelledby="llm-title" @submit.prevent="saveLlmConfig">
+      <form
+        ref="llmDialog"
+        class="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="llm-title"
+        @submit.prevent="saveLlmConfig"
+      >
         <h3 id="llm-title">大模型</h3>
         <label>
           协议

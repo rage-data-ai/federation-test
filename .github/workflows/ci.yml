@@ -38,3 +38,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end smoke and visual baselines
+        run: npm run test:e2e
+        env:
+          CI: true
