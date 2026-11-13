@@ -70,7 +70,8 @@
 1. 用户在控制台勾选表，按业务域分批起草。
 2. 网关为每张表取列名、类型和少量抽样行（抽样行可以发给大模型），由大模型按第 3 节的映射规则起草三元组，直接写入 TDB2。
 3. **起草即生效**：不区分草稿和正式版，人可以在控制台随时修改。
-4. **版本快照**：起草前自动写入 `federation.ontology-versions`（默认 `data/ontology-versions`）；可用 `GET/POST /api/v1/ontology/versions` 与 `POST .../versions/{id}/restore` 回滚。
+4. **审定（certify）**：概念/派生概念可标记 `certified`；问数优先采用已审定口径，未审定会告警。
+5. **版本快照**：起草前自动写入 `federation.ontology-versions`（默认 `data/ontology-versions`）；可用 `GET/POST /api/v1/ontology/versions` 与 `POST .../versions/{id}/restore` 回滚。
 5. 标签要求中英文 label，加多个中文别名和 comment。
 6. 支持的数据源：MySQL、ClickHouse、Elasticsearch。**Kafka 这次不做**，因为 topic 在 Trino 里只有 `_message` 原始字段。
 

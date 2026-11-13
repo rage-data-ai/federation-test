@@ -67,6 +67,7 @@ public class AskService {
             4. 码值过滤必须用码值的 value，禁止把中文名写进 WHERE；派生概念有 sqlCondition 时必须直接复用该条件，
                不要自行改写阈值。派生概念有 sqlExpression 时必须作为 SELECT 度量表达式复用（SQL attributes），
                不要另写不等价的聚合。只有 definitionText 时才按其文字定义实现。
+               多个口径候选时优先使用 certified=true 的派生概念/概念。
             5. 跨概念用关系路径给出的 join 条件，不要自己猜 join 列。
             6. 元数据里 timeColumn 不为空的表是大表，WHERE 中必须对该列做范围过滤。
             7. 写入等值过滤前，对有码表的列调用 validateFilterValues；结果为空时调用 scanFilterLiterals 检查字面量。

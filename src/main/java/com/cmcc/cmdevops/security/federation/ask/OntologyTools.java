@@ -73,6 +73,10 @@ public class OntologyTools {
                 score = term.quality();
             } else if (term.text().contains(needle) || needle.contains(term.text())) {
                 score = term.quality() * 0.6;
+            } else if (needle.length() >= 2 && term.text().length() >= 2
+                    && levenshtein(term.text(), needle) <= 1) {
+                // 轻量模糊召回（编辑距离 ≤1），弥补无向量检索时的近邻词
+                score = term.quality() * 0.35;
             } else {
                 continue;
             }
@@ -198,6 +202,7 @@ public class OntologyTools {
             String table,
             String timeColumn,
             boolean largeTable,
+            boolean certified,
             List<AttributeView> attributes,
             List<String> relations,
             List<String> definedConcepts) {
@@ -226,7 +231,8 @@ public class OntologyTools {
             List<String> conditions,
             String sqlCondition,
             String definitionText,
-            String sqlExpression) {
+            String sqlExpression,
+            boolean certified) {
     }
 
     public record PathStep(String relation, String labelZh, String from, String to, String join, boolean reversed) {
@@ -247,5 +253,24 @@ public class OntologyTools {
             List<JoinPath> paths,
             List<String> warnings,
             List<String> unresolved) {
+    }
+
+    static int levenshtein(String a, String b) {
+        int[] prev = new int[b.length() + 1];
+        int[] curr = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) {
+            prev[j] = j;
+        }
+        for (int i = 1; i <= a.length(); i++) {
+            curr[0] = i;
+            for (int j = 1; j <= b.length(); j++) {
+                int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
+                curr[j] = Math.min(Math.min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+            }
+            int[] swap = prev;
+            prev = curr;
+            curr = swap;
+        }
+        return prev[b.length()];
     }
 }

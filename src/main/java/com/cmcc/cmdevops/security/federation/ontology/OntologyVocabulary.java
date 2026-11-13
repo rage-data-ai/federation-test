@@ -42,6 +42,8 @@ public final class OntologyVocabulary {
     public static final Property DEFINITION_TEXT = property(FED, "definitionText");
     /** 可复用度量 / SQL 表达式（SELECT 片段），非 WHERE 条件 */
     public static final Property SQL_EXPRESSION = property(FED, "sqlExpression");
+    /** 人工认证 / 已审定（对齐 Auto Ontology certify） */
+    public static final Property CERTIFIED = property(FED, "certified");
 
     private OntologyVocabulary() {
     }

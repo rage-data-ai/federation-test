@@ -94,7 +94,7 @@ class OntologyToolsTest {
     @Test
     void aliasMatchesLowerConfidenceAndUnknownQuestionHasNoMatch() {
         BusinessContext alias = tools.getBusinessContext("主机数量");
-        assertEquals(0.85, alias.confidence());
+        assertEquals(0.9, alias.confidence()); // alias 0.85 + certified 加成
         assertEquals("Asset", alias.concepts().get(0).name());
 
         BusinessContext none = tools.getBusinessContext("今天天气怎么样");
@@ -129,7 +129,7 @@ class OntologyToolsTest {
 
         BusinessContext context = tools.getBusinessContext("各厂商的告警");
 
-        assertEquals(0.8, context.confidence());
+        assertEquals(0.85, context.confidence()); // 断连折损后 + certified 加成
         assertTrue(context.unresolved().contains("概念 Vendor 没有映射物理表"));
         assertTrue(context.unresolved().stream().anyMatch(item -> item.contains("没有关系路径")));
     }

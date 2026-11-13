@@ -14,6 +14,8 @@ import java.util.stream.Collectors;
 
 import com.cmcc.cmdevops.security.federation.ask.OntologyTools;
 import com.cmcc.cmdevops.security.federation.ask.OntologyTools.BusinessContext;
+import com.cmcc.cmdevops.security.federation.ask.OntologyTools.ConceptView;
+import com.cmcc.cmdevops.security.federation.ask.OntologyTools.DefinedView;
 import com.cmcc.cmdevops.security.federation.ask.OntologyTools.EntityHit;
 import com.cmcc.cmdevops.security.federation.ask.OntologyTools.JoinPath;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Attribute;
@@ -147,16 +149,35 @@ public final class BusinessContextBuilder {
                 confidence *= 0.8;
             }
         }
+        List<DefinedView> definedViews = defined.stream()
+                .map(name -> OntologyEntityViews.definedView(index, index.defined.get(name)))
+                .sorted((a, b) -> Boolean.compare(b.certified(), a.certified()))
+                .toList();
+        for (DefinedView view : definedViews) {
+            if (!view.certified()) {
+                warnings.add("派生概念 " + view.name() + " 尚未审定（certified=false），口径请人工确认");
+            }
+        }
+        List<ConceptView> conceptViews = seeds.stream()
+                .filter(index.concepts::containsKey)
+                .map(seed -> views.conceptView(index, seed))
+                .sorted((a, b) -> Boolean.compare(b.certified(), a.certified()))
+                .toList();
+        long certifiedHits = definedViews.stream().filter(DefinedView::certified).count()
+                + conceptViews.stream().filter(ConceptView::certified).count();
+        if (certifiedHits > 0 && OntologyTools.STATUS_OK.equals(status)) {
+            confidence = Math.min(1.0, confidence + 0.05 * Math.min(3, certifiedHits));
+        }
         return new BusinessContext(
                 status,
                 round(confidence),
                 matches.stream().map(m -> new EntityHit(m.entity(), m.kind(), index.labelOf(m.entity()), m.text(),
                         m.source(), round(m.quality()))).toList(),
-                seeds.stream().filter(index.concepts::containsKey).map(seed -> views.conceptView(index, seed)).toList(),
+                conceptViews,
                 attributes.stream().map(name -> OntologyEntityViews.attributeView(index, index.attributes.get(name))).toList(),
                 relations.stream().filter(index.relations::containsKey)
                         .map(name -> OntologyEntityViews.relationView(index, index.relations.get(name))).toList(),
-                defined.stream().map(name -> OntologyEntityViews.definedView(index, index.defined.get(name))).toList(),
+                definedViews,
                 codes.stream().map(index.codes::get)
                         .map(code -> OntologyEntityViews.codeView(index, code))
                         .toList(),

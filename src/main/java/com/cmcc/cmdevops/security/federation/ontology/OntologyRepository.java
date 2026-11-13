@@ -17,6 +17,7 @@ import static com.cmcc.cmdevops.security.federation.ontology.OntologyRdfIO.strin
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyRdfIO.valueSet;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.CODE_LIST;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.CODE_VALUE;
+import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.CERTIFIED;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.DEFINITION_TEXT;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.SQL_EXPRESSION;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.IDENTIFIER;
@@ -237,6 +238,9 @@ public class OntologyRepository {
             if (concept.largeTable()) {
                 r.addLiteral(LARGE_TABLE, true);
             }
+            if (concept.certified()) {
+                r.addLiteral(CERTIFIED, true);
+            }
         });
     }
 
@@ -426,9 +430,27 @@ public class OntologyRepository {
             r.addProperty(OWL2.equivalentClass, intersection);
             addString(r, DEFINITION_TEXT, defined.definitionText());
             addString(r, SQL_EXPRESSION, defined.sqlExpression());
+            if (defined.certified()) {
+                r.addLiteral(CERTIFIED, true);
+            }
         });
     }
 
+
+    /** 标记实体已审定（概念或派生概念）。 */
+    public void setCertified(String name, boolean certified) {
+        requireName(name, "实体");
+        store.write(model -> {
+            Resource r = model.getResource(iri(name));
+            if (!model.contains(r, null, (RDFNode) null)) {
+                throw new IllegalArgumentException("本体中不存在: " + name);
+            }
+            model.removeAll(r, CERTIFIED, null);
+            if (certified) {
+                r.addLiteral(CERTIFIED, true);
+            }
+        });
+    }
 
     /** 用快照整体替换当前本体（先清空再写入）。用于版本回滚。 */
     public void replaceSnapshot(Snapshot snapshot) {

@@ -70,7 +70,7 @@ public class OntologyController {
     @PutMapping("/concepts/{name}")
     public Snapshot saveConcept(@PathVariable("name") String name, @RequestBody Concept body) {
         repository.saveConcept(new Concept(name, body.labelZh(), body.labelEn(), body.aliases(), body.comment(),
-                body.parent(), body.table(), body.timeColumn(), body.largeTable(), body.subject()));
+                body.parent(), body.table(), body.timeColumn(), body.largeTable(), body.subject(), body.certified()));
         return repository.snapshot();
     }
 
@@ -111,7 +111,17 @@ public class OntologyController {
     @PutMapping("/defined/{name}")
     public Snapshot saveDefined(@PathVariable("name") String name, @RequestBody DefinedConcept body) {
         repository.saveDefinedConcept(new DefinedConcept(name, body.labelZh(), body.labelEn(), body.aliases(),
-                body.comment(), body.base(), body.conditions(), body.definitionText(), body.sqlExpression()));
+                body.comment(), body.base(), body.conditions(), body.definitionText(), body.sqlExpression(),
+                body.certified()));
+        return repository.snapshot();
+    }
+
+    /** 审定概念或派生概念：body {"certified": true|false} */
+    @RequireRole(GatewayRole.ADMIN)
+    @PutMapping("/{name}/certified")
+    public Snapshot certify(@PathVariable("name") String name, @RequestBody Map<String, Object> body) {
+        boolean certified = body != null && Boolean.TRUE.equals(body.get("certified"));
+        repository.setCertified(name, certified);
         return repository.snapshot();
     }
 

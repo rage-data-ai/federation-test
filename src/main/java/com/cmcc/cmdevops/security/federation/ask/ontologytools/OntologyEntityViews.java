@@ -45,7 +45,8 @@ public final class OntologyEntityViews {
                 .map(DefinedConcept::name)
                 .toList();
         return new ConceptView(concept.name(), concept.labelZh(), concept.aliases(), concept.comment(), concept.parent(),
-                subConcepts(name), concept.table(), concept.timeColumn(), concept.largeTable(), attributes, related, derived);
+                subConcepts(name), concept.table(), concept.timeColumn(), concept.largeTable(), concept.certified(),
+                attributes, related, derived);
     }
 
     public List<String> subConcepts(String name) {
@@ -98,6 +99,7 @@ public final class OntologyEntityViews {
         Concept base = index.concepts.get(defined.base());
         return new DefinedView(defined.name(), defined.labelZh(), defined.aliases(), defined.comment(), defined.base(),
                 base == null ? null : base.table(), readable,
-                sql.isEmpty() ? null : String.join(" AND ", sql), defined.definitionText(), defined.sqlExpression());
+                sql.isEmpty() ? null : String.join(" AND ", sql), defined.definitionText(), defined.sqlExpression(),
+                defined.certified());
     }
 }

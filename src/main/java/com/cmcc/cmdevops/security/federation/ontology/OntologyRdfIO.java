@@ -3,6 +3,7 @@ package com.cmcc.cmdevops.security.federation.ontology;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.ALT_LABEL;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.CODE_LIST;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.CODE_VALUE;
+import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.CERTIFIED;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.DEFINITION_TEXT;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.SQL_EXPRESSION;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.IDENTIFIER;
@@ -76,7 +77,7 @@ final class OntologyRdfIO {
                 concepts.add(new Concept(
                         localName(r.getURI()), label(r, "zh"), label(r, "en"), aliases(r), comment(r),
                         objectName(r, RDFS.subClassOf), string(r, MAPPED_TABLE), string(r, TIME_COLUMN),
-                        bool(r, LARGE_TABLE), string(r, SUBJECT)));
+                        bool(r, LARGE_TABLE), string(r, SUBJECT), bool(r, CERTIFIED)));
             }
         });
 
@@ -138,7 +139,7 @@ final class OntologyRdfIO {
             }
         }
         return new DefinedConcept(localName(r.getURI()), label(r, "zh"), label(r, "en"), aliases(r), comment(r),
-                base, conditions, string(r, DEFINITION_TEXT), string(r, SQL_EXPRESSION));
+                base, conditions, string(r, DEFINITION_TEXT), string(r, SQL_EXPRESSION), bool(r, CERTIFIED));
     }
 
     private static Condition readRestriction(Resource restriction) {
