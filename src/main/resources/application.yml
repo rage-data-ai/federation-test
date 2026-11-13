@@ -49,6 +49,9 @@ federation:
     roles:
       demo: QUERY,ADMIN
       reader: QUERY
+    jwt:
+      issuer-uri: ${FEDERATION_JWT_ISSUER_URI:}
+      roles-claim: ${FEDERATION_JWT_ROLES_CLAIM:roles}
   cors:
     allowed-origins: ${FEDERATION_CORS_ORIGINS:http://localhost:5173,http://localhost:18080}
   quota:

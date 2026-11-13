@@ -184,6 +184,7 @@ public class FederationProperties {
         private Map<String, String> tokens = new LinkedHashMap<>();
         /** 用户名 → 逗号分隔角色，如 QUERY 或 QUERY,ADMIN */
         private Map<String, String> roles = new LinkedHashMap<>();
+        private final Jwt jwt = new Jwt();
 
         public boolean isEnabled() {
             return enabled;
@@ -207,6 +208,36 @@ public class FederationProperties {
 
         public void setRoles(Map<String, String> roles) {
             this.roles = roles == null ? new LinkedHashMap<>() : roles;
+        }
+
+        public Jwt getJwt() {
+            return jwt;
+        }
+    }
+
+    /** 可选：校验外部 IdP 签发的 JWT（issuer-uri 非空时启用）。 */
+    public static class Jwt {
+        private String issuerUri = "";
+        private String rolesClaim = "roles";
+
+        public String getIssuerUri() {
+            return issuerUri;
+        }
+
+        public void setIssuerUri(String issuerUri) {
+            this.issuerUri = issuerUri == null ? "" : issuerUri;
+        }
+
+        public String getRolesClaim() {
+            return rolesClaim;
+        }
+
+        public void setRolesClaim(String rolesClaim) {
+            this.rolesClaim = rolesClaim == null || rolesClaim.isBlank() ? "roles" : rolesClaim;
+        }
+
+        public boolean isEnabled() {
+            return !issuerUri.isBlank();
         }
     }
 

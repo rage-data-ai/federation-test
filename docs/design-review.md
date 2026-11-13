@@ -2,35 +2,34 @@
 
 评估基准：Trino / Spring Boot / Apache Calcite 等成熟开源项目的工程与架构实践。  
 初评日期：2026-11-13（Asia/Shanghai）  
-复评轮次：第 4 轮（同日）
+复评轮次：第 5 轮（同日）
 
 ## 优点
 
-1. **包边界清晰**：`api / ask / ontology / catalog / sql / engine / store / security / llm / metadata / vector` 分层可读。
-2. **问数护栏设计正确**：`SqlGuard` + `InsightSession` 预算限制。
-3. **本体域模型有结构**：Jena TDB2 + 词汇表、Repository、确定性工具检索。
-4. **持久化抽象与密钥面有意识**：Store 接口；视图不回传明文密钥。
-5. **核心逻辑可测**：单测 + MockMvc 切片；JaCoCo 门禁（指令 ≥60%、行 ≥55%）。
-6. **前端功能闭环且已开始模块化**：数据源 / 本体 / 问数；composable + 子组件拆分。
+1. **包边界清晰**，查询 / 问数 / 本体主链路可读。
+2. **问数护栏**（SqlGuard + InsightSession）与联邦路由设计正确。
+3. **本体域模型**有结构；起草复杂度已模块化。
+4. **安全与可观测**：Bearer + RBAC + 可选 JWT；Prometheus + OTLP。
+5. **工程门禁**：CI、`mvn verify`（JaCoCo ≥65% 指令 / Spotless）、ESLint、Vitest、`tsc`。
+6. **前端模块化**：数据源 / 本体 / 问数均已抽出 composable；API 层 TypeScript。
 
-## 已关闭差距（累计）
+## 已关闭差距（累计至第 5 轮）
 
 | 问题 | 状态 |
 |------|------|
 | 查询管线断路 | ✅ |
-| 鉴权 / Audit / Quota 空转 | ✅ Bearer + 审计/配额 |
-| 粗粒度 RBAC | ✅ `QUERY` / `ADMIN` + `@RequireRole` |
-| 500 异常外泄 | ✅ |
-| 内网硬编码 | ✅ |
-| God Class（Draft/Tools/Repository） | ✅ 拆分 |
-| 巨型 Vue SFC | ✅ DatasourceView / OntologyView 抽出 composable |
-| CI / LICENSE / Dependabot | ✅ |
-| Docker Compose 一键 | ✅ |
-| Prometheus 指标 | ✅ |
-| OTLP Tracing | ✅ Micrometer OTel bridge（endpoint 可配） |
-| Spotless / JaCoCo 门槛 | ✅ `mvn verify` |
-| MockMvc 切片测试 | ✅ `QueryControllerWebTest` |
-| 前端 ESLint / Vitest | ✅ |
+| 鉴权 / 配额 / 审计 | ✅ |
+| 粗粒度 RBAC | ✅ |
+| 可选外部 IdP JWT | ✅ `FEDERATION_JWT_ISSUER_URI` |
+| RFC 7807 错误模型 | ✅ Problem Details（兼容 `message`） |
+| 500 脱敏 / 配置外置 | ✅ |
+| God Class 拆分 | ✅ |
+| 巨型 Vue SFC（三视图） | ✅ |
+| API TypeScript | ✅ `web/src/api.ts` |
+| CI / Docker / Compose / LICENSE | ✅ |
+| Spotless / JaCoCo 门槛抬升 | ✅ 65% / 60% |
+| MockMvc + Testcontainers | ✅ |
+| 前端 ESLint / Vitest / tsc | ✅ |
 
 ## 距顶尖开源仍待项
 
@@ -38,19 +37,20 @@
 
 | # | 问题 | 建议 |
 |---|------|------|
-| 1 | 非完整 OAuth2/OIDC | Spring Authorization Server / 外部 IdP 资源服务器 |
-| 2 | Testcontainers 仅覆盖配置库 CatalogStore | 扩展到元数据 / 启动切片与 Trino |
-| 3 | 前端仍有大 SFC、无 TypeScript | 继续拆 AskView/OntologyGraph；渐进 TS |
-| 4 | 覆盖率阈值可再抬高 | 补 MetadataService / FederalDataSource 测试后提到 70%+ |
-| 5 | 统一 Problem Details | RFC 7807 替换异构错误体 |
+| 1 | 无完整 OIDC 登录/授权码与会话 | 控制台接入 IdP；网关纯资源服务器 |
+| 2 | Testcontainers 覆盖面仍窄 | 元数据采集 / 应用启动切片 |
+| 3 | Vue SFC 与 composable 仍为 JS | 渐进迁移 `.vue` script 与 composable 到 TS |
+| 4 | 覆盖率仍可抬至 75%+ | FederalDataSource / OntologyController 等 |
+| 5 | 细粒度资源 ACL / 行级权限 | 按 catalog/表授权 |
 
 ### P2
 
-本体版本/回滚、a11y 深化、Error Prone、前端视觉回归测试。
+本体版本回滚、a11y、Error Prone、视觉回归、前端 Storybook。
 
-## 总评（第 4 轮）
+## 总评（第 5 轮）
 
-已从 PoC 提升到**可协作、可门禁、可观测、带 RBAC 的早期生产候选**水位。  
-距 Apache/CNCF「顶尖开源」仍差完整身份联邦、容器化 E2E 与更高覆盖率/类型化前端——但主架构与工程基线已对齐一流项目的主干实践。
+已达到**可对外开源协作的坚实中早期水位**：安全模型可扩展到 JWT、错误契约标准化、前端核心 API 类型化、质量门禁可强制执行。  
 
-验证证据（本轮）：`mvn -B verify` → 111 tests、JaCoCo check、Spotless check 通过；`cd web && npm run lint && npm test && npm run build` 通过。
+距「顶尖」仍差完整身份联邦产品化、更广容器化 E2E 与全仓 TypeScript——但若以「能否作为严肃开源项目维护」为标准，主干工程实践已对齐。目标需在剩余 P1 关闭并复评通过后才能宣称完成。
+
+验证：本地 `mvn -B verify` + `cd web && npm run lint && npm run typecheck && npm test && npm run build`。

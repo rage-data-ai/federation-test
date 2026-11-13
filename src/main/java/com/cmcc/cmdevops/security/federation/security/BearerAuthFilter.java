@@ -10,6 +10,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -29,9 +30,11 @@ import jakarta.servlet.http.HttpServletResponse;
 public class BearerAuthFilter extends OncePerRequestFilter {
 
     private final FederationProperties properties;
+    private final ObjectProvider<JwtAccessTokenService> jwtAccessTokens;
 
-    public BearerAuthFilter(FederationProperties properties) {
+    public BearerAuthFilter(FederationProperties properties, ObjectProvider<JwtAccessTokenService> jwtAccessTokens) {
         this.properties = properties;
+        this.jwtAccessTokens = jwtAccessTokens;
     }
 
     @Override
@@ -85,6 +88,10 @@ public class BearerAuthFilter extends OncePerRequestFilter {
                 return new GatewayUser(entry.getKey(), rolesOf(entry.getKey()));
             }
         }
+        JwtAccessTokenService jwt = jwtAccessTokens.getIfAvailable();
+        if (jwt != null && JwtAccessTokenService.looksLikeJwt(token)) {
+            return jwt.authenticate(token);
+        }
         return null;
     }
 
@@ -106,8 +113,10 @@ public class BearerAuthFilter extends OncePerRequestFilter {
     private static void unauthorized(HttpServletResponse response, String message) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.getWriter().write("{\"success\":false,\"message\":\"" + escape(message) + "\"}");
+        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"Unauthorized\",\"status\":401,"
+                + "\"detail\":\"" + escape(message) + "\",\"message\":\"" + escape(message)
+                + "\",\"success\":false}");
     }
 
     private static String escape(String text) {
