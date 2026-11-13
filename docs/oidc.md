@@ -55,3 +55,10 @@ federation.security.row-filters:
 ```
 
 查询若触及该表，SQL 文本须包含谓词中的列标识（如 `tenant_id`）；否则 403。
+
+
+## 令牌吊销
+
+- `POST /api/v1/auth/logout`：吊销当前 Bearer（登出）。
+- `POST /api/v1/auth/revoke`（ADMIN）：body `{"token":"..."}` 或吊销当前 token。
+- 吊销表为进程内 denylist；多实例需外置存储。控制台注销会先调 logout 再跳转 IdP。

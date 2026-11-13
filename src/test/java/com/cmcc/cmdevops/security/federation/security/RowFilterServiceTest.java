@@ -1,7 +1,9 @@
 package com.cmcc.cmdevops.security.federation.security;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
@@ -46,5 +48,31 @@ class RowFilterServiceTest {
         TableRef table = new TableRef("mysql_shop", "public", "orders", null);
         assertDoesNotThrow(() -> filters.assertSatisfied(
                 "SELECT * FROM mysql_shop.public.orders WHERE tenant_id = 'acme'", List.of(table)));
+    }
+
+    @Test
+    void applyInjectsPredicateIntoWhere() {
+        TableRef table = new TableRef("mysql_shop", "public", "orders", null);
+        String rewritten = filters.apply(
+                "SELECT id, amount FROM mysql_shop.public.orders", List.of(table));
+        String lower = rewritten.toLowerCase();
+        assertTrue(lower.contains("tenant_id"), rewritten);
+        assertTrue(lower.contains("acme"), rewritten);
+        assertTrue(lower.contains("where"), rewritten);
+    }
+
+    @Test
+    void applyNoopWhenNoMatchingTable() {
+        TableRef table = new TableRef("other", "public", "t", null);
+        String sql = "SELECT 1 FROM other.public.t";
+        assertTrue(filters.apply(sql, List.of(table)).contains("SELECT 1"));
+    }
+
+    @Test
+    void adminBypassesApply() {
+        GatewayUser.set(new GatewayUser("ops", Set.of(GatewayRole.ADMIN)));
+        TableRef table = new TableRef("mysql_shop", "public", "orders", null);
+        String sql = "SELECT * FROM mysql_shop.public.orders";
+        assertFalse(filters.apply(sql, List.of(table)).toLowerCase().contains("tenant_id"));
     }
 }

@@ -19,5 +19,5 @@
 
 ## 已知边界
 
-- 支持共享 Bearer、JWT、控制台 PKCE（refresh + IdP 注销跳转）、catalog/表 ACL 与行级启发式校验；尚未实现 back-channel logout 或 AST 级谓词自动注入。
+- 支持共享 Bearer、JWT、控制台 PKCE（refresh + IdP 注销跳转）、catalog/表 ACL 与行级启发式校验；已支持进程内 denylist（`/auth/logout`/`/auth/revoke`）与 Calcite 行级 WHERE 注入；尚未实现跨实例 back-channel logout。
 - 问数路径依赖 `SqlGuard` 与表白名单；`/api/v1/query` 在具备 `QUERY` 后仍可执行任意只读 SQL（相对已注册 catalog），需配合配额与审计。

@@ -98,6 +98,10 @@ export function deleteMetadata(catalog: string, schema: string, table: string) {
   )
 }
 
+export function authLogout() {
+  return request<{ success: boolean; revoked?: boolean }>('/api/v1/auth/logout', { method: 'POST', body: '{}' })
+}
+
 export function authMe() {
   return request<{
     name: string

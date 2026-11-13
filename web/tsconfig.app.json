@@ -8,6 +8,7 @@
   },
   "include": [
     "src/**/*.ts",
-    "src/components/ask/AskAnswerClarify.vue"
+    "src/components/ask/AskAnswerClarify.vue",
+    "src/components/datasource/CatalogFormModal.vue"
   ]
 }

@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
 import {
   collectMetadata,

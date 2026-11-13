@@ -1,6 +1,7 @@
 package com.cmcc.cmdevops.security.federation.api;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -29,7 +30,8 @@ import com.cmcc.cmdevops.security.federation.security.RoleAuthorizationIntercept
         RoleAuthorizationInterceptor.class,
         WebMvcSecurityConfiguration.class,
         GlobalExceptionHandler.class,
-        com.cmcc.cmdevops.security.federation.security.CatalogAclService.class
+        com.cmcc.cmdevops.security.federation.security.CatalogAclService.class,
+        com.cmcc.cmdevops.security.federation.security.TokenRevocationService.class
 })
 class AuthControllerWebTest {
 
@@ -65,4 +67,13 @@ class AuthControllerWebTest {
                 .andExpect(jsonPath("$.catalogAcl").value(false))
                 .andExpect(jsonPath("$.catalogs[0]").value("*"));
     }
+
+    @Test
+    void logoutReturnsSuccess() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .header("Authorization", "Bearer unused"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
 }

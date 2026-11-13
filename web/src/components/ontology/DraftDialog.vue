@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { DRAFT_STEPS, qualified } from '../../composables/useOntologyDraft'
 
 defineProps({

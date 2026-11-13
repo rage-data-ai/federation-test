@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, inject, onActivated, ref, watch } from 'vue'
 import { getOntology, getOntologyTurtle, listCatalogs, listMetadata, llmStatus, renameSubject } from './api'
 import OntologyGraph from './OntologyGraph.vue'

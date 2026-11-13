@@ -29,7 +29,7 @@ class BearerAuthFilterTest {
     void allowsAnonymousWhenDisabled() throws Exception {
         FederationProperties properties = new FederationProperties();
         properties.getSecurity().setEnabled(false);
-        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt());
+        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt(), new TokenRevocationService());
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/catalogs");
         MockHttpServletResponse response = new MockHttpServletResponse();
         AtomicBoolean passed = new AtomicBoolean();
@@ -46,7 +46,7 @@ class BearerAuthFilterTest {
         FederationProperties properties = new FederationProperties();
         properties.getSecurity().setEnabled(true);
         properties.getSecurity().getTokens().put("demo", "demo-token");
-        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt());
+        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt(), new TokenRevocationService());
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/catalogs");
         MockHttpServletResponse response = new MockHttpServletResponse();
         filter.doFilter(request, response, new MockFilterChain());
@@ -59,7 +59,7 @@ class BearerAuthFilterTest {
         FederationProperties properties = new FederationProperties();
         properties.getSecurity().setEnabled(true);
         properties.getSecurity().getTokens().put("alice", "secret");
-        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt());
+        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt(), new TokenRevocationService());
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/query");
         request.addHeader("Authorization", "Bearer secret");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -78,7 +78,7 @@ class BearerAuthFilterTest {
         properties.getSecurity().setEnabled(true);
         properties.getSecurity().getTokens().put("reader", "r-token");
         properties.getSecurity().getRoles().put("reader", "QUERY");
-        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt());
+        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt(), new TokenRevocationService());
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/query");
         request.addHeader("Authorization", "Bearer r-token");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -102,7 +102,7 @@ class BearerAuthFilterTest {
         ObjectProvider<JwtAccessTokenService> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(jwt);
         // static looksLikeJwt is on the class; real call uses JwtAccessTokenService.looksLikeJwt
-        BearerAuthFilter filter = new BearerAuthFilter(properties, provider);
+        BearerAuthFilter filter = new BearerAuthFilter(properties, provider, new TokenRevocationService());
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/query");
         request.addHeader("Authorization", "Bearer aaa.bbb.ccc");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -113,4 +113,21 @@ class BearerAuthFilterTest {
         });
         assertTrue(passed.get());
     }
+
+    @Test
+    void rejectsRevokedToken() throws Exception {
+        FederationProperties properties = new FederationProperties();
+        properties.getSecurity().setEnabled(true);
+        properties.getSecurity().getTokens().put("demo", "demo-token");
+        TokenRevocationService revocations = new TokenRevocationService();
+        revocations.revoke("demo-token");
+        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt(), revocations);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/catalogs");
+        request.addHeader("Authorization", "Bearer demo-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, new MockFilterChain());
+        assertEquals(401, response.getStatus());
+        assertTrue(response.getContentAsString().contains("吊销"));
+    }
+
 }

@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, onUnmounted, provide, reactive, ref } from 'vue'
-import { authMe, llmConfig, llmStatus, saveLlm, testLlm } from './api'
+import { authLogout, authMe, llmConfig, llmStatus, saveLlm, testLlm } from './api'
 import {
   beginOidcLogin,
   beginOidcLogout,
@@ -119,14 +119,24 @@ async function saveAuthToken() {
   }
 }
 
-function logoutAuth() {
+async function logoutAuth() {
+  try {
+    await authLogout()
+  } catch {
+    // 网关可能未开启鉴权
+  }
   clearAccessToken()
   authForm.token = ''
   authUser.value = null
   showAuth.value = false
 }
 
-function logoutOidc() {
+async function logoutOidc() {
+  try {
+    await authLogout()
+  } catch {
+    // ignore
+  }
   authUser.value = null
   authForm.token = ''
   showAuth.value = false

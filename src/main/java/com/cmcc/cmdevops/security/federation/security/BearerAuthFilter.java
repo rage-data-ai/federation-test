@@ -31,10 +31,15 @@ public class BearerAuthFilter extends OncePerRequestFilter {
 
     private final FederationProperties properties;
     private final ObjectProvider<JwtAccessTokenService> jwtAccessTokens;
+    private final TokenRevocationService revocations;
 
-    public BearerAuthFilter(FederationProperties properties, ObjectProvider<JwtAccessTokenService> jwtAccessTokens) {
+    public BearerAuthFilter(
+            FederationProperties properties,
+            ObjectProvider<JwtAccessTokenService> jwtAccessTokens,
+            TokenRevocationService revocations) {
         this.properties = properties;
         this.jwtAccessTokens = jwtAccessTokens;
+        this.revocations = revocations;
     }
 
     @Override
@@ -66,6 +71,10 @@ public class BearerAuthFilter extends OncePerRequestFilter {
                 return;
             }
             String token = header.substring(7).trim();
+            if (revocations.isRevoked(token)) {
+                unauthorized(response, "令牌已吊销");
+                return;
+            }
             GatewayUser user = resolveUser(token);
             if (user == null) {
                 unauthorized(response, "无效的访问令牌");
