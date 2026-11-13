@@ -13,11 +13,16 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
+import com.cmcc.cmdevops.security.federation.model.TableRef;
 
 /**
- * 按用户限制可见/可查询的 catalog。配置 {@code federation.security.catalogs} 非空时生效：
- * 值为 {@code *} 表示全部；逗号分隔名称；未出现的用户不允许任何 catalog。
- * {@link GatewayRole#ADMIN} 绕过限制。鉴权关闭时不限制。
+ * 按用户限制可见/可查询的 catalog 与表。配置 {@code federation.security.catalogs} 非空时生效：
+ * <ul>
+ *   <li>{@code *} — 全部</li>
+ *   <li>{@code mysql_shop} 或 {@code mysql_shop.*} — 该 catalog 下全部表</li>
+ *   <li>{@code mysql_shop.public.orders} — 指定三部分表名</li>
+ * </ul>
+ * 未出现的用户不允许任何资源；{@link GatewayRole#ADMIN} 绕过。鉴权关闭时不限制。
  */
 @Component
 public class CatalogAclService {
@@ -43,11 +48,51 @@ public class CatalogAclService {
         if (user.hasRole(GatewayRole.ADMIN)) {
             return true;
         }
-        Set<String> allowed = allowedCatalogs(user.name());
-        if (allowed.contains("*")) {
+        Set<String> grants = grantsOf(user.name());
+        if (grants.contains("*")) {
             return true;
         }
-        return allowed.contains(catalog.trim().toLowerCase(Locale.ROOT));
+        String key = catalog.trim().toLowerCase(Locale.ROOT);
+        if (grants.contains(key) || grants.contains(key + ".*")) {
+            return true;
+        }
+        for (String grant : grants) {
+            if (grant.startsWith(key + ".")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean allowsTable(TableRef table) {
+        if (table == null) {
+            return true;
+        }
+        if (!isEnforced()) {
+            return true;
+        }
+        GatewayUser user = GatewayUser.current();
+        if (user.hasRole(GatewayRole.ADMIN)) {
+            return true;
+        }
+        Set<String> grants = grantsOf(user.name());
+        if (grants.contains("*")) {
+            return true;
+        }
+        String catalog = nullToEmpty(table.catalog()).toLowerCase(Locale.ROOT);
+        String schema = nullToEmpty(table.schema()).toLowerCase(Locale.ROOT);
+        String name = nullToEmpty(table.table()).toLowerCase(Locale.ROOT);
+        if (catalog.isEmpty()) {
+            return true;
+        }
+        if (grants.contains(catalog) || grants.contains(catalog + ".*")) {
+            return true;
+        }
+        String qualified = catalog + "." + schema + "." + name;
+        if (grants.contains(qualified)) {
+            return true;
+        }
+        return grants.contains(catalog + "." + schema + ".*");
     }
 
     public void assertAllowed(Collection<String> catalogs) {
@@ -62,6 +107,18 @@ public class CatalogAclService {
         }
     }
 
+    public void assertAllowedTables(Collection<TableRef> tables) {
+        if (!isEnforced() || tables == null || tables.isEmpty()) {
+            return;
+        }
+        for (TableRef table : tables) {
+            if (!allowsTable(table)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "无权访问表: " + table.qualifiedName());
+            }
+        }
+    }
+
     public <T> java.util.List<T> filter(java.util.List<T> items, Function<T, String> catalogName) {
         if (!isEnforced() || items == null || items.isEmpty()) {
             return items;
@@ -69,7 +126,7 @@ public class CatalogAclService {
         return items.stream().filter(item -> allows(catalogName.apply(item))).toList();
     }
 
-    private Set<String> allowedCatalogs(String username) {
+    private Set<String> grantsOf(String username) {
         Map<String, String> catalogs = properties.getSecurity().getCatalogs();
         String raw = catalogs.get(username);
         if (raw == null || raw.isBlank()) {
@@ -97,8 +154,12 @@ public class CatalogAclService {
         if (user.hasRole(GatewayRole.ADMIN)) {
             return Set.of("*");
         }
-        Set<String> allowed = allowedCatalogs(user.name());
+        Set<String> allowed = grantsOf(user.name());
         return allowed.isEmpty() ? Set.of() : Set.copyOf(allowed);
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     @Override

@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearAccessToken, getAccessToken, setAccessToken } from './auth'
+import {
+  clearAccessToken,
+  getAccessToken,
+  getRefreshToken,
+  setAccessToken,
+  setRefreshToken
+} from './auth'
 
 describe('access token storage', () => {
   beforeEach(() => {
@@ -15,10 +21,13 @@ describe('access token storage', () => {
     })
   })
 
-  it('stores and clears bearer token', () => {
+  it('stores and clears bearer and refresh tokens', () => {
     setAccessToken('  abc  ')
+    setRefreshToken(' r1 ')
     expect(getAccessToken()).toBe('abc')
+    expect(getRefreshToken()).toBe('r1')
     clearAccessToken()
     expect(getAccessToken()).toBe('')
+    expect(getRefreshToken()).toBe('')
   })
 })

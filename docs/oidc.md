@@ -31,4 +31,16 @@ VITE_OIDC_SCOPE=openid profile roles
 Keycloak：创建 Public client，开启 PKCE，Valid redirect URIs 包含控制台地址；Token mapper 写入 `roles`。  
 其它 IdP：若 authorize/token 路径不是 Keycloak 风格，请将 `authority` 配到可推导 `/oauth2/v1/authorize|token` 的发行方，或后续扩展发现文档。
 
-侧栏「身份」→「OIDC 登录」；回调后 access_token 写入 localStorage，并由 `api.ts` 自动附带。
+侧栏「身份」→「OIDC 登录」；回调后 `access_token` / `refresh_token` 写入 localStorage，并由 `api.ts` 自动附带。  
+可用「刷新令牌」调用 `grant_type=refresh_token`（见 `refreshAccessToken`）。
+
+## 表级 ACL
+
+`federation.security.catalogs` 除 catalog 名外，还支持：
+
+- `mysql_shop.public.orders` — 单表
+- `mysql_shop.public.*` — schema 下全部表
+- `mysql_shop` / `mysql_shop.*` — catalog 下全部表
+- `*` — 全部
+
+查询路径在路由前校验 `TableRef`；列表/元数据仍按 catalog 过滤。

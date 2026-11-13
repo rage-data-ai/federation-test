@@ -6,7 +6,9 @@ import {
   clearAccessToken,
   completeOidcCallback,
   getAccessToken,
+  getRefreshToken,
   readOidcConfig,
+  refreshAccessToken,
   setAccessToken
 } from './auth'
 import AskView from './AskView.vue'
@@ -129,6 +131,20 @@ async function loginOidc() {
     await beginOidcLogin()
   } catch (e) {
     authError.value = e.message
+  }
+}
+
+async function refreshOidc() {
+  authBusy.value = true
+  authError.value = ''
+  try {
+    await refreshAccessToken()
+    authForm.token = getAccessToken()
+    await refreshAuth()
+  } catch (e) {
+    authError.value = e.message
+  } finally {
+    authBusy.value = false
   }
 }
 
@@ -268,6 +284,7 @@ function cycleTheme() {
         <p v-if="authError" class="err">{{ authError }}</p>
         <div class="actions">
           <button v-if="oidcEnabled" type="button" @click="loginOidc">OIDC 登录</button>
+          <button v-if="oidcEnabled && getRefreshToken()" type="button" :disabled="authBusy" @click="refreshOidc">刷新令牌</button>
           <button type="button" @click="logoutAuth">清除</button>
           <button type="button" @click="showAuth = false">关闭</button>
           <button class="primary" type="submit" :disabled="authBusy">{{ authBusy ? '校验中…' : '保存并校验' }}</button>

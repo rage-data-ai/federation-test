@@ -18,5 +18,5 @@
 
 ## 已知边界
 
-- 支持共享 Bearer、JWT、控制台 PKCE，以及按 catalog 的资源 ACL；尚未实现刷新令牌轮换、会话注销联动或行级权限。
+- 支持共享 Bearer、JWT、控制台 PKCE（含 refresh_token）、catalog/表级 ACL；尚未实现 IdP 注销联动或行级谓词注入。
 - 问数路径依赖 `SqlGuard` 与表白名单；`/api/v1/query` 在具备 `QUERY` 后仍可执行任意只读 SQL（相对已注册 catalog），需配合配额与审计。

@@ -2,7 +2,7 @@
 
 评估基准：Trino / Spring Boot / Apache Calcite 等成熟开源项目的工程与架构实践。  
 初评日期：2026-11-13（Asia/Shanghai）  
-复评轮次：第 8 轮（同日）
+复评轮次：第 9 轮（同日）
 
 ## 优点
 
@@ -16,12 +16,13 @@
 
 | 问题 | 状态 |
 |------|------|
-| 管线 / 鉴权 / RBAC / JWT / PKCE / catalog ACL | ✅ |
+| 管线 / 鉴权 / RBAC / JWT / PKCE / catalog·表 ACL | ✅ |
+| refresh_token 换发 | ✅（控制台） |
 | RFC 7807 · `/auth/me` | ✅ |
 | 巨型 SFC / God Class · composable TS | ✅ |
 | WebMvc（Query/Catalog/Auth/Ask/Ontology） | ✅ |
 | Engine 单测 + Store IT（CI Docker） | ✅ |
-| 覆盖率 ≥75% 指令 | ✅（约 75.5%） |
+| 覆盖率 ≥75% 指令 | ✅（约 78%） |
 
 ## 距顶尖开源仍待项
 
@@ -29,8 +30,8 @@
 
 | # | 问题 | 建议 |
 |---|------|------|
-| 1 | 刷新令牌 / IdP 注销联动 | refresh + RP / back-channel logout |
-| 2 | 行级 / 列级权限 | SqlGuard / 改写层注入谓词 |
+| 1 | IdP 注销 / back-channel logout | RP + 会话吊销 |
+| 2 | 行级谓词注入 | SqlGuard / 改写层按用户属性注入 WHERE |
 | 3 | 多数 `.vue` 仍无 `lang="ts"` | 全面迁移 + 扩大 vue-tsc include |
 | 4 | store 包在无 Docker 单元跑为 0% | 接受 IT-only，或抽可测迁移逻辑 |
 
@@ -38,10 +39,10 @@
 
 本体版本回滚、a11y、Error Prone、OIDC Discovery、视觉回归。
 
-## 总评（第 8 轮）
+## 总评（第 9 轮）
 
-已达到**接近成熟开源协作的高水位**：安全（身份/角色/数据源范围）、契约、类型化前端逻辑、广覆盖 WebMvc/引擎测试与强制覆盖率门槛均已对齐严肃开源仓库。  
+已达到**接近顶尖开源协作的高水位**：身份联邦（JWT/PKCE/refresh）、角色与 catalog/表 ACL、错误契约、类型化前端逻辑与强制覆盖率均已扎实。  
 
-距「顶尖」仍差会话生命周期、行列级授权、Vue 全量 TS。目标在剩余 P1 关闭并证据充分前**不标记完成**。
+距「顶尖」仍差 IdP 注销联动、行级谓词、Vue 全量 TS。目标在剩余 P1 关闭并证据充分前**不标记完成**。
 
-验证：`mvn -B verify`（151 tests，指令 ~75.5%）+ `cd web && npm run lint && npm run typecheck && npm test && npm run build`。
+验证：`mvn -B verify` + `cd web && npm run lint && npm run typecheck && npm test && npm run build`。

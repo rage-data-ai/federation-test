@@ -1,4 +1,5 @@
 const TOKEN_KEY = 'federation.access_token'
+const REFRESH_TOKEN_KEY = 'federation.refresh_token'
 const PKCE_VERIFIER_KEY = 'federation.oidc.code_verifier'
 const PKCE_STATE_KEY = 'federation.oidc.state'
 
@@ -24,6 +25,20 @@ export function setAccessToken(token: string): void {
 
 export function clearAccessToken(): void {
   localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(REFRESH_TOKEN_KEY)
+}
+
+export function getRefreshToken(): string {
+  return localStorage.getItem(REFRESH_TOKEN_KEY) || ''
+}
+
+export function setRefreshToken(token: string): void {
+  const value = token.trim()
+  if (value) {
+    localStorage.setItem(REFRESH_TOKEN_KEY, value)
+  } else {
+    localStorage.removeItem(REFRESH_TOKEN_KEY)
+  }
 }
 
 export function readOidcConfig(): OidcConfig | null {
@@ -136,11 +151,7 @@ export async function completeOidcCallback(
   if (!response.ok) {
     throw new Error(String(data.error_description || data.error || `换取令牌失败 (${response.status})`))
   }
-  const accessToken = data.access_token
-  if (typeof accessToken !== 'string' || !accessToken) {
-    throw new Error('令牌响应缺少 access_token')
-  }
-  setAccessToken(accessToken)
+  storeTokenResponse(data)
   sessionStorage.removeItem(PKCE_VERIFIER_KEY)
   sessionStorage.removeItem(PKCE_STATE_KEY)
   const clean = new URL(window.location.href)
@@ -150,4 +161,53 @@ export async function completeOidcCallback(
   clean.searchParams.delete('iss')
   window.history.replaceState({}, document.title, clean.pathname + clean.search + clean.hash)
   return true
+}
+
+function storeTokenResponse(data: Record<string, unknown>): void {
+  const accessToken = data.access_token
+  if (typeof accessToken !== 'string' || !accessToken) {
+    throw new Error('令牌响应缺少 access_token')
+  }
+  setAccessToken(accessToken)
+  const refresh = data.refresh_token
+  if (typeof refresh === 'string' && refresh) {
+    setRefreshToken(refresh)
+  }
+}
+
+/** 使用 refresh_token 换取新的 access_token；失败时清除本地令牌。 */
+export async function refreshAccessToken(
+  config: OidcConfig | null = readOidcConfig()
+): Promise<string> {
+  if (!config) {
+    throw new Error('未配置 OIDC')
+  }
+  const refresh = getRefreshToken()
+  if (!refresh) {
+    throw new Error('没有 refresh_token，请重新登录')
+  }
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: config.clientId,
+    refresh_token: refresh
+  })
+  const response = await fetch(tokenUrl(config.authority), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body
+  })
+  const text = await response.text()
+  let data: Record<string, unknown>
+  try {
+    data = JSON.parse(text) as Record<string, unknown>
+  } catch {
+    clearAccessToken()
+    throw new Error(`刷新令牌返回非 JSON：${text.slice(0, 120)}`)
+  }
+  if (!response.ok) {
+    clearAccessToken()
+    throw new Error(String(data.error_description || data.error || `刷新失败 (${response.status})`))
+  }
+  storeTokenResponse(data)
+  return getAccessToken()
 }

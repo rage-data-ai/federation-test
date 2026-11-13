@@ -60,4 +60,18 @@ class CatalogAclServiceTest {
         assertFalse(acl.isEnforced());
         assertTrue(acl.allows("secret_db"));
     }
+
+    @Test
+    void tableLevelGrantAllowsOnlyListedTables() {
+        properties.getSecurity().setCatalogs(Map.of(
+                "reader", "mysql_shop.public.orders, pg_warehouse.*"));
+        GatewayUser.set(new GatewayUser("reader", Set.of(GatewayRole.QUERY)));
+        assertTrue(acl.allowsTable(new com.cmcc.cmdevops.security.federation.model.TableRef(
+                "mysql_shop", "public", "orders", null)));
+        assertFalse(acl.allowsTable(new com.cmcc.cmdevops.security.federation.model.TableRef(
+                "mysql_shop", "public", "secrets", null)));
+        assertTrue(acl.allows("pg_warehouse"));
+        assertTrue(acl.allowsTable(new com.cmcc.cmdevops.security.federation.model.TableRef(
+                "pg_warehouse", "inv", "stock", null)));
+    }
 }

@@ -101,6 +101,7 @@ public class QueryService {
                 ? analyzed
                 : analyzer.analyze(afterVector);
 
+        catalogAcl.assertAllowedTables(routedQuery.tables());
         RoutePlan routed = router.route(routedQuery, afterVector, request.getEngine());
         catalogAcl.assertAllowed(routed.catalogs());
         String rewritten = rewriter.applyRouteRewrite(routed.rewrittenSql(), routed);
