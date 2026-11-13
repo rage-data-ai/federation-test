@@ -258,6 +258,7 @@ function cycleTheme() {
           当前用户 {{ authUser.name }} · 角色 {{ (authUser.roles || []).join(', ') || '无' }}
           · 鉴权 {{ authUser.securityEnabled ? '已开启' : '关闭' }}
           · JWT {{ authUser.jwtEnabled ? '已启用' : '未启用' }}
+          · Catalog ACL {{ authUser.catalogAcl ? (authUser.catalogs || []).join(', ') || '无' : '未启用' }}
         </p>
         <label>
           Bearer / Access Token

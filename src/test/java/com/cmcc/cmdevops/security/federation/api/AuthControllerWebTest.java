@@ -25,7 +25,12 @@ import com.cmcc.cmdevops.security.federation.security.RoleAuthorizationIntercept
 @WebMvcTest(controllers = AuthController.class)
 @AutoConfigureMockMvc(addFilters = false)
 @EnableConfigurationProperties(FederationProperties.class)
-@Import({ RoleAuthorizationInterceptor.class, WebMvcSecurityConfiguration.class, GlobalExceptionHandler.class })
+@Import({
+        RoleAuthorizationInterceptor.class,
+        WebMvcSecurityConfiguration.class,
+        GlobalExceptionHandler.class,
+        com.cmcc.cmdevops.security.federation.security.CatalogAclService.class
+})
 class AuthControllerWebTest {
 
     @Autowired
@@ -56,6 +61,8 @@ class AuthControllerWebTest {
                 .andExpect(jsonPath("$.roles[0]").value("ADMIN"))
                 .andExpect(jsonPath("$.roles[1]").value("QUERY"))
                 .andExpect(jsonPath("$.securityEnabled").value(true))
-                .andExpect(jsonPath("$.jwtEnabled").value(true));
+                .andExpect(jsonPath("$.jwtEnabled").value(true))
+                .andExpect(jsonPath("$.catalogAcl").value(false))
+                .andExpect(jsonPath("$.catalogs[0]").value("*"));
     }
 }

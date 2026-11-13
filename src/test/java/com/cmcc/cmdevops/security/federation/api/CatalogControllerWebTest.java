@@ -29,6 +29,7 @@ import com.cmcc.cmdevops.security.federation.catalog.CatalogRegistry;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogView;
 import com.cmcc.cmdevops.security.federation.config.WebMvcSecurityConfiguration;
 import com.cmcc.cmdevops.security.federation.metadata.MetadataService;
+import com.cmcc.cmdevops.security.federation.security.CatalogAclService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.RoleAuthorizationInterceptor;
@@ -55,9 +56,13 @@ class CatalogControllerWebTest {
     @MockitoBean
     private MetadataService metadataService;
 
+    @MockitoBean
+    private CatalogAclService catalogAcl;
+
     @BeforeEach
     void setUp() {
         GatewayUser.set(new GatewayUser("tester", Set.of(GatewayRole.ADMIN, GatewayRole.QUERY)));
+        when(catalogAcl.filter(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @AfterEach

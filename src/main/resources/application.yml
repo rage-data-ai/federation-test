@@ -49,6 +49,8 @@ federation:
     roles:
       demo: QUERY,ADMIN
       reader: QUERY
+    # 非空时按用户限制 catalog；示例：reader 仅 mysql_shop。默认空=不启用 ACL。
+    catalogs: {}
     jwt:
       issuer-uri: ${FEDERATION_JWT_ISSUER_URI:}
       roles-claim: ${FEDERATION_JWT_ROLES_CLAIM:roles}

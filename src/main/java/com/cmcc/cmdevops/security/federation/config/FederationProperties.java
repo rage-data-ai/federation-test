@@ -184,6 +184,11 @@ public class FederationProperties {
         private Map<String, String> tokens = new LinkedHashMap<>();
         /** 用户名 → 逗号分隔角色，如 QUERY 或 QUERY,ADMIN */
         private Map<String, String> roles = new LinkedHashMap<>();
+        /**
+         * 用户名 → 可访问 catalog（逗号分隔或 {@code *}）。非空时启用资源 ACL；
+         * 未列出的用户无任何 catalog；ADMIN 角色绕过。
+         */
+        private Map<String, String> catalogs = new LinkedHashMap<>();
         private final Jwt jwt = new Jwt();
 
         public boolean isEnabled() {
@@ -208,6 +213,14 @@ public class FederationProperties {
 
         public void setRoles(Map<String, String> roles) {
             this.roles = roles == null ? new LinkedHashMap<>() : roles;
+        }
+
+        public Map<String, String> getCatalogs() {
+            return catalogs;
+        }
+
+        public void setCatalogs(Map<String, String> catalogs) {
+            this.catalogs = catalogs == null ? new LinkedHashMap<>() : catalogs;
         }
 
         public Jwt getJwt() {

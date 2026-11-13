@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
+import com.cmcc.cmdevops.security.federation.security.CatalogAclService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 
@@ -17,9 +18,11 @@ import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 public class AuthController {
 
     private final FederationProperties properties;
+    private final CatalogAclService catalogAcl;
 
-    public AuthController(FederationProperties properties) {
+    public AuthController(FederationProperties properties, CatalogAclService catalogAcl) {
         this.properties = properties;
+        this.catalogAcl = catalogAcl;
     }
 
     /** 返回当前 Bearer / JWT 解析后的身份；鉴权关闭时为 anonymous。 */
@@ -31,6 +34,8 @@ public class AuthController {
         body.put("roles", user.roles().stream().map(GatewayRole::name).sorted().collect(Collectors.toList()));
         body.put("securityEnabled", properties.getSecurity().isEnabled());
         body.put("jwtEnabled", properties.getSecurity().getJwt().isEnabled());
+        body.put("catalogAcl", catalogAcl.isEnforced());
+        body.put("catalogs", catalogAcl.currentGrants().stream().sorted().collect(Collectors.toList()));
         return body;
     }
 }

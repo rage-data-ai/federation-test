@@ -104,6 +104,8 @@ export function authMe() {
     roles: string[]
     securityEnabled: boolean
     jwtEnabled: boolean
+    catalogAcl: boolean
+    catalogs: string[]
   }>('/api/v1/auth/me')
 }
 

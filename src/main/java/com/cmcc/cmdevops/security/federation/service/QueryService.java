@@ -24,6 +24,7 @@ import com.cmcc.cmdevops.security.federation.model.RoutePlan;
 import com.cmcc.cmdevops.security.federation.model.VectorSearchCall;
 import com.cmcc.cmdevops.security.federation.router.QueryRouter;
 import com.cmcc.cmdevops.security.federation.security.AuditService;
+import com.cmcc.cmdevops.security.federation.security.CatalogAclService;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.QuotaService;
 import com.cmcc.cmdevops.security.federation.sql.FederatedSqlAnalyzer;
@@ -43,6 +44,7 @@ public class QueryService {
     private final VectorSearchClient vectorSearchClient;
     private final QuotaService quotaService;
     private final AuditService auditService;
+    private final CatalogAclService catalogAcl;
     private final MeterRegistry meters;
 
     public QueryService(
@@ -55,6 +57,7 @@ public class QueryService {
             VectorSearchClient vectorSearchClient,
             QuotaService quotaService,
             AuditService auditService,
+            CatalogAclService catalogAcl,
             MeterRegistry meters) {
         this.analyzer = analyzer;
         this.rewriter = rewriter;
@@ -65,6 +68,7 @@ public class QueryService {
         this.vectorSearchClient = vectorSearchClient;
         this.quotaService = quotaService;
         this.auditService = auditService;
+        this.catalogAcl = catalogAcl;
         this.meters = meters;
     }
 
@@ -98,6 +102,7 @@ public class QueryService {
                 : analyzer.analyze(afterVector);
 
         RoutePlan routed = router.route(routedQuery, afterVector, request.getEngine());
+        catalogAcl.assertAllowed(routed.catalogs());
         String rewritten = rewriter.applyRouteRewrite(routed.rewrittenSql(), routed);
         RoutePlan plan = new RoutePlan(routed.engine(), routed.directCatalog(), routed.catalogs(),
                 routed.reason(), rewritten);
@@ -146,7 +151,9 @@ public class QueryService {
     }
 
     public List<CatalogView> listCatalogs() {
-        return catalogRegistry.list().stream().map(CatalogView::from).toList();
+        return catalogAcl.filter(
+                catalogRegistry.list().stream().map(CatalogView::from).toList(),
+                CatalogView::name);
     }
 
     private String injectVectors(AnalyzedQuery analyzed, Map<String, Object> parameters) {
@@ -165,7 +172,9 @@ public class QueryService {
 
     private QueryResponse showCatalogs(RoutePlan plan, long elapsedMs) {
         List<QueryResponse.ColumnMeta> columns = List.of(new QueryResponse.ColumnMeta("Catalog", "varchar"));
-        List<List<Object>> rows = catalogRegistry.list().stream()
+        List<List<Object>> rows = catalogAcl
+                .filter(catalogRegistry.list(), record -> record.getName())
+                .stream()
                 .map(record -> List.<Object>of(record.getName()))
                 .toList();
         return new QueryResponse(true, EngineType.GATEWAY.name(), plan.reason(), List.of(),

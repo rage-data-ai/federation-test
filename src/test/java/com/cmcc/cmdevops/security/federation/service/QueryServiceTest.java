@@ -29,6 +29,7 @@ import com.cmcc.cmdevops.security.federation.model.QueryResponse;
 import com.cmcc.cmdevops.security.federation.model.RoutePlan;
 import com.cmcc.cmdevops.security.federation.router.QueryRouter;
 import com.cmcc.cmdevops.security.federation.security.AuditService;
+import com.cmcc.cmdevops.security.federation.security.CatalogAclService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.QuotaService;
@@ -83,6 +84,7 @@ class QueryServiceTest {
                 vectors,
                 quota,
                 audit,
+                new CatalogAclService(properties),
                 new SimpleMeterRegistry());
     }
 
