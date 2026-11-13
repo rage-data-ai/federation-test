@@ -1,35 +1,26 @@
 package com.cmcc.cmdevops.security.federation.ask;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.BusinessContextBuilder;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.BusinessContextBuilder.Term;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyEntityViews;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyIndex;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyPathFinder;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
-import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Attribute;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Code;
-import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Concept;
-import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Condition;
-import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.DefinedConcept;
-import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Relation;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Snapshot;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyQueryService;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyRepository;
-import com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary;
 
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -41,16 +32,14 @@ import dev.langchain4j.agent.tool.Tool;
 @Component
 public class OntologyTools {
 
-    static final String STATUS_OK = "ok";
-    static final String STATUS_AMBIGUOUS = "ambiguous";
-    static final String STATUS_NO_MATCH = "no_match";
-
-    private static final Set<String> TEXT_TYPES = Set.of("string", "date", "dateTime");
-    private static final int MAX_PATHS = 5;
+    public static final String STATUS_OK = "ok";
+    public static final String STATUS_AMBIGUOUS = "ambiguous";
+    public static final String STATUS_NO_MATCH = "no_match";
 
     private final OntologyRepository repository;
-    private final OntologyQueryService queryService;
-    private final int maxDepth;
+    private final OntologyPathFinder pathFinder;
+    private final OntologyEntityViews views;
+    private final BusinessContextBuilder contextBuilder;
 
     @Autowired
     public OntologyTools(OntologyRepository repository, OntologyQueryService queryService, FederationProperties properties) {
@@ -59,8 +48,9 @@ public class OntologyTools {
 
     OntologyTools(OntologyRepository repository, OntologyQueryService queryService, int maxDepth) {
         this.repository = repository;
-        this.queryService = queryService;
-        this.maxDepth = maxDepth;
+        this.pathFinder = new OntologyPathFinder(maxDepth);
+        this.views = new OntologyEntityViews(queryService);
+        this.contextBuilder = new BusinessContextBuilder(repository, pathFinder, views);
     }
 
     @Tool("列出本体中全部业务概念（类）的名称、中文名、别名和映射的表，用于了解有哪些对象可以分析")
@@ -77,7 +67,7 @@ public class OntologyTools {
         }
         String needle = keyword.trim().toLowerCase(Locale.ROOT);
         List<EntityHit> hits = new ArrayList<>();
-        for (Term term : lexicon(repository.snapshot())) {
+        for (Term term : BusinessContextBuilder.lexicon(repository.snapshot())) {
             double score;
             if (term.text().equals(needle)) {
                 score = term.quality();
@@ -86,7 +76,8 @@ public class OntologyTools {
             } else {
                 continue;
             }
-            hits.add(new EntityHit(term.entity(), term.kind(), term.label(), term.original(), term.source(), round(score)));
+            hits.add(new EntityHit(term.entity(), term.kind(), term.label(), term.original(), term.source(),
+                    BusinessContextBuilder.round(score)));
         }
         Map<String, EntityHit> best = new LinkedHashMap<>();
         hits.stream()
@@ -98,534 +89,56 @@ public class OntologyTools {
     @Tool("查看一个本体实体的完整描述：类返回映射表、时间列、属性及码值、子类和相关关系；属性返回码值；派生概念返回定义和可用的 SQL 条件")
     public Object describeEntity(@P("实体名称，例如 Alert、alertLevel、HighRiskAlert") String name) {
         Snapshot snapshot = repository.snapshot();
-        Index index = new Index(snapshot);
+        OntologyIndex index = new OntologyIndex(snapshot);
         if (index.concepts.containsKey(name)) {
-            return conceptView(index, name);
+            return views.conceptView(index, name);
         }
         if (index.attributes.containsKey(name)) {
-            return attributeView(index, index.attributes.get(name));
+            return OntologyEntityViews.attributeView(index, index.attributes.get(name));
         }
         if (index.relations.containsKey(name)) {
-            return relationView(index, index.relations.get(name));
+            return OntologyEntityViews.relationView(index, index.relations.get(name));
         }
         if (index.defined.containsKey(name)) {
-            return definedView(index, index.defined.get(name));
+            return OntologyEntityViews.definedView(index, index.defined.get(name));
         }
         Code code = index.codes.get(name);
         if (code != null) {
-            return codeView(index, code);
+            return OntologyEntityViews.codeView(index, code);
         }
         return Map.of("error", "本体中没有实体 " + name + "，请先用 searchEntities 检索");
     }
 
     @Tool("查找两个业务概念之间的最短关系路径（可多跳），返回每一步的关系和 Join 条件")
     public List<JoinPath> findPaths(@P("起点概念名称") String from, @P("终点概念名称") String to) {
-        return paths(new Index(repository.snapshot()), from, to);
+        return pathFinder.findPaths(new OntologyIndex(repository.snapshot()), from, to);
     }
 
     @Tool("列出本体中全部派生业务概念（如高危告警、失陷主机）的正式定义")
     public List<DefinedView> listDefinedConcepts() {
-        Index index = new Index(repository.snapshot());
-        return index.defined.values().stream().map(defined -> definedView(index, defined)).toList();
+        OntologyIndex index = new OntologyIndex(repository.snapshot());
+        return index.defined.values().stream()
+                .map(defined -> OntologyEntityViews.definedView(index, defined))
+                .toList();
     }
 
     @Tool("对一个业务问题做确定性的本体检索：识别问题中的概念、属性、码值、派生概念，并给出它们之间的关系路径和置信度")
     public BusinessContext getBusinessContext(@P("用户的原始问题") String question) {
-        return businessContext(question, Set.of());
+        return contextBuilder.businessContext(question, Set.of());
     }
 
     /**
      * @param extraEntities 恢复检索时补充的实体名，与问题中的词面命中合并
      */
     public BusinessContext businessContext(String question, Set<String> extraEntities) {
-        return build(question, extraEntities, false);
+        return contextBuilder.businessContext(question, extraEntities);
     }
 
     /**
      * 只用多轮工具 Agent 选定的实体构造上下文，不再做词面匹配（歧义已由 Agent 消解）。
      */
     public BusinessContext contextOf(Set<String> entities) {
-        return build(null, entities, true);
-    }
-
-    private BusinessContext build(String question, Set<String> extraEntities, boolean exclusive) {
-        Snapshot snapshot = repository.snapshot();
-        Index index = new Index(snapshot);
-        List<String> warnings = new ArrayList<>();
-        List<Match> matches = exclusive ? new ArrayList<>()
-                : match(question == null ? "" : question, lexicon(snapshot), warnings);
-        for (String entity : extraEntities) {
-            String kind = index.kindOf(entity);
-            if (kind == null) {
-                warnings.add("本体中没有实体 " + entity);
-            } else if (matches.stream().noneMatch(m -> m.entity().equals(entity))) {
-                matches.add(new Match(entity, kind, entity, "agent", 0.8, "agent:" + entity));
-            }
-        }
-        matches = lockCodeConcepts(index, matches, warnings);
-
-        Set<String> seeds = new LinkedHashSet<>();
-        Set<String> attributes = new LinkedHashSet<>();
-        Set<String> relations = new LinkedHashSet<>();
-        Set<String> defined = new LinkedHashSet<>();
-        Set<String> codes = new LinkedHashSet<>();
-        Map<String, Set<String>> seedSpans = new HashMap<>();
-        for (Match match : matches) {
-            Set<String> matchSeeds = new LinkedHashSet<>();
-            switch (match.kind()) {
-                case "concept" -> matchSeeds.add(match.entity());
-                case "attribute" -> {
-                    attributes.add(match.entity());
-                    addSeed(matchSeeds, index.attributes.get(match.entity()).domain());
-                }
-                case "relation" -> {
-                    Relation relation = index.relations.get(match.entity());
-                    relations.add(relation.name());
-                    addSeed(matchSeeds, relation.domain());
-                    addSeed(matchSeeds, relation.range());
-                }
-                case "defined" -> {
-                    defined.add(match.entity());
-                    addSeed(matchSeeds, index.defined.get(match.entity()).base());
-                }
-                case "code" -> {
-                    Code code = index.codes.get(match.entity());
-                    codes.add(code.name());
-                    Attribute owner = index.codeOwner(code.codeList());
-                    if (owner == null) {
-                        warnings.add("码值 " + code.name() + " 的集合 " + code.codeList() + " 没有挂在任何属性上，无法确定概念");
-                    } else {
-                        attributes.add(owner.name());
-                        addSeed(matchSeeds, owner.domain());
-                    }
-                }
-                default -> {
-                }
-            }
-            seeds.addAll(matchSeeds);
-            matchSeeds.forEach(seed -> seedSpans.computeIfAbsent(seed, ignored -> new LinkedHashSet<>()).add(match.span()));
-        }
-
-        List<String> unresolved = new ArrayList<>();
-        for (String seed : seeds) {
-            Concept concept = index.concepts.get(seed);
-            if (concept == null || concept.table() == null) {
-                unresolved.add("概念 " + seed + " 没有映射物理表");
-            }
-        }
-        List<JoinPath> paths = new ArrayList<>();
-        List<String> seedList = new ArrayList<>(seeds);
-        boolean disconnected = false;
-        for (int i = 0; i < seedList.size(); i++) {
-            for (int j = i + 1; j < seedList.size(); j++) {
-                if (alternatives(seedSpans.get(seedList.get(i)), seedSpans.get(seedList.get(j)))) {
-                    continue;
-                }
-                List<JoinPath> found = paths(index, seedList.get(i), seedList.get(j));
-                if (found.isEmpty()) {
-                    disconnected = true;
-                    unresolved.add(seedList.get(i) + " 与 " + seedList.get(j) + " 之间没有关系路径");
-                }
-                paths.addAll(found);
-            }
-        }
-        paths.forEach(path -> path.steps().forEach(step -> relations.add(step.relation())));
-
-        String status;
-        double confidence;
-        if (seeds.isEmpty()) {
-            status = STATUS_NO_MATCH;
-            confidence = 0;
-        } else {
-            confidence = matches.stream().mapToDouble(Match::quality).average().orElse(0);
-            boolean ambiguous = warnings.stream().anyMatch(warning -> warning.startsWith("歧义"));
-            status = ambiguous ? STATUS_AMBIGUOUS : STATUS_OK;
-            if (ambiguous) {
-                confidence *= 0.6;
-            }
-            if (disconnected) {
-                confidence *= 0.8;
-            }
-        }
-        return new BusinessContext(
-                status,
-                round(confidence),
-                matches.stream().map(m -> new EntityHit(m.entity(), m.kind(), index.labelOf(m.entity()), m.text(),
-                        m.source(), round(m.quality()))).toList(),
-                seeds.stream().filter(index.concepts::containsKey).map(seed -> conceptView(index, seed)).toList(),
-                attributes.stream().map(name -> attributeView(index, index.attributes.get(name))).toList(),
-                relations.stream().filter(index.relations::containsKey)
-                        .map(name -> relationView(index, index.relations.get(name))).toList(),
-                defined.stream().map(name -> definedView(index, index.defined.get(name))).toList(),
-                codes.stream().map(index.codes::get)
-                        .map(code -> codeView(index, code))
-                        .toList(),
-                paths,
-                warnings,
-                unresolved);
-    }
-
-    /**
-     * 同一个词命中多个概念的码值时，若问题里另外提到了其中某个概念（或它的属性），只保留该概念的码值。
-     */
-    private static List<Match> lockCodeConcepts(Index index, List<Match> matches, List<String> warnings) {
-        Set<String> mentioned = new LinkedHashSet<>();
-        for (Match match : matches) {
-            switch (match.kind()) {
-                case "concept" -> mentioned.add(match.entity());
-                case "attribute" -> addSeed(mentioned, index.attributes.get(match.entity()).domain());
-                case "defined" -> addSeed(mentioned, index.defined.get(match.entity()).base());
-                default -> {
-                }
-            }
-        }
-        if (mentioned.isEmpty()) {
-            return matches;
-        }
-        Map<String, List<Match>> bySpan = new LinkedHashMap<>();
-        matches.stream().filter(match -> "code".equals(match.kind()))
-                .forEach(match -> bySpan.computeIfAbsent(match.span(), ignored -> new ArrayList<>()).add(match));
-        Set<Match> dropped = new HashSet<>();
-        for (List<Match> group : bySpan.values()) {
-            if (group.size() < 2) {
-                continue;
-            }
-            List<Match> kept = group.stream().filter(match -> {
-                Attribute owner = index.codeOwner(index.codes.get(match.entity()).codeList());
-                return owner != null && mentioned.contains(owner.domain());
-            }).toList();
-            if (kept.isEmpty() || kept.size() == group.size()) {
-                continue;
-            }
-            group.stream().filter(match -> !kept.contains(match)).forEach(dropped::add);
-            Set<String> removed = group.stream().filter(dropped::contains).map(Match::entity).collect(Collectors.toSet());
-            warnings.removeIf(warning -> warning.startsWith("歧义") && removed.stream().anyMatch(warning::contains)
-                    && kept.size() == 1);
-            warnings.add("「" + group.get(0).text() + "」按问题中的概念锁定为码值 "
-                    + kept.stream().map(Match::entity).toList());
-        }
-        if (dropped.isEmpty()) {
-            return matches;
-        }
-        return new ArrayList<>(matches.stream().filter(match -> !dropped.contains(match)).toList());
-    }
-
-    private static boolean alternatives(Set<String> left, Set<String> right) {
-        return left.size() == 1 && left.equals(right);
-    }
-
-    private static void addSeed(Set<String> seeds, String concept) {
-        if (concept != null) {
-            seeds.add(concept);
-        }
-    }
-
-    static List<Match> match(String question, List<Term> lexicon, List<String> warnings) {
-        String text = question.toLowerCase(Locale.ROOT);
-        List<Occurrence> occurrences = new ArrayList<>();
-        for (Term term : lexicon) {
-            int from = 0;
-            while (true) {
-                int at = text.indexOf(term.text(), from);
-                if (at < 0) {
-                    break;
-                }
-                occurrences.add(new Occurrence(term, at, at + term.text().length()));
-                from = at + 1;
-            }
-        }
-        occurrences.sort(Comparator.comparingInt((Occurrence o) -> o.end() - o.start()).reversed()
-                .thenComparing(Comparator.comparingDouble((Occurrence o) -> o.term().quality()).reversed()));
-
-        boolean[] covered = new boolean[text.length()];
-        Map<String, List<Occurrence>> accepted = new LinkedHashMap<>();
-        for (Occurrence occurrence : occurrences) {
-            String span = occurrence.start() + ":" + occurrence.end();
-            if (!accepted.containsKey(span) && anyCovered(covered, occurrence)) {
-                continue;
-            }
-            accepted.computeIfAbsent(span, ignored -> new ArrayList<>()).add(occurrence);
-            for (int i = occurrence.start(); i < occurrence.end(); i++) {
-                covered[i] = true;
-            }
-        }
-
-        Map<String, Match> result = new LinkedHashMap<>();
-        for (Map.Entry<String, List<Occurrence>> entry : accepted.entrySet()) {
-            List<Occurrence> group = entry.getValue();
-            double top = group.stream().mapToDouble(o -> o.term().quality()).max().orElse(0);
-            List<Occurrence> best = group.stream().filter(o -> o.term().quality() == top).toList();
-            Set<String> entities = best.stream().map(o -> o.term().entity()).collect(Collectors.toCollection(LinkedHashSet::new));
-            if (entities.size() > 1) {
-                warnings.add("歧义：「" + best.get(0).term().original() + "」同时对应 " + entities);
-            }
-            for (Occurrence occurrence : best) {
-                Term term = occurrence.term();
-                result.merge(term.entity(),
-                        new Match(term.entity(), term.kind(), term.original(), term.source(), term.quality(), entry.getKey()),
-                        (a, b) -> a.quality() >= b.quality() ? a : b);
-            }
-        }
-        return new ArrayList<>(result.values());
-    }
-
-    private static boolean anyCovered(boolean[] covered, Occurrence occurrence) {
-        for (int i = occurrence.start(); i < occurrence.end(); i++) {
-            if (covered[i]) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    static List<Term> lexicon(Snapshot snapshot) {
-        List<Term> terms = new ArrayList<>();
-        snapshot.concepts().forEach(c -> addTerms(terms, c.name(), "concept", c.labelZh(), c.labelEn(), c.aliases()));
-        snapshot.attributes().forEach(a -> addTerms(terms, a.name(), "attribute", a.labelZh(), a.labelEn(), a.aliases()));
-        snapshot.relations().forEach(r -> addTerms(terms, r.name(), "relation", r.labelZh(), r.labelEn(), r.aliases()));
-        snapshot.definedConcepts().forEach(d -> addTerms(terms, d.name(), "defined", d.labelZh(), d.labelEn(), d.aliases()));
-        snapshot.codes().forEach(c -> addTerms(terms, c.name(), "code", c.labelZh(), c.labelEn(), c.aliases()));
-        return terms;
-    }
-
-    private static void addTerms(List<Term> terms, String name, String kind, String labelZh, String labelEn, List<String> aliases) {
-        String label = labelZh != null ? labelZh : name;
-        addTerm(terms, name, kind, label, labelZh, "label", 1.0);
-        addTerm(terms, name, kind, label, name, "name", 1.0);
-        addTerm(terms, name, kind, label, labelEn, "labelEn", 0.9);
-        if (aliases != null) {
-            aliases.forEach(alias -> addTerm(terms, name, kind, label, alias, "alias", 0.85));
-        }
-    }
-
-    private static void addTerm(List<Term> terms, String entity, String kind, String label, String text, String source, double quality) {
-        if (text == null || text.isBlank() || text.trim().length() < 2) {
-            return;
-        }
-        terms.add(new Term(entity, kind, label, text.trim(), text.trim().toLowerCase(Locale.ROOT), source, quality));
-    }
-
-    private List<JoinPath> paths(Index index, String from, String to) {
-        String start = index.conceptFor(from);
-        String goal = index.conceptFor(to);
-        if (start == null || goal == null) {
-            return List.of();
-        }
-        if (start.equals(goal)) {
-            return List.of(new JoinPath(start, goal, List.of()));
-        }
-        Map<String, List<PathStep>> edges = new HashMap<>();
-        for (Relation relation : index.relations.values()) {
-            if (relation.domain() == null || relation.range() == null) {
-                continue;
-            }
-            String join = joinText(index, relation);
-            edges.computeIfAbsent(relation.domain(), ignored -> new ArrayList<>())
-                    .add(new PathStep(relation.name(), relation.labelZh(), relation.domain(), relation.range(), join, false));
-            edges.computeIfAbsent(relation.range(), ignored -> new ArrayList<>())
-                    .add(new PathStep(relation.name(), relation.labelZh(), relation.range(), relation.domain(), join, true));
-        }
-        List<JoinPath> found = new ArrayList<>();
-        Deque<List<PathStep>> queue = new ArrayDeque<>();
-        queue.add(List.of());
-        int shortest = Integer.MAX_VALUE;
-        while (!queue.isEmpty() && found.size() < MAX_PATHS) {
-            List<PathStep> path = queue.poll();
-            if (path.size() >= maxDepth || path.size() >= shortest) {
-                continue;
-            }
-            String node = path.isEmpty() ? start : path.get(path.size() - 1).to();
-            Set<String> visited = new LinkedHashSet<>();
-            visited.add(start);
-            path.forEach(step -> visited.add(step.to()));
-            for (PathStep step : edges.getOrDefault(node, List.of())) {
-                if (visited.contains(step.to())) {
-                    continue;
-                }
-                List<PathStep> next = new ArrayList<>(path);
-                next.add(step);
-                if (step.to().equals(goal)) {
-                    shortest = next.size();
-                    found.add(new JoinPath(start, goal, next));
-                } else {
-                    queue.add(next);
-                }
-            }
-        }
-        return found;
-    }
-
-    private static String joinText(Index index, Relation relation) {
-        if (relation.joinFrom() == null || relation.joinTo() == null) {
-            return null;
-        }
-        return tableOf(index, relation.domain()) + "." + relation.joinFrom()
-                + " = " + tableOf(index, relation.range()) + "." + relation.joinTo();
-    }
-
-    private static String tableOf(Index index, String concept) {
-        Concept c = index.concepts.get(concept);
-        return c == null || c.table() == null ? concept : c.table();
-    }
-
-    private ConceptView conceptView(Index index, String name) {
-        Concept concept = index.concepts.get(name);
-        List<AttributeView> attributes = index.attributes.values().stream()
-                .filter(attribute -> name.equals(attribute.domain()))
-                .map(attribute -> attributeView(index, attribute))
-                .toList();
-        List<String> related = index.relations.values().stream()
-                .filter(relation -> name.equals(relation.domain()) || name.equals(relation.range()))
-                .map(Relation::name)
-                .toList();
-        List<String> derived = index.defined.values().stream()
-                .filter(defined -> name.equals(defined.base()))
-                .map(DefinedConcept::name)
-                .toList();
-        return new ConceptView(concept.name(), concept.labelZh(), concept.aliases(), concept.comment(), concept.parent(),
-                subConcepts(name), concept.table(), concept.timeColumn(), concept.largeTable(), attributes, related, derived);
-    }
-
-    private List<String> subConcepts(String name) {
-        String sparql = "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n"
-                + "SELECT DISTINCT ?c WHERE { ?c rdfs:subClassOf <" + OntologyVocabulary.iri(name) + "> "
-                + "FILTER(isIRI(?c) && ?c != <" + OntologyVocabulary.iri(name) + "> "
-                + "&& STRSTARTS(STR(?c), \"" + OntologyVocabulary.SOC + "\")) } ORDER BY ?c";
-        return queryService.select(sparql, true).rows().stream()
-                .map(row -> OntologyVocabulary.localName(row.get(0)))
-                .toList();
-    }
-
-    private static CodeView codeView(Index index, Code code) {
-        Attribute owner = index.codeOwner(code.codeList());
-        return new CodeView(code.name(), code.codeList(), code.value(), code.labelZh(), code.aliases(),
-                owner == null ? null : owner.domain(),
-                owner == null ? null : owner.name(),
-                owner == null ? null : owner.column());
-    }
-
-    private static AttributeView attributeView(Index index, Attribute attribute) {
-        List<CodeView> codes = attribute.codeList() == null ? List.of() : index.codes.values().stream()
-                .filter(code -> attribute.codeList().equals(code.codeList()))
-                .map(code -> codeView(index, code))
-                .toList();
-        return new AttributeView(attribute.name(), attribute.labelZh(), attribute.aliases(), attribute.comment(),
-                attribute.domain(), attribute.column(), attribute.datatype(), attribute.unit(), attribute.identifier(),
-                attribute.codeList(), codes);
-    }
-
-    private static RelationView relationView(Index index, Relation relation) {
-        return new RelationView(relation.name(), relation.labelZh(), relation.aliases(), relation.comment(),
-                relation.domain(), relation.range(), joinText(index, relation), relation.inverse(),
-                relation.transitive(), relation.functional());
-    }
-
-    static DefinedView definedView(Index index, DefinedConcept defined) {
-        List<String> readable = new ArrayList<>();
-        List<String> sql = new ArrayList<>();
-        for (Condition condition : defined.conditions()) {
-            Attribute attribute = index.attributes.get(condition.attribute());
-            String label = attribute == null || attribute.labelZh() == null ? condition.attribute() : attribute.labelZh();
-            readable.add(label + " " + condition.operator() + " " + condition.value());
-            if (attribute != null && attribute.column() != null) {
-                boolean text = TEXT_TYPES.contains(Objects.toString(attribute.datatype(), "string"));
-                String value = text ? "'" + condition.value().replace("'", "''") + "'" : condition.value();
-                sql.add(attribute.column() + " " + condition.operator() + " " + value);
-            }
-        }
-        Concept base = index.concepts.get(defined.base());
-        return new DefinedView(defined.name(), defined.labelZh(), defined.aliases(), defined.comment(), defined.base(),
-                base == null ? null : base.table(), readable,
-                sql.isEmpty() ? null : String.join(" AND ", sql), defined.definitionText());
-    }
-
-    private static double round(double value) {
-        return Math.round(value * 100) / 100.0;
-    }
-
-    static final class Index {
-        final Map<String, Concept> concepts;
-        final Map<String, Attribute> attributes;
-        final Map<String, Relation> relations;
-        final Map<String, DefinedConcept> defined;
-        final Map<String, Code> codes;
-
-        Index(Snapshot snapshot) {
-            concepts = byName(snapshot.concepts(), Concept::name);
-            attributes = byName(snapshot.attributes(), Attribute::name);
-            relations = byName(snapshot.relations(), Relation::name);
-            defined = byName(snapshot.definedConcepts(), DefinedConcept::name);
-            codes = byName(snapshot.codes(), Code::name);
-        }
-
-        /** 码值集合只属于一个概念的一个属性（由本体仓库保证）。 */
-        Attribute codeOwner(String codeList) {
-            if (codeList == null) {
-                return null;
-            }
-            return attributes.values().stream()
-                    .filter(attribute -> codeList.equals(attribute.codeList()))
-                    .findFirst()
-                    .orElse(null);
-        }
-
-        String kindOf(String name) {
-            if (concepts.containsKey(name)) {
-                return "concept";
-            }
-            if (attributes.containsKey(name)) {
-                return "attribute";
-            }
-            if (relations.containsKey(name)) {
-                return "relation";
-            }
-            if (defined.containsKey(name)) {
-                return "defined";
-            }
-            return codes.containsKey(name) ? "code" : null;
-        }
-
-        String conceptFor(String name) {
-            if (concepts.containsKey(name)) {
-                return name;
-            }
-            DefinedConcept d = defined.get(name);
-            return d == null ? null : d.base();
-        }
-
-        String labelOf(String name) {
-            if (concepts.containsKey(name)) {
-                return concepts.get(name).labelZh();
-            }
-            if (attributes.containsKey(name)) {
-                return attributes.get(name).labelZh();
-            }
-            if (relations.containsKey(name)) {
-                return relations.get(name).labelZh();
-            }
-            if (defined.containsKey(name)) {
-                return defined.get(name).labelZh();
-            }
-            return codes.containsKey(name) ? codes.get(name).labelZh() : null;
-        }
-
-        private static <T> Map<String, T> byName(List<T> items, Function<T, String> name) {
-            Map<String, T> map = new LinkedHashMap<>();
-            items.forEach(item -> map.put(name.apply(item), item));
-            return map;
-        }
-    }
-
-    record Term(String entity, String kind, String label, String original, String text, String source, double quality) {
-    }
-
-    record Occurrence(Term term, int start, int end) {
-    }
-
-    /**
-     * @param span 命中的问题片段位置；同一片段的多个候选互为歧义备选，不要求它们之间有关系路径
-     */
-    record Match(String entity, String kind, String text, String source, double quality, String span) {
+        return contextBuilder.contextOf(entities);
     }
 
     public record ConceptSummary(String name, String labelZh, List<String> aliases, String table) {
