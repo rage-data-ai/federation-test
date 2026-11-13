@@ -36,10 +36,10 @@ public final class BusinessContextBuilder {
     private final OntologyPathFinder pathFinder;
     private final OntologyEntityViews views;
     private final TermEmbedder termEmbedder;
-    private final Path embeddingCacheDir;
+    private final OntologyEmbeddingStore embeddingStore;
 
     public BusinessContextBuilder(OntologyRepository repository, OntologyPathFinder pathFinder, OntologyEntityViews views) {
-        this(repository, pathFinder, views, new HashingTermEmbedder(), null);
+        this(repository, pathFinder, views, new HashingTermEmbedder(), (OntologyEmbeddingStore) null);
     }
 
     public BusinessContextBuilder(
@@ -47,7 +47,7 @@ public final class BusinessContextBuilder {
             OntologyPathFinder pathFinder,
             OntologyEntityViews views,
             TermEmbedder termEmbedder) {
-        this(repository, pathFinder, views, termEmbedder, null);
+        this(repository, pathFinder, views, termEmbedder, (OntologyEmbeddingStore) null);
     }
 
     public BusinessContextBuilder(
@@ -56,11 +56,25 @@ public final class BusinessContextBuilder {
             OntologyEntityViews views,
             TermEmbedder termEmbedder,
             Path embeddingCacheDir) {
+        this(
+                repository,
+                pathFinder,
+                views,
+                termEmbedder,
+                embeddingCacheDir == null ? null : new FileOntologyEmbeddingStore(embeddingCacheDir));
+    }
+
+    public BusinessContextBuilder(
+            OntologyRepository repository,
+            OntologyPathFinder pathFinder,
+            OntologyEntityViews views,
+            TermEmbedder termEmbedder,
+            OntologyEmbeddingStore embeddingStore) {
         this.repository = repository;
         this.pathFinder = pathFinder;
         this.views = views;
         this.termEmbedder = termEmbedder == null ? new HashingTermEmbedder() : termEmbedder;
-        this.embeddingCacheDir = embeddingCacheDir;
+        this.embeddingStore = embeddingStore;
     }
 
     public BusinessContext businessContext(String question, Set<String> extraEntities) {
@@ -85,7 +99,7 @@ public final class BusinessContextBuilder {
                 : match(question == null ? "" : question, lexicon, warnings);
         if (!exclusive && question != null && matches.isEmpty()) {
             // 无字面命中时：先本地哈希嵌入召回，再 n-gram 补漏（无需 pgvector / EMBED API）
-            matches.addAll(EmbeddingTermRetriever.retrieve(question, lexicon, termEmbedder, embeddingCacheDir, 5));
+            matches.addAll(EmbeddingTermRetriever.retrieve(question, lexicon, termEmbedder, embeddingStore, 5));
             if (matches.isEmpty()) {
                 matches.addAll(NgramTermRetriever.retrieve(question, lexicon, 5));
             }

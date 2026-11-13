@@ -476,6 +476,11 @@ public class FederationProperties {
         private String embedModel = "";
         /** 术语向量落盘目录；空则默认为 ontologyStore 同级 ontology-embeddings */
         private String embedCacheDir = "";
+        /**
+         * 术语向量持久化后端：{@code file}（仅落盘）、{@code jdbc}（仅联邦库）、
+         * {@code both}（JDBC 优先加载，双写；对齐 Auto Ontology 共享索引）。
+         */
+        private String embedStore = "both";
 
         public double getMinConfidence() {
             return minConfidence;
@@ -539,6 +544,14 @@ public class FederationProperties {
 
         public void setEmbedCacheDir(String embedCacheDir) {
             this.embedCacheDir = embedCacheDir == null ? "" : embedCacheDir;
+        }
+
+        public String getEmbedStore() {
+            return embedStore;
+        }
+
+        public void setEmbedStore(String embedStore) {
+            this.embedStore = embedStore == null || embedStore.isBlank() ? "both" : embedStore.trim();
         }
     }
 

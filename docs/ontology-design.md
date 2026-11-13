@@ -180,7 +180,7 @@
 | `LLM_API_KEY` | 密钥 |
 | `LLM_MODEL` | 模型名 |
 
-`federation.ask.*` 可调：`min-confidence`（默认 0.5，低于它转多轮工具探索）、`max-path-depth`（关系路径最大跳数，默认 4）、`sample-rows`（起草时每表样例行数，默认 3）、`result-preview-rows`（返回给大模型和页面的结果行数，默认 50）。
+`federation.ask.*` 可调：`min-confidence`（默认 0.5，低于它转多轮工具探索）、`max-path-depth`（关系路径最大跳数，默认 4）、`sample-rows`（起草时每表样例行数，默认 3）、`result-preview-rows`（返回给大模型和页面的结果行数，默认 50）、`embed-endpoint` / `embed-store`（`file` | `jdbc` | `both`，默认 `both`：联邦库 `fed_ontology_embedding` + 落盘术语索引）。
 
 ### 11.2 与上文设计的差异
 

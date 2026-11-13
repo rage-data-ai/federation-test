@@ -125,6 +125,15 @@ public class FederalDataSource {
                   model VARCHAR(128) NOT NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_ontology_embedding (
+                  fingerprint VARCHAR(32) NOT NULL,
+                  embedder VARCHAR(64) NOT NULL,
+                  payload LONGBLOB NOT NULL,
+                  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  PRIMARY KEY (fingerprint, embedder)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
     }
 
     private void migrateLegacy(ObjectMapper objectMapper) {

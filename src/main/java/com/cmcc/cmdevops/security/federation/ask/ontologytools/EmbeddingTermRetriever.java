@@ -17,19 +17,25 @@ public final class EmbeddingTermRetriever {
     }
 
     public static List<Match> retrieve(String question, List<Term> lexicon, int limit) {
-        return retrieve(question, lexicon, DEFAULT, null, limit);
+        return retrieve(question, lexicon, DEFAULT, (OntologyEmbeddingStore) null, limit);
     }
 
     public static List<Match> retrieve(String question, List<Term> lexicon, TermEmbedder embedder, int limit) {
-        return retrieve(question, lexicon, embedder, null, limit);
+        return retrieve(question, lexicon, embedder, (OntologyEmbeddingStore) null, limit);
     }
 
     public static List<Match> retrieve(
             String question, List<Term> lexicon, TermEmbedder embedder, Path cacheDir, int limit) {
+        OntologyEmbeddingStore store = cacheDir == null ? null : new FileOntologyEmbeddingStore(cacheDir);
+        return retrieve(question, lexicon, embedder, store, limit);
+    }
+
+    public static List<Match> retrieve(
+            String question, List<Term> lexicon, TermEmbedder embedder, OntologyEmbeddingStore store, int limit) {
         if (question == null || question.isBlank() || lexicon == null || lexicon.isEmpty()) {
             return List.of();
         }
-        OntologyEmbeddingIndex index = OntologyEmbeddingIndex.build(lexicon, embedder, cacheDir);
+        OntologyEmbeddingIndex index = OntologyEmbeddingIndex.build(lexicon, embedder, store);
         return index.retrieve(question, embedder, limit);
     }
 }

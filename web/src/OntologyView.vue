@@ -14,6 +14,7 @@ import {
 } from './api'
 import OntologyGraph from './OntologyGraph.vue'
 import DraftDialog from './components/ontology/DraftDialog.vue'
+import { useFocusTrap } from './composables/useFocusTrap'
 import { qualified, useOntologyDraft } from './composables/useOntologyDraft'
 import { KINDS, OPERATORS, useOntologyEditor, type KindKey } from './composables/useOntologyEditor'
 import type { CatalogRecord, LlmStatus, MetadataTable, OntologyBundle, OntologyEntity } from './types'
@@ -101,6 +102,11 @@ const versionsBusy = ref(false)
 const versionsNote = ref('')
 const openNodes = ref(new Set<string>())
 
+const deleteDialog = ref<HTMLElement | null>(null)
+const renameDialog = ref<HTMLElement | null>(null)
+const versionsDialog = ref<HTMLElement | null>(null)
+const turtleDialog = ref<HTMLElement | null>(null)
+
 const columnsByTable = computed(() => {
   const map: Record<string, string[]> = {}
   for (const t of tables.value) {
@@ -136,6 +142,22 @@ const {
   conceptNames,
   columnsByTable,
   fresh
+})
+
+const deleteOpen = computed(() => pendingDelete.value != null)
+const renameOpen = computed(() => renaming.value != null)
+const turtleOpen = computed(() => !!turtle.value)
+useFocusTrap(deleteOpen, deleteDialog, () => {
+  pendingDelete.value = null
+})
+useFocusTrap(renameOpen, renameDialog, () => {
+  renaming.value = null
+})
+useFocusTrap(versionsOpen, versionsDialog, () => {
+  versionsOpen.value = false
+})
+useFocusTrap(turtleOpen, turtleDialog, () => {
+  turtle.value = ''
 })
 
 async function load() {
@@ -782,7 +804,13 @@ function ensureConditions() {
     </div>
 
     <div v-if="pendingDelete" class="mask" @click.self="pendingDelete = null">
-      <div class="dialog confirm" role="alertdialog" aria-labelledby="delete-title">
+      <div
+        ref="deleteDialog"
+        class="dialog confirm"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-title"
+      >
         <h3 id="delete-title">删除 {{ pendingDelete.name }}？</h3>
         <p v-if="pendingDelete.note">{{ pendingDelete.note }}</p>
         <div class="actions">
@@ -793,8 +821,15 @@ function ensureConditions() {
     </div>
 
     <div v-if="renaming" class="mask" @click.self="renaming = null">
-      <form class="dialog confirm" @submit.prevent="confirmRename">
-        <h3>重命名主题域</h3>
+      <form
+        ref="renameDialog"
+        class="dialog confirm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rename-title"
+        @submit.prevent="confirmRename"
+      >
+        <h3 id="rename-title">重命名主题域</h3>
         <label>
           新名字
           <input v-model="renaming.to" required />
@@ -836,7 +871,13 @@ function ensureConditions() {
     />
 
     <div v-if="versionsOpen" class="mask" @click.self="versionsOpen = false">
-      <div class="dialog preview" role="dialog" aria-modal="true" aria-labelledby="versions-title">
+      <div
+        ref="versionsDialog"
+        class="dialog preview"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="versions-title"
+      >
         <h3 id="versions-title">本体版本</h3>
         <p class="hint">起草前会自动打 checkpoint；也可手动快照或回滚。</p>
         <p v-if="versionsNote" class="head-note">{{ versionsNote }}</p>
@@ -861,8 +902,14 @@ function ensureConditions() {
     </div>
 
     <div v-if="turtle" class="mask" @click.self="turtle = ''">
-      <div class="dialog preview">
-        <h3>本体 Turtle</h3>
+      <div
+        ref="turtleDialog"
+        class="dialog preview"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="turtle-title"
+      >
+        <h3 id="turtle-title">本体 Turtle</h3>
         <pre>{{ turtle }}</pre>
         <div class="actions">
           <button type="button" @click="downloadTurtle">下载 .ttl</button>
