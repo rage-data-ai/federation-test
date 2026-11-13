@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, provide, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, provide, reactive, ref, type Component } from 'vue'
 import { authLogout, authMe, llmConfig, llmStatus, saveLlm, testLlm } from './api'
 import {
   beginOidcLogin,
@@ -15,19 +15,29 @@ import {
 import AskView from './AskView.vue'
 import DatasourceView from './DatasourceView.vue'
 import OntologyView from './OntologyView.vue'
+import type { AuthMe, LlmConfig, LlmStatus } from './types'
+import { errMessage } from './types'
 
-const MODULES = [
+type ModuleDef = {
+  key: string
+  label: string
+  short: string
+  icon: string
+  component: Component
+}
+
+const MODULES: ModuleDef[] = [
   { key: 'datasource', label: '数据源管理', short: '数据源', icon: '⛁', component: DatasourceView },
   { key: 'ontology', label: '本体建模', short: '本体', icon: '◈', component: OntologyView },
   { key: 'ask', label: '智能问数', short: '问数', icon: '✦', component: AskView }
 ]
 
 const saved = localStorage.getItem('module')
-const active = ref(MODULES.some((item) => item.key === saved) ? saved : 'datasource')
-const current = computed(() => MODULES.find((item) => item.key === active.value).component)
+const active = ref(MODULES.some((item) => item.key === saved) ? (saved as string) : 'datasource')
+const current = computed(() => MODULES.find((item) => item.key === active.value)?.component ?? DatasourceView)
 
 const showLlm = ref(false)
-const llm = ref(null)
+const llm = ref<LlmStatus | LlmConfig | null>(null)
 const llmRevision = ref(0)
 const llmForm = reactive({ protocol: 'openai', baseUrl: '', apiKey: '', model: '' })
 const llmMessage = ref('')
@@ -38,7 +48,7 @@ provide('llmRevision', llmRevision)
 
 const showAuth = ref(false)
 const authForm = reactive({ token: getAccessToken() })
-const authUser = ref(null)
+const authUser = ref<AuthMe | null>(null)
 const authError = ref('')
 const authBusy = ref(false)
 const oidcEnabled = !!readOidcConfig()
@@ -67,7 +77,7 @@ onMounted(async () => {
   try {
     await completeOidcCallback()
   } catch (e) {
-    authError.value = e.message
+    authError.value = errMessage(e)
     showAuth.value = true
   }
   authForm.token = getAccessToken()
@@ -93,7 +103,7 @@ async function refreshAuth() {
   } catch (e) {
     authUser.value = null
     if (getAccessToken()) {
-      authError.value = e.message
+      authError.value = errMessage(e)
     }
   }
 }
@@ -113,7 +123,7 @@ async function saveAuthToken() {
     await refreshAuth()
     showAuth.value = false
   } catch (e) {
-    authError.value = e.message
+    authError.value = errMessage(e)
   } finally {
     authBusy.value = false
   }
@@ -148,7 +158,7 @@ async function loginOidc() {
   try {
     await beginOidcLogin()
   } catch (e) {
-    authError.value = e.message
+    authError.value = errMessage(e)
   }
 }
 
@@ -160,7 +170,7 @@ async function refreshOidc() {
     authForm.token = getAccessToken()
     await refreshAuth()
   } catch (e) {
-    authError.value = e.message
+    authError.value = errMessage(e)
   } finally {
     authBusy.value = false
   }
@@ -178,7 +188,7 @@ async function openLlm() {
     llmForm.apiKey = ''
     llm.value = config
   } catch (e) {
-    llmError.value = e.message
+    llmError.value = errMessage(e)
   }
 }
 
@@ -201,7 +211,7 @@ async function saveLlmConfig() {
     llmRevision.value += 1
     llmMessage.value = '已保存，立即生效'
   } catch (e) {
-    llmError.value = e.message
+    llmError.value = errMessage(e)
   } finally {
     llmBusy.value = ''
   }
@@ -219,13 +229,13 @@ async function testLlmConfig() {
       llmError.value = result.message || '连接失败'
     }
   } catch (e) {
-    llmError.value = e.message
+    llmError.value = errMessage(e)
   } finally {
     llmBusy.value = ''
   }
 }
 
-function open(key) {
+function open(key: string) {
   active.value = key
   localStorage.setItem('module', key)
 }

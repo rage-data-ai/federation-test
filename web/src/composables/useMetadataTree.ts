@@ -1,25 +1,10 @@
 import { computed, nextTick, ref, type Ref } from 'vue'
+import type { CatalogRecord, MetadataColumn, MetadataTable } from '../types'
 
 const TABLE_CAP = 80
 
-export type MetadataColumn = {
-  name: string
-  type?: string
-  [key: string]: unknown
-}
-
-export type MetadataTable = {
-  catalog: string
-  schema: string
-  table: string
-  columns?: MetadataColumn[]
-  [key: string]: unknown
-}
-
-export type CatalogItem = {
-  name: string
-  [key: string]: unknown
-}
+export type { MetadataColumn, MetadataTable }
+export type CatalogItem = CatalogRecord
 
 export type MetadataTreeOptions = {
   catalogs: Ref<CatalogItem[]>

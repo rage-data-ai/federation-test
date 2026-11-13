@@ -1,48 +1,75 @@
 <script setup lang="ts">
-import { computed, inject, onActivated, ref, watch } from 'vue'
+import { computed, inject, onActivated, ref, watch, type Ref } from 'vue'
 import { getOntology, getOntologyTurtle, listCatalogs, listMetadata, llmStatus, renameSubject } from './api'
 import OntologyGraph from './OntologyGraph.vue'
 import DraftDialog from './components/ontology/DraftDialog.vue'
 import { qualified, useOntologyDraft } from './composables/useOntologyDraft'
-import { KINDS, OPERATORS, useOntologyEditor } from './composables/useOntologyEditor'
+import { KINDS, OPERATORS, useOntologyEditor, type KindKey } from './composables/useOntologyEditor'
+import type { CatalogRecord, LlmStatus, MetadataTable, OntologyBundle, OntologyEntity } from './types'
+import { emptyOntology, errMessage } from './types'
 
-const tables = ref([])
-const catalogs = ref([])
+type TreeAdd = { kind: KindKey; preset?: Record<string, unknown> } | null
 
-const openLlmSettings = inject('openLlmSettings', () => {})
-const llmRevision = inject('llmRevision', ref(0))
+type TreeRow = {
+  type: 'section' | 'item'
+  key: string
+  depth: number
+  label?: string
+  count?: number
+  warn?: boolean
+  kind?: KindKey | string
+  item?: OntologyEntity
+  out?: boolean
+  toggle?: boolean
+  open?: boolean
+  add?: TreeAdd
+}
+
+type SubjectTab = { name: string; label: string; count: number }
+type RenameState = { from: string; to: string; error: string }
+
+const tables = ref<MetadataTable[]>([])
+const catalogs = ref<CatalogRecord[]>([])
+
+const openLlmSettings = inject<() => void>('openLlmSettings', () => {})
+const llmRevision = inject<Ref<number>>('llmRevision', ref(0))
 /** 全部主题域的本体。页面上的树、画布和下拉选项都只用当前主题域的 snapshot。 */
-const everything = ref({ concepts: [], attributes: [], relations: [], codes: [], definedConcepts: [] })
+const everything = ref<OntologyBundle>(emptyOntology())
 /** 当前主题域；空串是"未分主题域" */
 const subject = ref('')
 const UNASSIGNED = '未分主题域'
-const subjectOf = (concept) => (concept.subject || '').trim()
+const subjectOf = (concept: OntologyEntity) => (concept.subject || '').trim()
 
 /** 只留一个主题域的概念，以及跟随它们的属性、关系、码值和派生概念。没有归属的实体算在未分主题域里。 */
-function scopeTo(data, name) {
+function scopeTo(data: OntologyBundle, name: string): OntologyBundle {
   const all = new Set(data.concepts.map((c) => c.name))
   const mine = new Set(data.concepts.filter((c) => subjectOf(c) === name).map((c) => c.name))
-  const stray = (owner) => name === '' && !all.has(owner)
-  const attributes = data.attributes.filter((a) => mine.has(a.domain) || stray(a.domain))
-  const ownedLists = new Set(data.attributes.filter((a) => all.has(a.domain) && a.codeList).map((a) => a.codeList))
-  const lists = new Set(attributes.filter((a) => a.codeList).map((a) => a.codeList))
+  const stray = (owner: string) => name === '' && !all.has(owner)
+  const attributes = data.attributes.filter((a) => mine.has(a.domain || '') || stray(a.domain || ''))
+  const ownedLists = new Set(
+    data.attributes.filter((a) => all.has(a.domain || '') && a.codeList).map((a) => a.codeList as string)
+  )
+  const lists = new Set(attributes.filter((a) => a.codeList).map((a) => a.codeList as string))
   return {
     concepts: data.concepts.filter((c) => mine.has(c.name)),
     attributes,
-    relations: data.relations.filter((r) => (mine.has(r.domain) && mine.has(r.range))
-      || (name === '' && !all.has(r.domain) && !all.has(r.range))),
-    codes: data.codes.filter((c) => lists.has(c.codeList) || (name === '' && !ownedLists.has(c.codeList))),
-    definedConcepts: data.definedConcepts.filter((d) => mine.has(d.base) || stray(d.base))
+    relations: data.relations.filter(
+      (r) =>
+        (mine.has(r.domain || '') && mine.has(r.range || '')) ||
+        (name === '' && !all.has(r.domain || '') && !all.has(r.range || ''))
+    ),
+    codes: data.codes.filter((c) => lists.has(c.codeList || '') || (name === '' && !ownedLists.has(c.codeList || ''))),
+    definedConcepts: data.definedConcepts.filter((d) => mine.has(d.base || '') || stray(d.base || ''))
   }
 }
 
 const subjects = computed(() => {
-  const counts = new Map()
+  const counts = new Map<string, number>()
   for (const concept of everything.value.concepts) {
     counts.set(subjectOf(concept), (counts.get(subjectOf(concept)) || 0) + 1)
   }
   const named = [...counts.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b, 'zh'))
-  const list = named.map((name) => ({ name, label: name, count: counts.get(name) }))
+  const list: SubjectTab[] = named.map((name) => ({ name, label: name, count: counts.get(name) || 0 }))
   const loose = scopeTo(everything.value, '')
   if (counts.has('') || loose.attributes.length || loose.relations.length || loose.codes.length || loose.definedConcepts.length) {
     list.push({ name: '', label: UNASSIGNED, count: counts.get('') || 0 })
@@ -53,14 +80,14 @@ const subjectNames = computed(() => subjects.value.map((item) => item.name).filt
 const snapshot = computed(() => scopeTo(everything.value, subject.value))
 
 const query = ref('')
-const llm = ref(null)
-const fresh = ref([])
-const renaming = ref(null)
+const llm = ref<LlmStatus | null>(null)
+const fresh = ref<string[]>([])
+const renaming = ref<RenameState | null>(null)
 const turtle = ref('')
-const openNodes = ref(new Set())
+const openNodes = ref(new Set<string>())
 
 const columnsByTable = computed(() => {
-  const map = {}
+  const map: Record<string, string[]> = {}
   for (const t of tables.value) {
     map[qualified(t).toLowerCase()] = (t.columns || []).map((c) => c.name)
   }
@@ -101,7 +128,7 @@ async function load() {
     everything.value = await getOntology()
     error.value = ''
   } catch (e) {
-    error.value = e.message
+    error.value = errMessage(e)
   }
 }
 
@@ -136,28 +163,32 @@ const {
   fresh
 })
 
-watch(subjects, (list) => {
-  if (list.length && !list.some((item) => item.name === subject.value)) {
-    subject.value = list[0].name
-  }
-}, { immediate: true })
+watch(
+  subjects,
+  (list) => {
+    if (list.length && !list.some((item) => item.name === subject.value)) {
+      subject.value = list[0]!.name
+    }
+  },
+  { immediate: true }
+)
 watch(subject, () => {
   selected.value = null
 })
 
-function groupBy(items, key) {
-  const map = new Map()
+function groupBy<T>(items: T[] | undefined, key: (item: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>()
   for (const item of items || []) {
     const k = key(item)
     if (!map.has(k)) {
       map.set(k, [])
     }
-    map.get(k).push(item)
+    map.get(k)!.push(item)
   }
   return map
 }
 
-function toggleNode(key) {
+function toggleNode(key: string) {
   const next = new Set(openNodes.value)
   if (next.has(key)) {
     next.delete(key)
@@ -171,36 +202,43 @@ function toggleNode(key) {
 const tree = computed(() => {
   const s = snapshot.value
   const q = query.value.trim().toLowerCase()
-  const hit = (item) => !q
-    || item.name.toLowerCase().includes(q)
-    || (item.labelZh || '').toLowerCase().includes(q)
-    || (item.aliases || []).some((a) => a.toLowerCase().includes(q))
-    || (item.value != null && String(item.value).toLowerCase() === q)
+  const hit = (item: OntologyEntity) =>
+    !q ||
+    item.name.toLowerCase().includes(q) ||
+    (item.labelZh || '').toLowerCase().includes(q) ||
+    (item.aliases || []).some((a) => a.toLowerCase().includes(q)) ||
+    (item.value != null && String(item.value).toLowerCase() === q)
   const conceptSet = new Set(s.concepts.map((c) => c.name))
-  const attrsOf = groupBy(s.attributes, (a) => a.domain)
-  const codesOf = groupBy(s.codes, (c) => c.codeList)
-  const outOf = groupBy(s.relations, (r) => r.domain)
-  const inOf = groupBy(s.relations, (r) => r.range)
-  const definedOf = groupBy(s.definedConcepts, (d) => d.base)
-  const childrenOf = groupBy(s.concepts.filter((c) => c.parent && conceptSet.has(c.parent)), (c) => c.parent)
-  const codesFor = (attribute) => (attribute.codeList ? codesOf.get(attribute.codeList) || [] : [])
-  const isOpen = (key) => !!q || openNodes.value.has(key)
+  const attrsOf = groupBy(s.attributes, (a) => a.domain || '')
+  const codesOf = groupBy(s.codes, (c) => c.codeList || '')
+  const outOf = groupBy(s.relations, (r) => r.domain || '')
+  const inOf = groupBy(s.relations, (r) => r.range || '')
+  const definedOf = groupBy(s.definedConcepts, (d) => d.base || '')
+  const childrenOf = groupBy(
+    s.concepts.filter((c) => c.parent && conceptSet.has(c.parent)),
+    (c) => c.parent || ''
+  )
+  const codesFor = (attribute: OntologyEntity) => (attribute.codeList ? codesOf.get(attribute.codeList) || [] : [])
+  const isOpen = (key: string) => !!q || openNodes.value.has(key)
 
-  const memo = new Map()
-  const conceptHit = (concept) => {
+  const memo = new Map<string, boolean>()
+  const conceptHit = (concept: OntologyEntity): boolean => {
     if (!memo.has(concept.name)) {
       memo.set(concept.name, false)
-      memo.set(concept.name, hit(concept)
-        || (attrsOf.get(concept.name) || []).some((a) => hit(a) || codesFor(a).some(hit))
-        || (outOf.get(concept.name) || []).some(hit)
-        || (definedOf.get(concept.name) || []).some(hit)
-        || (childrenOf.get(concept.name) || []).some(conceptHit))
+      memo.set(
+        concept.name,
+        hit(concept) ||
+          (attrsOf.get(concept.name) || []).some((a) => hit(a) || codesFor(a).some(hit)) ||
+          (outOf.get(concept.name) || []).some(hit) ||
+          (definedOf.get(concept.name) || []).some(hit) ||
+          (childrenOf.get(concept.name) || []).some(conceptHit)
+      )
     }
-    return memo.get(concept.name)
+    return memo.get(concept.name)!
   }
 
-  const rows = []
-  const visit = (concept, depth) => {
+  const rows: TreeRow[] = []
+  const visit = (concept: OntologyEntity, depth: number) => {
     if (q && !conceptHit(concept)) {
       return
     }
@@ -219,16 +257,30 @@ const tree = computed(() => {
     const all = !q || hit(concept)
     const shownAttrs = all ? attrs : attrs.filter((a) => hit(a) || codesFor(a).some(hit))
     if (!q || shownAttrs.length) {
-      rows.push({ type: 'section', key: `${key}:attrs`, depth: depth + 1, label: '属性', count: attrs.length,
-        add: { kind: 'attribute', preset: { domain: concept.name } } })
+      rows.push({
+        type: 'section',
+        key: `${key}:attrs`,
+        depth: depth + 1,
+        label: '属性',
+        count: attrs.length,
+        add: { kind: 'attribute', preset: { domain: concept.name } }
+      })
     }
     for (const attribute of shownAttrs) {
       const codes = codesFor(attribute)
       const akey = `a:${attribute.name}`
       const aOpen = codes.length > 0 && (openNodes.value.has(akey) || (!!q && codes.some(hit) && !hit(attribute)))
-      rows.push({ type: 'item', kind: 'attribute', key: akey, depth: depth + 2, item: attribute,
-        toggle: codes.length > 0, open: aOpen, count: codes.length,
-        add: attribute.codeList ? { kind: 'code', preset: { codeList: attribute.codeList } } : null })
+      rows.push({
+        type: 'item',
+        kind: 'attribute',
+        key: akey,
+        depth: depth + 2,
+        item: attribute,
+        toggle: codes.length > 0,
+        open: aOpen,
+        count: codes.length,
+        add: attribute.codeList ? { kind: 'code', preset: { codeList: attribute.codeList } } : null
+      })
       if (aOpen) {
         const shownCodes = all || hit(attribute) ? codes : codes.filter(hit)
         for (const code of shownCodes) {
@@ -238,23 +290,41 @@ const tree = computed(() => {
     }
     const shownRelations = all ? relations : relations.filter(({ r }) => hit(r))
     if (!q || shownRelations.length) {
-      rows.push({ type: 'section', key: `${key}:rels`, depth: depth + 1, label: '关系', count: relations.length,
-        add: { kind: 'relation', preset: { domain: concept.name } } })
+      rows.push({
+        type: 'section',
+        key: `${key}:rels`,
+        depth: depth + 1,
+        label: '关系',
+        count: relations.length,
+        add: { kind: 'relation', preset: { domain: concept.name } }
+      })
     }
     for (const { r, out } of shownRelations) {
       rows.push({ type: 'item', kind: 'relation', key: `r:${concept.name}:${r.name}`, depth: depth + 2, item: r, out })
     }
     const shownDefined = all ? defined : defined.filter(hit)
     if (shownDefined.length) {
-      rows.push({ type: 'section', key: `${key}:defs`, depth: depth + 1, label: '派生概念', count: defined.length,
-        add: { kind: 'defined', preset: { base: concept.name } } })
+      rows.push({
+        type: 'section',
+        key: `${key}:defs`,
+        depth: depth + 1,
+        label: '派生概念',
+        count: defined.length,
+        add: { kind: 'defined', preset: { base: concept.name } }
+      })
       for (const item of shownDefined) {
         rows.push({ type: 'item', kind: 'defined', key: `d:${item.name}`, depth: depth + 2, item })
       }
     }
     if (children.length) {
-      rows.push({ type: 'section', key: `${key}:kids`, depth: depth + 1, label: '子概念', count: children.length,
-        add: { kind: 'concept', preset: { parent: concept.name } } })
+      rows.push({
+        type: 'section',
+        key: `${key}:kids`,
+        depth: depth + 1,
+        label: '子概念',
+        count: children.length,
+        add: { kind: 'concept', preset: { parent: concept.name } }
+      })
       for (const child of children) {
         visit(child, depth + 2)
       }
@@ -262,15 +332,26 @@ const tree = computed(() => {
   }
   s.concepts.filter((c) => !c.parent || !conceptSet.has(c.parent)).forEach((c) => visit(c, 0))
 
-  const ownedLists = new Set(s.attributes.filter((a) => conceptSet.has(a.domain) && a.codeList).map((a) => a.codeList))
-  const orphans = [
-    ...s.attributes.filter((a) => !conceptSet.has(a.domain)).map((item) => ({ kind: 'attribute', item })),
-    ...s.relations.filter((r) => !conceptSet.has(r.domain) && !conceptSet.has(r.range)).map((item) => ({ kind: 'relation', item, out: true })),
-    ...s.codes.filter((c) => !ownedLists.has(c.codeList)).map((item) => ({ kind: 'code', item })),
-    ...s.definedConcepts.filter((d) => !conceptSet.has(d.base)).map((item) => ({ kind: 'defined', item }))
+  const ownedLists = new Set(
+    s.attributes.filter((a) => conceptSet.has(a.domain || '') && a.codeList).map((a) => a.codeList as string)
+  )
+  const orphans: Array<{ kind: KindKey; item: OntologyEntity; out?: boolean }> = [
+    ...s.attributes.filter((a) => !conceptSet.has(a.domain || '')).map((item) => ({ kind: 'attribute' as const, item })),
+    ...s.relations
+      .filter((r) => !conceptSet.has(r.domain || '') && !conceptSet.has(r.range || ''))
+      .map((item) => ({ kind: 'relation' as const, item, out: true })),
+    ...s.codes.filter((c) => !ownedLists.has(c.codeList || '')).map((item) => ({ kind: 'code' as const, item })),
+    ...s.definedConcepts.filter((d) => !conceptSet.has(d.base || '')).map((item) => ({ kind: 'defined' as const, item }))
   ].filter(({ item }) => hit(item))
   if (orphans.length) {
-    rows.push({ type: 'section', key: 'orphans', depth: 0, label: '未归属（所属概念已不存在）', count: orphans.length, warn: true })
+    rows.push({
+      type: 'section',
+      key: 'orphans',
+      depth: 0,
+      label: '未归属（所属概念已不存在）',
+      count: orphans.length,
+      warn: true
+    })
     for (const { kind, item, out } of orphans) {
       rows.push({ type: 'item', kind, key: `o:${kind}:${item.name}`, depth: 1, item, out })
     }
@@ -278,39 +359,59 @@ const tree = computed(() => {
   return rows
 })
 
-const KIND_TAG = { concept: '概念', attribute: '属性', code: '码值', relation: '关系', defined: '派生' }
+const KIND_TAG: Record<string, string> = {
+  concept: '概念',
+  attribute: '属性',
+  code: '码值',
+  relation: '关系',
+  defined: '派生'
+}
 
-function rowSub(row) {
+function rowSub(row: TreeRow) {
   const item = row.item
+  if (!item) {
+    return ''
+  }
   switch (row.kind) {
-    case 'concept': return item.table || '未映射表'
-    case 'attribute': return [item.column || '未映射列', item.datatype, item.identifier ? '主键' : ''].filter(Boolean).join('  ')
-    case 'code': return `取值 ${item.value}`
+    case 'concept':
+      return item.table || '未映射表'
+    case 'attribute':
+      return [item.column || '未映射列', item.datatype, item.identifier ? '主键' : ''].filter(Boolean).join('  ')
+    case 'code':
+      return `取值 ${item.value}`
     case 'relation': {
       const other = row.out ? item.range : item.domain
       const label = snapshot.value.concepts.find((c) => c.name === other)?.labelZh || other || '?'
       const join = item.joinFrom && item.joinTo ? `  ${item.joinFrom} = ${item.joinTo}` : ''
       return `${row.out ? '→' : '←'} ${label}${join}`
     }
-    default: return (item.conditions || []).map((c) => `${c.attribute} ${c.operator} ${c.value}`).join(' 且 ') || item.definitionText || ''
+    default:
+      return (
+        (item.conditions || []).map((c) => `${c.attribute} ${c.operator} ${c.value}`).join(' 且 ') ||
+        item.definitionText ||
+        ''
+      )
   }
 }
 
-function openRow(row) {
-  open(KINDS.find((kind) => kind.key === row.kind), row.item)
+function openRow(row: TreeRow) {
+  const kind = KINDS.find((k) => k.key === row.kind)
+  if (kind && row.item) {
+    open(kind, row.item)
+  }
 }
 
 /** 选中实体时把它在树里的上级都展开。 */
-function revealInTree(kindKey, item) {
+function revealInTree(kindKey: string, item: OntologyEntity) {
   const s = snapshot.value
   const next = new Set(openNodes.value)
-  const addConcept = (name) => {
+  const addConcept = (name?: string) => {
     let current = s.concepts.find((c) => c.name === name)
-    const seen = new Set()
+    const seen = new Set<string>()
     while (current && !seen.has(current.name)) {
       seen.add(current.name)
       next.add(`c:${current.name}`)
-      current = s.concepts.find((c) => c.name === current.parent)
+      current = s.concepts.find((c) => c.name === current!.parent)
     }
   }
   if (kindKey === 'concept') {
@@ -354,9 +455,9 @@ async function loadSources() {
   }
 }
 
-function onPick(target) {
+function onPick(target: { kind: string; name: string }) {
   const kind = KINDS.find((item) => item.key === target.kind)
-  const entity = kind && snapshot.value[kind.list].find((item) => item.name === target.name)
+  const entity = kind && (snapshot.value[kind.list] as OntologyEntity[]).find((item) => item.name === target.name)
   if (kind && entity) {
     open(kind, entity)
   }
@@ -364,9 +465,9 @@ function onPick(target) {
 
 watch(selected, () => {
   if (selected.value && !isNew.value) {
-    const kind = KINDS.find((item) => item.key === selected.value.kind)
-    const entity = kind && snapshot.value[kind.list].find((item) => item.name === form.name)
-    if (entity) {
+    const kind = KINDS.find((item) => item.key === selected.value!.kind)
+    const entity = kind && (snapshot.value[kind.list] as OntologyEntity[]).find((item) => item.name === form.name)
+    if (kind && entity) {
       revealInTree(kind.key, entity)
     }
   }
@@ -377,6 +478,9 @@ function openRename() {
 }
 
 async function confirmRename() {
+  if (!renaming.value) {
+    return
+  }
   const { from, to } = renaming.value
   const target = to.trim()
   if (!target || target === from) {
@@ -388,7 +492,9 @@ async function confirmRename() {
     subject.value = target
     renaming.value = null
   } catch (e) {
-    renaming.value.error = e.message
+    if (renaming.value) {
+      renaming.value.error = errMessage(e)
+    }
   }
 }
 
@@ -396,7 +502,7 @@ async function showTurtle() {
   try {
     turtle.value = await getOntologyTurtle()
   } catch (e) {
-    error.value = e.message
+    error.value = errMessage(e)
   }
 }
 
@@ -407,6 +513,13 @@ function downloadTurtle() {
   link.download = 'ontology.ttl'
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function ensureConditions() {
+  if (!form.conditions) {
+    form.conditions = []
+  }
+  return form.conditions
 }
 </script>
 
@@ -456,7 +569,7 @@ function downloadTurtle() {
           v-for="row in tree"
           :key="row.key"
           class="tree-row"
-          :class="[row.type, row.kind, { active: row.type === 'item' && selected && !isNew && form.name === row.item.name, warn: row.warn }]"
+          :class="[row.type, row.kind, { active: row.type === 'item' && selected && !isNew && form.name === row.item?.name, warn: row.warn }]"
           :style="{ paddingLeft: `${6 + row.depth * 14}px` }"
         >
           <template v-if="row.type === 'section'">
@@ -482,8 +595,8 @@ function downloadTurtle() {
             <span v-else class="caret-gap" />
             <button class="node-btn" type="button" @click="openRow(row)">
               <span class="node-line">
-                <i class="tag" :class="row.kind">{{ KIND_TAG[row.kind] }}</i>
-                <span class="node-label">{{ row.kind === 'code' ? (row.item.labelZh || row.item.value) : (row.item.labelZh || row.item.name) }}</span>
+                <i class="tag" :class="row.kind">{{ row.kind ? KIND_TAG[row.kind] : '' }}</i>
+                <span class="node-label">{{ row.kind === 'code' ? (row.item?.labelZh || row.item?.value) : (row.item?.labelZh || row.item?.name) }}</span>
                 <em v-if="row.count" class="count">{{ row.count }}</em>
               </span>
               <small>{{ rowSub(row) }}</small>
@@ -495,7 +608,7 @@ function downloadTurtle() {
               :title="`新建${KIND_TAG[row.add.kind]}`"
               @click="createKind(row.add.kind, row.add.preset)"
             >＋</button>
-            <button class="icon sm danger ghost" type="button" title="删除" @click="removeNamed(row.item.name)">✕</button>
+            <button v-if="row.item" class="icon sm danger ghost" type="button" title="删除" @click="removeNamed(row.item.name)">✕</button>
           </template>
         </div>
       </div>
@@ -570,7 +683,7 @@ function downloadTurtle() {
           </label>
           <div v-else-if="field.type === 'conditions'" class="conditions">
             <span class="cond-label">{{ field.label }}</span>
-            <div v-for="(cond, cidx) in form.conditions" :key="cidx" class="cond">
+            <div v-for="(cond, cidx) in ensureConditions()" :key="cidx" class="cond">
               <select v-model="cond.attribute">
                 <option v-for="name in attributeNames" :key="name" :value="name">{{ name }}</option>
               </select>
@@ -578,9 +691,9 @@ function downloadTurtle() {
                 <option v-for="op in OPERATORS" :key="op" :value="op">{{ op }}</option>
               </select>
               <input v-model="cond.value" placeholder="值" />
-              <button class="icon sm" type="button" title="删除条件" @click="form.conditions.splice(cidx, 1)">✕</button>
+              <button class="icon sm" type="button" title="删除条件" @click="ensureConditions().splice(cidx, 1)">✕</button>
             </div>
-            <button class="link" type="button" @click="form.conditions.push({ attribute: attributeNames[0] || '', operator: '>=', value: '' })">＋ 添加条件</button>
+            <button class="link" type="button" @click="ensureConditions().push({ attribute: attributeNames[0] || '', operator: '>=', value: '' })">＋ 添加条件</button>
           </div>
         </template>
         <label>

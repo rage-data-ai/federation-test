@@ -63,6 +63,19 @@ public class AskController {
         }
     }
 
+    /**
+     * 廉价可回答性预检（不调用 LLM、不执行 SQL）。
+     * 对齐 NVIDIA Auto Ontology {@code check_answerable}：先确认本体覆盖再发起完整问数。
+     */
+    @RequireRole(GatewayRole.QUERY)
+    @PostMapping("/ask/answerable")
+    public Object answerable(@RequestBody AskRequest request) {
+        if (request == null || request.question() == null || request.question().isBlank()) {
+            throw new IllegalArgumentException("问题不能为空");
+        }
+        return askService.answerability(request.question().strip());
+    }
+
     @RequireRole(GatewayRole.QUERY)
     @PostMapping(value = "/ask", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter ask(@RequestBody AskRequest request) {

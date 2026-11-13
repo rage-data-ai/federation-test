@@ -11,25 +11,27 @@ import {
 } from './api'
 import { typeLabel } from './examples'
 import CatalogFormModal from './components/datasource/CatalogFormModal.vue'
-import { useCatalogForm } from './composables/useCatalogForm'
-import { useMetadataTree } from './composables/useMetadataTree'
+import { useCatalogForm, type CatalogRecord } from './composables/useCatalogForm'
+import { useMetadataTree, type MetadataTable } from './composables/useMetadataTree'
+import type { ExampleItem, QueryResult } from './types'
+import { errMessage } from './types'
 
-const catalogs = ref([])
-const examples = ref([])
+const catalogs = ref<CatalogRecord[]>([])
+const examples = ref<ExampleItem[]>([])
 const sql = ref('SHOW CATALOGS')
 const loading = ref(false)
 const error = ref('')
-const result = ref(null)
+const result = ref<QueryResult | null>(null)
 const sideError = ref('')
-const gatewayOk = ref(null)
+const gatewayOk = ref<boolean | null>(null)
 
 const showRewritten = ref(false)
 const preview = ref('')
-const snapshots = ref([])
+const snapshots = ref<MetadataTable[]>([])
 const collecting = ref('')
 const menu = ref('')
 const sideOpen = ref(false)
-const sqlBox = ref(null)
+const sqlBox = ref<HTMLTextAreaElement | null>(null)
 let errorTimer = 0
 
 const hasRows = computed(() => !!result.value?.columns?.length)
@@ -38,7 +40,7 @@ function closeMenu() {
   menu.value = ''
 }
 
-function flashError(message) {
+function flashError(message: string) {
   sideError.value = message
   window.clearTimeout(errorTimer)
   errorTimer = window.setTimeout(() => {
@@ -50,7 +52,7 @@ async function loadExamples() {
   try {
     examples.value = await listExamples()
     if (examples.value.length && sql.value === 'SHOW CATALOGS') {
-      sql.value = examples.value[0].sql
+      sql.value = examples.value[0]?.sql ?? sql.value
     }
   } catch {
     examples.value = []
@@ -63,7 +65,7 @@ async function loadCatalogs() {
     gatewayOk.value = true
   } catch (e) {
     gatewayOk.value = false
-    flashError(e.message || '无法加载数据源')
+    flashError(errMessage(e, '无法加载数据源'))
   }
 }
 
@@ -150,7 +152,7 @@ onUnmounted(() => {
   window.removeEventListener('click', closeMenu)
 })
 
-function onHotkey(event) {
+function onHotkey(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
     event.preventDefault()
     if (!loading.value) {
@@ -162,7 +164,7 @@ function onHotkey(event) {
   }
 }
 
-function toggleMenu(key) {
+function toggleMenu(key: string) {
   menu.value = menu.value === key ? '' : key
 }
 
@@ -171,12 +173,12 @@ function refreshAll() {
   loadMetadata()
 }
 
-function useExample(item) {
+function useExample(item: ExampleItem) {
   sql.value = item.sql
   menu.value = ''
 }
 
-async function collectCatalog(name) {
+async function collectCatalog(name: string) {
   menu.value = ''
   collecting.value = name
   try {
@@ -184,13 +186,13 @@ async function collectCatalog(name) {
     openCatalogs.value = { ...openCatalogs.value, [name]: true }
     await loadMetadata()
   } catch (e) {
-    flashError(e.message || '采集失败')
+    flashError(errMessage(e, '采集失败'))
   } finally {
     collecting.value = ''
   }
 }
 
-async function removeTable(item) {
+async function removeTable(item: MetadataTable) {
   menu.value = ''
   if (!confirm(`从已采集的元数据中删除 ${qualifiedTable(item)}？数据库里的表不会被删除。`)) {
     return
@@ -199,24 +201,24 @@ async function removeTable(item) {
     await deleteMetadata(item.catalog, item.schema, item.table)
     await loadMetadata()
   } catch (e) {
-    flashError(e.message || '删除失败')
+    flashError(errMessage(e, '删除失败'))
   }
 }
 
-async function collectTable(item) {
+async function collectTable(item: MetadataTable) {
   menu.value = ''
   collecting.value = tableKey(item)
   try {
     await collectMetadata({ catalog: item.catalog, schema: item.schema, table: item.table })
     await loadMetadata()
   } catch (e) {
-    flashError(e.message || '重采失败')
+    flashError(errMessage(e, '重采失败'))
   } finally {
     collecting.value = ''
   }
 }
 
-async function submit(explainOnly) {
+async function submit(explainOnly: boolean) {
   error.value = ''
   result.value = null
   preview.value = ''
@@ -228,13 +230,13 @@ async function submit(explainOnly) {
       error.value = result.value.message || '查询失败'
     }
   } catch (e) {
-    error.value = e.message || '请求失败'
+    error.value = errMessage(e, '请求失败')
   } finally {
     loading.value = false
   }
 }
 
-function displayCell(cell) {
+function displayCell(cell: unknown) {
   if (cell == null) {
     return { text: 'NULL', title: '', empty: true }
   }
@@ -242,12 +244,12 @@ function displayCell(cell) {
   return { text, title: text, empty: false }
 }
 
-function openPreview(cell) {
+function openPreview(cell: unknown) {
   const shown = displayCell(cell)
   preview.value = shown.empty ? 'NULL' : shown.text
 }
 
-function catalogEndpoint(item) {
+function catalogEndpoint(item: CatalogRecord | null | undefined) {
   if (!item) {
     return ''
   }
@@ -392,11 +394,11 @@ function catalogEndpoint(item) {
             <table>
               <thead>
                 <tr>
-                  <th v-for="col in result.columns" :key="col.name">{{ col.name }}</th>
+                  <th v-for="col in result?.columns || []" :key="col.name">{{ col.name }}</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(row, idx) in result.rows" :key="idx">
+                <tr v-for="(row, idx) in result?.rows || []" :key="idx">
                   <td
                     v-for="(cell, cidx) in row"
                     :key="cidx"

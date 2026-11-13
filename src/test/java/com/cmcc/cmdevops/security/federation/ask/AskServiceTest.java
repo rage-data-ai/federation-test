@@ -82,16 +82,17 @@ class AskServiceTest {
 
         service(model, rows(List.of("web-01", 5L))).ask(new AskRequest("最近一天高危告警最多的资产名称", List.of()), this::record);
 
-        assertEquals(List.of("stage", "ontology", "stage", "metadata", "stage", "sql", "sql", "result", "answer"), events);
+        assertEquals(List.of("stage", "answerability", "ontology", "stage", "metadata", "stage", "sql", "sql", "result", "answer"), events);
         assertEquals(List.of(GOOD_SQL), executed);
-        Map<?, ?> rejected = (Map<?, ?>) payloads.get(5);
+        Map<?, ?> rejected = (Map<?, ?>) payloads.get(events.indexOf("sql"));
         assertEquals("rejected", rejected.get("status"));
         assertTrue(String.valueOf(rejected.get("message")).contains("occurTime"));
         assertTrue(model.toolResults().get(0).startsWith("校验未通过"));
-        Map<?, ?> answer = (Map<?, ?>) payloads.get(8);
+        Map<?, ?> answer = (Map<?, ?>) payloads.get(events.lastIndexOf("answer"));
         assertEquals("web-01 最多，5 条", answer.get("answer"));
         assertEquals(List.of(List.of("web-01", 5L)), answer.get("rows"));
         assertEquals(2, ((List<?>) answer.get("caliber")).size());
+        assertTrue(((List<?>) answer.get("steps")).size() >= 2);
     }
 
     @Test

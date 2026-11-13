@@ -6,9 +6,5 @@
     "moduleDetection": "force",
     "types": ["vite/client"]
   },
-  "include": [
-    "src/**/*.ts",
-    "src/components/ask/AskAnswerClarify.vue",
-    "src/components/datasource/CatalogFormModal.vue"
-  ]
+  "include": ["src/**/*.ts", "src/**/*.vue"]
 }

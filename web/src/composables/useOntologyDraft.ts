@@ -1,5 +1,15 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import { draftOntology } from '../api'
+import type {
+  CatalogRecord,
+  DraftLogEntry,
+  DraftResult,
+  MetadataTable,
+  OntologyBundle,
+  OntologyEntity
+} from '../types'
+
+export type { DraftLogEntry, OntologyBundle, OntologyEntity }
 
 export const DRAFT_STEPS = [
   { key: 'sample', label: '读取列和样例' },
@@ -10,40 +20,8 @@ export const DRAFT_STEPS = [
   { key: 'defined', label: '起草派生概念' }
 ] as const
 
-export type OntologyTableRef = {
-  catalog: string
-  schema: string
-  table: string
-  [key: string]: unknown
-}
-
-export type OntologyCatalogRef = {
-  name: string
-  type?: string
-  [key: string]: unknown
-}
-
-export type OntologyEntity = {
-  name: string
-  subject?: string
-  table?: string
-  [key: string]: unknown
-}
-
-export type OntologyBundle = {
-  concepts: OntologyEntity[]
-  attributes: OntologyEntity[]
-  relations: OntologyEntity[]
-  codes: OntologyEntity[]
-  definedConcepts: OntologyEntity[]
-  [key: string]: unknown
-}
-
-export type DraftLogEntry = {
-  status: string
-  text: string
-  notes: unknown[]
-}
+export type OntologyTableRef = MetadataTable
+export type OntologyCatalogRef = CatalogRecord
 
 export type OntologyDraftOptions = {
   tables: Ref<OntologyTableRef[]>
@@ -91,7 +69,7 @@ export function useOntologyDraft({
   const draftNote = ref('')
   const draftSubject = ref('')
   const drafting = ref(false)
-  const draftResult = ref<unknown>(null)
+  const draftResult = ref<DraftResult | null>(null)
   const draftError = ref('')
   const draftStep = ref('')
   const draftDetail = ref('')
@@ -187,10 +165,10 @@ export function useOntologyDraft({
             draftLog.value.push({
               status: String(payload.status || 'start'),
               text: String(payload.message ?? ''),
-              notes: Array.isArray(payload.notes) ? payload.notes : []
+              notes: Array.isArray(payload.notes) ? payload.notes.map(String) : []
             })
           } else if (event === 'result') {
-            draftResult.value = data
+            draftResult.value = payload as DraftResult
             draftStep.value = 'done'
             draftDetail.value = ''
           } else if (event === 'error') {

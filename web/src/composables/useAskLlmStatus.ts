@@ -1,12 +1,8 @@
 import { computed, inject, onActivated, ref, watch, type Ref } from 'vue'
 import { llmStatus } from '../api'
+import type { LlmStatus } from '../types'
 
-export type LlmStatus = {
-  configured?: boolean
-  protocol?: string
-  model?: string
-  [key: string]: unknown
-}
+export type { LlmStatus }
 
 /**
  * LLM readiness for AskView: status fetch, injects, and ready flag.
@@ -20,7 +16,7 @@ export function useAskLlmStatus() {
 
   async function loadStatus() {
     try {
-      status.value = (await llmStatus()) as LlmStatus
+      status.value = await llmStatus()
       statusError.value = ''
     } catch (e) {
       statusError.value = e instanceof Error ? e.message : String(e)

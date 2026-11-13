@@ -1,6 +1,6 @@
 import { computed, nextTick, reactive, ref, type ComputedRef, type Ref } from 'vue'
 import { deleteEntity, saveEntity } from '../api'
-import type { OntologyBundle, OntologyEntity } from './useOntologyDraft'
+import type { OntologyBundle, OntologyEntity } from '../types'
 
 export const KINDS = [
   { key: 'concept', list: 'concepts', label: '概念' },
@@ -67,13 +67,14 @@ export const FIELDS: Record<KindKey, FieldDef[]> = {
   ]
 }
 
-export type EditorForm = Record<string, unknown> & {
+export type EditorForm = {
   name?: string
   aliasText?: string
   aliases?: string[]
   comment?: string
   table?: string
-  conditions?: Array<{ attribute?: string; value?: string; [key: string]: unknown }>
+  conditions?: Array<{ attribute?: string; value?: string; operator?: string; [key: string]: any }>
+  [key: string]: any
 }
 
 export type OntologyEditorOptions = {
@@ -202,7 +203,7 @@ export function useOntologyEditor({
         return
       }
       const name = String(form.name || '')
-      everything.value = (await saveEntity(kind.kind, name, body)) as OntologyBundle
+      everything.value = await saveEntity(kind.kind, name, body)
       if (kind.kind === 'concept' && String(body.subject || '') !== subject.value) {
         subject.value = String(body.subject || '')
         await nextTick()
@@ -237,7 +238,7 @@ export function useOntologyEditor({
     }
     pendingDelete.value = null
     try {
-      everything.value = (await deleteEntity(name)) as OntologyBundle
+      everything.value = await deleteEntity(name)
       fresh.value = fresh.value.filter((item) => item !== name)
       if (form.name === name) {
         selected.value = null

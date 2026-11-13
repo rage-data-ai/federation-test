@@ -114,10 +114,25 @@
 - 通常直接执行。**口径缺失或有歧义时停下来问用户**，不自己编门槛（参照 Part 3 第 9.2 节）。
 - 前端通过 SSE 流式展示每个子智能体的过程：命中的本体概念、核对过的表和列、SQL。最后给出结果表、结论和口径来源，口径来源要区分"本体定义"和"推断"。
 
-### 7.6 后续再做
+### 7.6 借鉴 NVIDIA Auto Ontology 的工程加固（2026-11-14）
 
-- 治理 SQL 模板快速通道（Part 3 的 `analytics-spec`）。
+参考 [NVIDIA/auto-ontology](https://github.com/NVIDIA/auto-ontology) 的公开流程（Discover → Ground → Validate → Answer），在不引入 pgvector/NIM 的前提下落地：
+
+| Auto Ontology | 本网关落地 |
+|---|---|
+| `check_answerable` | `POST /api/v1/ask/answerable` + SSE `answerability` + 工具 `checkAnswerable` |
+| 强制复用 SQL attributes | Insight 提示强制复用 `definedConcept.sqlCondition` |
+| filter value validation | 工具 `validateFilterValues` / `scanFilterLiterals`；空结果自动扫字面量 |
+| Chat steps 溯源 | `answer.steps`（解析术语 / 派生口径 / 关联 / 元数据 / 过滤校验） |
+| 语义编译同义词 | 起草规则要求 aliases；码值别名利于词表命中 |
+
+未搬迁（体量大 / 依赖不同）：embedding 检索、pgvector、认证式 certify 标志、Redis 语义目录。
+
+### 7.7 后续再做
+
+- 治理 SQL 模板快速通道（Part 3 的 `analytics-spec`）与可复用度量表达式（SQL attributes）。
 - Kafka 数据源的本体映射。
+- 可选：向量检索术语召回。
 
 ## 8. 已知风险
 

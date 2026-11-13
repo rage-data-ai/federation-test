@@ -30,7 +30,7 @@ public final class OntologyFixtures {
         repository.saveAttribute(new Attribute("alertId", "告警编号", "alert id", List.of(), null,
                 "Alert", "string", "id", null, true, null));
         repository.saveAttribute(new Attribute("alertLevel", "告警级别", "alert level", List.of("危险级别", "严重程度"), null,
-                "Alert", "integer", "level", null, false, "AlertLevel"));
+                "Alert", "integer", "level", null, false, ALERT_LEVEL));
         repository.saveAttribute(new Attribute("occurTime", "发生时间", "occur time", List.of(), null,
                 "Alert", "dateTime", "occurTime", null, false, null));
 

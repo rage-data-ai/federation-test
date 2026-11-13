@@ -127,6 +127,21 @@ public class OntologyTools {
         return contextBuilder.businessContext(question, Set.of());
     }
 
+    @Tool("廉价可回答性预检：不写 SQL。返回 answerable、coverage、已匹配术语、缺口与建议；覆盖不足时应先向用户澄清")
+    public AnswerabilityChecker.Answerability checkAnswerable(@P("用户的原始问题") String question) {
+        BusinessContext context = contextBuilder.businessContext(question, Set.of());
+        AnswerabilityChecker.Answerability result = AnswerabilityChecker.check(context, listConcepts(), 0.5);
+        List<String> uncovered = AnswerabilityChecker.uncoveredPhrases(question, context);
+        if (!uncovered.isEmpty() && !result.answerable()) {
+            List<String> gaps = new ArrayList<>(result.gaps());
+            gaps.add("可能未覆盖：" + String.join("、", uncovered));
+            return new AnswerabilityChecker.Answerability(
+                    result.answerable(), result.coverage(), result.status(),
+                    result.matchedTerms(), gaps, result.suggestion());
+        }
+        return result;
+    }
+
     /**
      * @param extraEntities 恢复检索时补充的实体名，与问题中的词面命中合并
      */

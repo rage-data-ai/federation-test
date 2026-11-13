@@ -1,12 +1,55 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import type { OntologyBundle, OntologyEntity } from './types'
 
-const props = defineProps({
-  snapshot: { type: Object, required: true },
-  fresh: { type: Array, default: () => [] },
-  active: { type: String, default: '' }
-})
-const emit = defineEmits(['pick'])
+type GraphNode = {
+  id: string
+  name?: string
+  kind: string
+  x: number
+  y: number
+  w: number
+  h: number
+  label?: string
+  sub?: string
+  table?: string
+  count?: number
+  toggleKey?: string | null
+  open?: boolean
+  detail?: string
+  column?: string
+  identifier?: boolean
+  value?: string
+}
+
+type GraphEdge = {
+  kind: string
+  from: GraphNode
+  to: GraphNode
+  index?: number
+  id?: string
+  label?: string
+  join?: string
+  d?: string
+  lx?: number
+  ly?: number
+  anchor?: string
+}
+
+type ClusterIndex = {
+  attrsOf: Map<string, OntologyEntity[]>
+  codesOf: Map<string, OntologyEntity[]>
+  definedOf: Map<string, OntologyEntity[]>
+}
+
+type DragState = { x: number; y: number; cam: { x: number; y: number; k: number } }
+
+const props = defineProps<{
+  snapshot: OntologyBundle
+  fresh?: string[]
+  active?: string
+}>()
+const emit = defineEmits<{ pick: [target: { kind: string; name: string }] }>()
 
 const CARD = { w: 240, h: 74 }
 const ATTR = { w: 230, h: 32, gap: 8 }
@@ -15,19 +58,19 @@ const CODE_LIMIT = 40
 const GAP_X = 150
 const GAP_Y = 120
 
-const host = ref(null)
+const host = ref<HTMLElement | null>(null)
 const hostWidth = ref(1200)
 const camera = ref({ x: 40, y: 40, k: 1 })
-const expanded = ref(new Set())
-let drag = null
-let observer = null
+const expanded = ref(new Set<string>())
+let drag: DragState | null = null
+let observer: ResizeObserver | null = null
 let fitted = false
 
 const rowWidth = computed(() => Math.max(900, Math.round(hostWidth.value / 0.75 / 100) * 100))
 const model = computed(() => layout(props.snapshot, expanded.value, rowWidth.value))
-const freshSet = computed(() => new Set(props.fresh))
+const freshSet = computed(() => new Set(props.fresh || []))
 
-function toggle(key) {
+function toggle(key: string) {
   const next = new Set(expanded.value)
   if (next.has(key)) {
     next.delete(key)
@@ -47,19 +90,19 @@ function collapseAll() {
   nextTick(() => fit(true))
 }
 
-function groupBy(items, key) {
-  const map = new Map()
+function groupBy<T>(items: T[] | undefined, key: (item: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>()
   for (const item of items || []) {
     const k = key(item)
     if (!map.has(k)) {
       map.set(k, [])
     }
-    map.get(k).push(item)
+    map.get(k)!.push(item)
   }
   return map
 }
 
-function clip(text, max) {
+function clip(text: string | undefined | null, max: number) {
   if (!text) {
     return ''
   }
@@ -67,13 +110,13 @@ function clip(text, max) {
 }
 
 /** 关系相连的概念排在一起，便于连线变短。 */
-function orderConcepts(concepts, relations) {
+function orderConcepts(concepts: OntologyEntity[], relations: OntologyEntity[] | undefined) {
   const names = concepts.map((concept) => concept.name)
-  const links = new Map(names.map((name) => [name, new Set()]))
-  const link = (a, b) => {
-    if (links.has(a) && links.has(b) && a !== b) {
-      links.get(a).add(b)
-      links.get(b).add(a)
+  const links = new Map(names.map((name) => [name, new Set<string>()]))
+  const link = (a: string | undefined, b: string | undefined) => {
+    if (a && b && links.has(a) && links.has(b) && a !== b) {
+      links.get(a)!.add(b)
+      links.get(b)!.add(a)
     }
   }
   for (const relation of relations || []) {
@@ -82,8 +125,8 @@ function orderConcepts(concepts, relations) {
   for (const concept of concepts) {
     link(concept.parent, concept.name)
   }
-  const seen = new Set()
-  const order = []
+  const seen = new Set<string>()
+  const order: string[] = []
   for (const start of names) {
     if (seen.has(start)) {
       continue
@@ -91,9 +134,9 @@ function orderConcepts(concepts, relations) {
     const queue = [start]
     seen.add(start)
     while (queue.length) {
-      const name = queue.shift()
+      const name = queue.shift()!
       order.push(name)
-      for (const next of links.get(name)) {
+      for (const next of links.get(name) || []) {
         if (!seen.has(next)) {
           seen.add(next)
           queue.push(next)
@@ -101,14 +144,14 @@ function orderConcepts(concepts, relations) {
       }
     }
   }
-  return order.map((name) => concepts.find((concept) => concept.name === name))
+  return order.map((name) => concepts.find((concept) => concept.name === name)!).filter(Boolean)
 }
 
-function buildCluster(concept, s, open) {
+function buildCluster(concept: OntologyEntity, s: ClusterIndex, open: Set<string>) {
   const attrs = s.attrsOf.get(concept.name) || []
-  const nodes = []
-  const edges = []
-  const card = {
+  const nodes: GraphNode[] = []
+  const edges: GraphEdge[] = []
+  const card: GraphNode = {
     id: concept.name,
     name: concept.name,
     kind: 'concept',
@@ -127,9 +170,11 @@ function buildCluster(concept, s, open) {
 
   let left = CARD.h
   for (const item of s.definedOf.get(concept.name) || []) {
-    const detail = (item.conditions || []).map((c) => `${c.attribute} ${c.operator} ${c.value}`).join(' 且 ')
-      || item.definitionText || ''
-    const node = {
+    const detail =
+      (item.conditions || []).map((c) => `${c.attribute} ${c.operator} ${c.value}`).join(' 且 ') ||
+      item.definitionText ||
+      ''
+    const node: GraphNode = {
       id: item.name,
       name: item.name,
       kind: 'defined',
@@ -152,7 +197,7 @@ function buildCluster(concept, s, open) {
     for (const attribute of attrs) {
       const codes = attribute.codeList ? s.codesOf.get(attribute.codeList) || [] : []
       const key = `a:${attribute.name}`
-      const node = {
+      const node: GraphNode = {
         id: attribute.name,
         name: attribute.name,
         kind: 'attribute',
@@ -174,7 +219,7 @@ function buildCluster(concept, s, open) {
         const cx = ax + ATTR.w + 56
         let cy = y
         for (const code of codes.slice(0, CODE_LIMIT)) {
-          const leaf = {
+          const leaf: GraphNode = {
             id: `code:${code.name}`,
             name: code.name,
             kind: 'code',
@@ -211,15 +256,15 @@ function buildCluster(concept, s, open) {
   return { card, nodes, edges, width, height: Math.max(left, right) }
 }
 
-function layout(snapshot, open, rowLimit) {
+function layout(snapshot: OntologyBundle, open: Set<string>, rowLimit: number) {
   const concepts = snapshot.concepts || []
-  const s = {
-    attrsOf: groupBy(snapshot.attributes, (a) => a.domain),
-    codesOf: groupBy(snapshot.codes, (c) => c.codeList),
-    definedOf: groupBy(snapshot.definedConcepts, (d) => d.base)
+  const s: ClusterIndex = {
+    attrsOf: groupBy(snapshot.attributes, (a) => a.domain || ''),
+    codesOf: groupBy(snapshot.codes, (c) => c.codeList || ''),
+    definedOf: groupBy(snapshot.definedConcepts, (d) => d.base || '')
   }
   const clusters = orderConcepts(concepts, snapshot.relations).map((concept) => buildCluster(concept, s, open))
-  const limit = Math.max(rowLimit, ...clusters.map((cluster) => cluster.width))
+  const limit = Math.max(rowLimit, ...clusters.map((cluster) => cluster.width), 0)
   let x = 0
   let y = 0
   let rowHeight = 0
@@ -240,8 +285,8 @@ function layout(snapshot, open, rowLimit) {
   const nodes = clusters.flatMap((cluster) => cluster.nodes)
   const edges = clusters.flatMap((cluster) => cluster.edges)
   const cards = new Map(clusters.map((cluster) => [cluster.card.id, cluster.card]))
-  const pairs = new Map()
-  const between = (kind, from, to, extra) => {
+  const pairs = new Map<string, number>()
+  const between = (kind: string, from: string, to: string, extra: Record<string, unknown> = {}) => {
     const a = cards.get(from)
     const b = cards.get(to)
     if (!a || !b) {
@@ -250,7 +295,7 @@ function layout(snapshot, open, rowLimit) {
     const pair = [from, to].sort().join('|')
     const index = pairs.get(pair) || 0
     pairs.set(pair, index + 1)
-    edges.push({ kind, from: a, to: b, index, ...extra })
+    edges.push({ kind, from: a, to: b, index, ...extra } as GraphEdge)
   }
   for (const concept of concepts) {
     if (concept.parent) {
@@ -258,7 +303,7 @@ function layout(snapshot, open, rowLimit) {
     }
   }
   for (const relation of snapshot.relations || []) {
-    between('relation', relation.domain, relation.range, {
+    between('relation', relation.domain || '', relation.range || '', {
       id: relation.name,
       label: clip(relation.labelZh || relation.name, 12),
       join: relation.joinFrom && relation.joinTo ? `${relation.joinFrom} = ${relation.joinTo}` : ''
@@ -270,7 +315,7 @@ function layout(snapshot, open, rowLimit) {
   return { nodes, edges }
 }
 
-function route(edge) {
+function route(edge: GraphEdge) {
   const a = edge.from
   const b = edge.to
   if (edge.kind === 'has') {
@@ -285,9 +330,9 @@ function route(edge) {
     const x = a.x + 14
     return { d: `M ${x} ${a.y + a.h} V ${b.y + b.h / 2} H ${b.x}` }
   }
-  const lift = 54 + edge.index * 26
+  const lift = 54 + (edge.index || 0) * 26
   if (a === b) {
-    const x = a.x + 24 + edge.index * 34
+    const x = a.x + 24 + (edge.index || 0) * 34
     const d = `M ${x} ${a.y} C ${x - 10} ${a.y - lift}, ${x + 70} ${a.y - lift}, ${x + 40} ${a.y}`
     return { d, lx: x + 20, ly: a.y - lift * 0.78 }
   }
@@ -301,9 +346,9 @@ function route(edge) {
       ly: a.y - h * 0.75
     }
   }
-  const y1 = a.y + 26 + edge.index * 10
-  const y2 = b.y + 26 + edge.index * 10
-  const bend = 70 + edge.index * 28 + Math.min(120, Math.abs(y2 - y1) * 0.12)
+  const y1 = a.y + 26 + (edge.index || 0) * 10
+  const y2 = b.y + 26 + (edge.index || 0) * 10
+  const bend = 70 + (edge.index || 0) * 28 + Math.min(120, Math.abs(y2 - y1) * 0.12)
   return {
     d: `M ${a.x} ${y1} C ${a.x - bend} ${y1}, ${b.x - bend} ${y2}, ${b.x} ${y2}`,
     lx: Math.min(a.x, b.x) - bend * 0.75 - 8,
@@ -317,7 +362,7 @@ const bounds = computed(() => {
   if (!nodes.length) {
     return { x: 0, y: 0, w: 800, h: 480 }
   }
-  const labels = model.value.edges.filter((e) => e.anchor === 'end').map((e) => e.lx - 220)
+  const labels = model.value.edges.filter((e) => e.anchor === 'end').map((e) => (e.lx || 0) - 220)
   const minX = Math.min(...nodes.map((n) => n.x), ...labels) - 40
   const minY = Math.min(...nodes.map((n) => n.y)) - 110
   const maxX = Math.max(...nodes.map((n) => n.x + n.w)) + 40
@@ -325,7 +370,7 @@ const bounds = computed(() => {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
 })
 
-function fit(force) {
+function fit(force = false) {
   const el = host.value
   if (!el || el.clientWidth < 80 || el.clientHeight < 80 || !model.value.nodes.length) {
     return
@@ -344,7 +389,7 @@ function fit(force) {
   }
 }
 
-function centerOn(id) {
+function centerOn(id: string) {
   const el = host.value
   const node = model.value.nodes.find((item) => item.id === id || item.id === `code:${id}`)
   if (!el || !node) {
@@ -363,8 +408,11 @@ function centerOn(id) {
   }
 }
 
-function onWheel(event) {
+function onWheel(event: WheelEvent) {
   event.preventDefault()
+  if (!host.value) {
+    return
+  }
   const rect = host.value.getBoundingClientRect()
   const px = event.clientX - rect.left
   const py = event.clientY - rect.top
@@ -377,14 +425,14 @@ function onWheel(event) {
   }
 }
 
-function onPointerDown(event) {
-  if (event.target.closest('.node, .toolbar')) {
+function onPointerDown(event: PointerEvent) {
+  if ((event.target as HTMLElement | null)?.closest('.node, .toolbar')) {
     return
   }
   drag = { x: event.clientX, y: event.clientY, cam: { ...camera.value } }
 }
 
-function onPointerMove(event) {
+function onPointerMove(event: PointerEvent) {
   if (!drag) {
     return
   }
@@ -399,15 +447,15 @@ function onPointerUp() {
   drag = null
 }
 
-function pick(node) {
-  if (node.kind === 'more') {
+function pick(node: GraphNode) {
+  if (node.kind === 'more' || !node.name) {
     return
   }
   emit('pick', { kind: node.kind, name: node.name })
 }
 
 /** 左侧或别处选中属性、码值时，把它所在的概念和属性展开。 */
-function reveal(name) {
+function reveal(name: string) {
   const s = props.snapshot
   const next = new Set(expanded.value)
   const attribute = (s.attributes || []).find((item) => item.name === name)
@@ -428,22 +476,29 @@ function reveal(name) {
   nextTick(() => centerOn(name))
 }
 
-watch(() => props.active, (name) => {
-  if (name) {
-    reveal(name)
+watch(
+  () => props.active,
+  (name) => {
+    if (name) {
+      reveal(name)
+    }
   }
-})
+)
 
-watch(() => props.snapshot, (snapshot, previous) => {
-  const concepts = snapshot.concepts || []
-  if (!(previous?.concepts || []).length && concepts.length && concepts.length <= 4) {
-    expanded.value = new Set(concepts.map((concept) => `c:${concept.name}`))
-  }
-  if (!(previous?.concepts || []).length) {
-    fitted = false
-  }
-  nextTick(() => fit())
-}, { immediate: true })
+watch(
+  () => props.snapshot,
+  (snapshot, previous) => {
+    const concepts = snapshot.concepts || []
+    if (!(previous?.concepts || []).length && concepts.length && concepts.length <= 4) {
+      expanded.value = new Set(concepts.map((concept) => `c:${concept.name}`))
+    }
+    if (!(previous?.concepts || []).length) {
+      fitted = false
+    }
+    nextTick(() => fit())
+  },
+  { immediate: true }
+)
 
 onMounted(() => {
   window.addEventListener('pointermove', onPointerMove)
@@ -452,8 +507,10 @@ onMounted(() => {
     hostWidth.value = host.value?.clientWidth || hostWidth.value
     fit()
   })
-  observer.observe(host.value)
-  hostWidth.value = host.value.clientWidth || hostWidth.value
+  if (host.value) {
+    observer.observe(host.value)
+    hostWidth.value = host.value.clientWidth || hostWidth.value
+  }
   fit()
 })
 onUnmounted(() => {
@@ -462,8 +519,8 @@ onUnmounted(() => {
   window.removeEventListener('pointerup', onPointerUp)
 })
 
-function isFresh(node) {
-  return freshSet.value.has(node.name)
+function isFresh(node: GraphNode) {
+  return !!node.name && freshSet.value.has(node.name)
 }
 </script>
 
@@ -482,7 +539,7 @@ function isFresh(node) {
           :d="edge.d"
           class="edge"
           :class="edge.kind"
-          :marker-end="edge.kind === 'relation' || edge.kind === 'parent' ? 'url(#arrow)' : null"
+          :marker-end="edge.kind === 'relation' || edge.kind === 'parent' ? 'url(#arrow)' : undefined"
         />
         <g
           v-for="node in model.nodes"

@@ -58,33 +58,33 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
                 <em v-if="turn.ontology.recovery">· 恢复检索</em>
               </h4>
               <ul class="chips">
-                <li v-for="hit in turn.ontology.matches" :key="hit.name">
+                <li v-for="hit in turn.ontology.matches || []" :key="hit.name">
                   「{{ hit.matchedText }}」→ {{ hit.labelZh || hit.name }} <em>{{ hit.kind }} {{ hit.score }}</em>
                 </li>
               </ul>
-              <p v-for="d in turn.ontology.definedConcepts" :key="d.name" class="line">
-                派生概念 {{ d.labelZh }}：{{ d.sqlCondition || d.definitionText || d.conditions.join(' 且 ') }}
+              <p v-for="d in turn.ontology.definedConcepts || []" :key="d.name" class="line">
+                派生概念 {{ d.labelZh }}：{{ d.sqlCondition || d.definitionText || (d.conditions || []).map((c) => `${c.attribute} ${c.operator} ${c.value}`).join(' 且 ') }}
               </p>
-              <p v-for="(path, pidx) in turn.ontology.paths" :key="pidx" class="line">
-                路径 {{ path.from }} → {{ path.to }}：<code v-for="step in path.steps" :key="step.relation">{{ step.join }}</code>
+              <p v-for="(path, pidx) in turn.ontology.paths || []" :key="pidx" class="line">
+                路径 {{ path.from }} → {{ path.to }}：<code v-for="step in path.steps || []" :key="step.relation">{{ step.join }}</code>
               </p>
-              <p v-for="w in [...turn.ontology.warnings, ...turn.ontology.unresolved]" :key="w" class="line warn">{{ w }}</p>
+              <p v-for="w in [...(turn.ontology.warnings || []), ...(turn.ontology.unresolved || [])]" :key="w" class="line warn">{{ w }}</p>
             </section>
 
             <section v-if="turn.metadata" class="step">
               <h4><span class="tag">{{ STAGE_LABEL.metadata }}</span>核对映射表 <em v-if="turn.metadata.recovery">· 已重采</em></h4>
-              <p v-for="t in turn.metadata.tables" :key="t.table" class="line">
-                <code>{{ t.table }}</code>（{{ t.concept }}）映射列 {{ t.mappedColumns.map((c) => c.name).join('、') || '无' }}
+              <p v-for="t in turn.metadata.tables || []" :key="t.table" class="line">
+                <code>{{ t.table }}</code>（{{ t.concept }}）映射列 {{ (t.mappedColumns || []).map((c) => c.name).join('、') || '无' }}
                 <em v-if="t.timeColumn">· 大表，时间列 {{ t.timeColumn }}</em>
               </p>
-              <p v-for="issue in turn.metadata.issues" :key="issue" class="line warn">{{ issue }}</p>
+              <p v-for="issue in turn.metadata.issues || []" :key="issue" class="line warn">{{ issue }}</p>
             </section>
 
             <section v-for="(item, sidx) in turn.sqls" :key="`s${sidx}`" class="step">
               <h4>
                 <span class="tag">SQL</span>
                 {{ item.purpose === 'diagnostic' ? '诊断查询' : '主查询' }}
-                <em :class="item.status">{{ SQL_STATUS[item.status] || item.status }}</em>
+                <em :class="item.status">{{ (item.status && SQL_STATUS[item.status]) || item.status }}</em>
               </h4>
               <pre class="sql">{{ item.sql }}</pre>
               <p v-if="item.message" class="line warn">{{ item.message }}</p>

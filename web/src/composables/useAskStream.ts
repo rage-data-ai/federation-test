@@ -1,5 +1,10 @@
 import { nextTick, onUnmounted, ref, type Ref } from 'vue'
 import { askStream } from '../api'
+import type {
+  AskMetadataReport,
+  AskOntologyContext,
+  AskSqlItem
+} from '../types'
 
 export const SAMPLES = [
   '哪些账户在大量不同主机上登录失败？各失败了多少次、涉及多少台主机？',
@@ -19,10 +24,12 @@ export type AskStage = {
 export type AskTurn = {
   question: string
   stages: AskStage[]
-  ontology: Record<string, unknown> | null
-  metadata: Record<string, unknown> | null
-  sqls: unknown[]
+  ontology: AskOntologyContext | null
+  answerability: Record<string, unknown> | null
+  metadata: AskMetadataReport | null
+  sqls: AskSqlItem[]
   results: unknown[]
+  filterChecks: Record<string, unknown>[]
   answer: Record<string, unknown> | null
   clarify: Record<string, unknown> | null
   error: string
@@ -49,9 +56,11 @@ function emptyTurn(question: string): AskTurn {
     question,
     stages: [],
     ontology: null,
+    answerability: null,
     metadata: null,
     sqls: [],
     results: [],
+    filterChecks: [],
     answer: null,
     clarify: null,
     error: '',
@@ -87,21 +96,28 @@ function applyEvent(turn: AskTurn, name: string, data: unknown): void {
     case 'ontology':
       turn.ontology = {
         ...asRecord(payload.context),
-        mode: payload.mode,
-        recovery: payload.recovery
-      }
+        mode: payload.mode as string | undefined,
+        recovery: payload.recovery as boolean | undefined
+      } as AskOntologyContext
+      break
+    case 'answerability':
+      turn.answerability = payload
       break
     case 'metadata':
       turn.metadata = {
         ...asRecord(payload.report),
-        recovery: payload.recovery
-      }
+        recovery: payload.recovery as boolean | undefined
+      } as AskMetadataReport
       break
     case 'sql':
-      turn.sqls.push(data)
+      turn.sqls.push(asRecord(data) as AskSqlItem)
       break
     case 'result':
       turn.results.push(data)
+      break
+    case 'filter_check':
+      turn.filterChecks = turn.filterChecks ?? []
+      turn.filterChecks.push(payload)
       break
     case 'answer':
       turn.answer = payload

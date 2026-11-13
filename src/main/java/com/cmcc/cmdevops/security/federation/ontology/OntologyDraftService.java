@@ -51,6 +51,8 @@ public class OntologyDraftService {
             datatype 只能取 string、integer、long、decimal、double、boolean、date、dateTime。
             已有本体里的类直接引用 name，不要重复定义。除 aliases、conditions 外，字段都是字符串或布尔值，不要写成数组。本次没要求的数组必须是 []。
             每个字段必须写成 "键": 值。不能写成 "键", 值，也不能省略冒号。
+            aliases 必须填业务同义词（至少 1～3 个中文或英文别名），便于问数词表命中；码值也要给常用别名。
+            派生概念优先写可用的 conditions（可编译为 sqlCondition），少用纯自然语言 definitionText。
             """;
 
     private final LlmClient llm;

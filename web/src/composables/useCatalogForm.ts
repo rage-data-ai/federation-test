@@ -1,22 +1,10 @@
 import { reactive, ref, type Ref } from 'vue'
 import { createCatalog, deleteCatalog, testCatalog, updateCatalog } from '../api'
 import { SOURCE_TYPES, emptyCatalog } from '../examples'
+import type { CatalogRecord } from '../types'
 
 export type CatalogForm = ReturnType<typeof emptyCatalog>
-
-export type CatalogRecord = {
-  name: string
-  type: string
-  host?: string
-  port?: number
-  database?: string
-  username?: string
-  password?: string
-  url?: string
-  extra?: string
-  tls?: boolean
-  [key: string]: unknown
-}
+export type { CatalogRecord }
 
 export type CatalogFormOptions = {
   onSaved?: () => void | Promise<void>

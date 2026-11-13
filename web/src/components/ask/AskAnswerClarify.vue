@@ -12,6 +12,7 @@ defineProps<{
     rows?: unknown[][]
     rowCount?: number
     caliber?: Array<{ source?: string; item?: string; detail?: string }>
+    steps?: string[]
     sql?: string
   } | null
   busy?: boolean
@@ -56,6 +57,12 @@ defineEmits<{
     <p v-if="(answer.rowCount || 0) > (answer.rows?.length || 0)" class="hint small">
       共 {{ answer.rowCount }} 行，仅展示前 {{ answer.rows?.length || 0 }} 行
     </p>
+    <div v-if="answer.steps?.length" class="caliber">
+      <h4>推理步骤</h4>
+      <ul>
+        <li v-for="(step, sidx) in answer.steps" :key="sidx">{{ step }}</li>
+      </ul>
+    </div>
     <div v-if="answer.caliber?.length" class="caliber">
       <h4>口径来源</h4>
       <ul>
