@@ -1,0 +1,207 @@
+import { computed, ref } from 'vue'
+import { draftOntology } from '../api'
+
+export const DRAFT_STEPS = [
+  { key: 'sample', label: '读取列和样例' },
+  { key: 'concepts', label: '起草概念' },
+  { key: 'attributes', label: '起草属性' },
+  { key: 'codes', label: '起草码值' },
+  { key: 'relations', label: '起草关系' },
+  { key: 'defined', label: '起草派生概念' }
+]
+
+export function qualified(table) {
+  return `${table.catalog}.${table.schema}.${table.table}`
+}
+
+function entityNames(data) {
+  return new Set([
+    ...(data.concepts || []).map((item) => item.name),
+    ...(data.attributes || []).map((item) => item.name),
+    ...(data.relations || []).map((item) => item.name),
+    ...(data.codes || []).map((item) => item.name),
+    ...(data.definedConcepts || []).map((item) => item.name)
+  ])
+}
+
+function subjectOf(concept) {
+  return (concept.subject || '').trim()
+}
+
+/**
+ * LLM ontology draft modal state and run/progress helpers.
+ * @param {{
+ *   tables: import('vue').Ref,
+ *   catalogs: import('vue').Ref,
+ *   everything: import('vue').Ref,
+ *   subject: import('vue').Ref<string>,
+ *   subjects: import('vue').ComputedRef,
+ *   load: () => Promise<void>,
+ *   fresh: import('vue').Ref<string[]>
+ * }} opts
+ */
+export function useOntologyDraft({
+  tables,
+  catalogs,
+  everything,
+  subject,
+  subjects,
+  load,
+  fresh
+}) {
+  const showDraft = ref(false)
+  const draftTables = ref([])
+  const draftQuery = ref('')
+  const draftNote = ref('')
+  const draftSubject = ref('')
+  const drafting = ref(false)
+  const draftResult = ref(null)
+  const draftError = ref('')
+  const draftStep = ref('')
+  const draftDetail = ref('')
+  const draftLog = ref([])
+  const draftStartedAt = ref(0)
+  const draftClock = ref(0)
+  let draftClockTimer = 0
+
+  const draftElapsed = computed(() => draftStartedAt.value
+    ? Math.max(0, Math.round((draftClock.value - draftStartedAt.value) / 1000))
+    : 0)
+
+  const kafka = computed(() => new Set(catalogs.value.filter((c) => c.type === 'kafka').map((c) => c.name)))
+  const draftable = computed(() => tables.value.filter((t) => !kafka.value.has(t.catalog)))
+  const draftCandidates = computed(() => {
+    const q = draftQuery.value.trim().toLowerCase()
+    const list = q ? draftable.value.filter((t) => qualified(t).toLowerCase().includes(q)) : draftable.value
+    return list.slice(0, 200)
+  })
+
+  /** 表已经属于哪个主题域的哪个概念：一张表只能属于一个主题域 */
+  const tableOwner = computed(() => {
+    const map = {}
+    for (const concept of everything.value.concepts) {
+      if (concept.table) {
+        map[concept.table.toLowerCase()] = { subject: subjectOf(concept), concept: concept.name }
+      }
+    }
+    return map
+  })
+
+  function takenElsewhere(name) {
+    const owner = tableOwner.value[name.toLowerCase()]
+    return owner && owner.subject !== draftSubject.value.trim() ? owner : null
+  }
+
+  function openDraft() {
+    showDraft.value = true
+    if (!draftSubject.value.trim()) {
+      draftSubject.value = subject.value
+    }
+    draftResult.value = null
+    draftError.value = ''
+    draftLog.value = []
+    draftStep.value = ''
+    draftDetail.value = ''
+  }
+
+  function toggleDraftTable(name) {
+    const index = draftTables.value.indexOf(name)
+    if (index >= 0) {
+      draftTables.value.splice(index, 1)
+    } else {
+      draftTables.value.push(name)
+    }
+  }
+
+  function draftReached(key) {
+    if (draftStep.value === 'done') {
+      return true
+    }
+    const current = DRAFT_STEPS.findIndex((step) => step.key === draftStep.value)
+    const target = DRAFT_STEPS.findIndex((step) => step.key === key)
+    return current >= 0 && target >= 0 && current >= target
+  }
+
+  async function runDraft() {
+    drafting.value = true
+    draftStep.value = 'sample'
+    draftDetail.value = '读取列和样例'
+    draftError.value = ''
+    draftResult.value = null
+    draftLog.value = []
+    draftStartedAt.value = Date.now()
+    draftClock.value = draftStartedAt.value
+    window.clearInterval(draftClockTimer)
+    draftClockTimer = window.setInterval(() => {
+      draftClock.value = Date.now()
+    }, 1000)
+    const before = entityNames(everything.value)
+    const target = draftSubject.value.trim()
+    let failed = ''
+    try {
+      await draftOntology({ tables: draftTables.value, instructions: draftNote.value || null, subject: target }, (event, data) => {
+        if (event === 'phase') {
+          draftStep.value = data.phase
+          draftDetail.value = data.message
+          draftLog.value.push({
+            status: data.status || 'start',
+            text: data.message,
+            notes: data.notes || []
+          })
+        } else if (event === 'result') {
+          draftResult.value = data
+          draftStep.value = 'done'
+          draftDetail.value = ''
+        } else if (event === 'error') {
+          failed = data.message || '起草失败'
+        }
+      })
+      if (failed) {
+        throw new Error(failed)
+      }
+      await load()
+      subject.value = target
+      fresh.value = [...entityNames(everything.value)].filter((name) => !before.has(name))
+    } catch (e) {
+      await load()
+      if (subjects.value.some((item) => item.name === target)) {
+        subject.value = target
+      }
+      draftError.value = e.message
+      if (draftStep.value !== 'done') {
+        draftStep.value = ''
+      }
+    } finally {
+      window.clearInterval(draftClockTimer)
+      drafting.value = false
+    }
+  }
+
+  function finishDraft() {
+    showDraft.value = false
+  }
+
+  return {
+    showDraft,
+    draftTables,
+    draftQuery,
+    draftNote,
+    draftSubject,
+    drafting,
+    draftResult,
+    draftError,
+    draftStep,
+    draftDetail,
+    draftLog,
+    draftElapsed,
+    draftable,
+    draftCandidates,
+    openDraft,
+    toggleDraftTable,
+    draftReached,
+    runDraft,
+    finishDraft,
+    takenElsewhere,
+    qualified
+  }
+}
