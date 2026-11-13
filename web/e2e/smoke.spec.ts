@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
 /** Stabilize glyph rasterization across CI runner images. */
@@ -70,6 +71,24 @@ test.describe('console smoke', () => {
     await expect(dialog.locator('input').first()).toBeFocused()
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
+  })
+
+  test('axe: no serious/critical violations on module shells', async ({ page }) => {
+    const modules: Array<{ button: string; title: string }> = [
+      { button: '数据源管理', title: '#ds-title' },
+      { button: '本体建模', title: '#onto-title' },
+      { button: '智能问数', title: '#ask-title' }
+    ]
+    for (const mod of modules) {
+      await page.goto('/')
+      await page.getByRole('button', { name: mod.button }).click()
+      await expect(page.locator(mod.title)).toBeVisible()
+      const results = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa'])
+        .analyze()
+      const blocking = results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')
+      expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
+    }
   })
 
   test('ask critical path exposes landmarks and composer semantics', async ({ page }) => {

@@ -2,41 +2,49 @@
 
 评估基准：Trino / Spring Boot / Apache Calcite / NVIDIA Auto Ontology 等成熟开源实践。  
 初评日期：2026-11-13（Asia/Shanghai）  
-复评轮次：第 25 轮（进行中）
+复评轮次：第 26 轮
 
-## 第 24 → 25 轮开放项清单
+## 第 25 → 26 轮开放项 / 本轮处置
 
-| 开放项 | 本轮处置 |
-|--------|----------|
-| pgvector IVFFlat/HNSW | ✅ 可配 `hnsw`/`ivfflat`/`none`；建索引失败 → 精确扫描 |
-| eslint moderate transitive | ✅ 钉 `minimatch@^11`；剩余 eslint/vitest 工具链 **文档接受风险**（仅 dev） |
-| 屏幕阅读器 AT | ✅ 问数关键路径 ARIA + e2e 语义断言；**仍需人工 AT（VoiceOver/NVDA）验收** |
+| 项 | 本轮处置 |
+|----|----------|
+| 人工 AT 无法自动化替代 | ✅ Playwright + axe（serious/critical）+ `docs/a11y-checklist.md`；亮色 `--muted` 对比度与状态点 `role=img`；**真人 AT 仍开** |
+| 运维可观测性（问数嵌入状态） | ✅ `/api/v1/health` 暴露 embedStore / embedEndpointConfigured / pgvector* 信号（无密钥） |
+| README/CHANGELOG/本地门禁脚本滞后 | ✅ Node 22、health 文档、`scripts/verify-all.sh`、CHANGELOG |
+
+## 第 25 轮已关闭的 P3（回顾）
+
+1. pgvector IVFFlat/HNSW：可选，建索失败降级精确扫描。  
+2. eslint moderate transitive：`minimatch`/`tinypool` overrides；生产 audit 0；vitest@3 两条 moderate 文档接受。  
+3. 问数关键路径 ARIA/e2e 断言；design-review 标明需人工 AT。
 
 ## 优点
 
-1. **包边界清晰**，查询 / 问数 / 本体主链路可读。
-2. **问数护栏**：嵌入 file/JDBC/both + 可选 pgvector（HNSW/IVFFlat 可降级）。
-3. **安全栈** + SECURITY.md（含依赖风险声明）。
-4. **工程门禁**：CI ubuntu-24.04、质量插件、Dependabot 分组、Playwright。
-5. **可访问性**：对话框焦点陷阱；问数 log/composer/samples ARIA；e2e 覆盖关键语义。
+1. 包边界清晰；问数护栏与三层术语召回（本地 / 联邦 / 可选 pgvector ANN）。
+2. 安全栈完整；SECURITY.md 含依赖风险策略。
+3. CI ubuntu-24.04 + 质量插件 + axe/Playwright + Dependabot。
+4. 文档：设计复评、ADR、OIDC、a11y 人工清单、一键 verify。
 
-## 已关闭差距（累计至第 25 轮）
+## 已关闭差距（累计至第 26 轮）
 
-| 问题 | 状态 |
-|------|------|
-| 至第 24 轮累计项 | ✅ |
-| **pgvector ANN（HNSW/IVFFlat）+ 降级** | ✅ |
-| **dev 依赖 CVE 策略（overrides + 接受剩余 moderate）** | ✅ |
-| **问数关键路径 ARIA/e2e（人工 AT 仍开）** | ✅ 工程侧；人工 AT 待办 |
+至第 25 轮累计项 + **axe 扫描** + **health 问数信号** + **文档/脚本对齐** + **亮色对比度/状态点 ARIA**。
 
 ## 距顶尖开源仍待项
 
 ### P3 / 人工
 
-**屏幕阅读器端到端人工验收**（VoiceOver / NVDA / TalkBack）：需真人走问数、起草、鉴权对话框；自动化无法替代。
+屏幕阅读器端到端**真人**验收（见 `docs/a11y-checklist.md`）。自动化 axe **不能**关闭此项。
 
-## 总评（第 25 轮）
+### P3 / 可选后续
 
-可自动落地的 P3 已收口；唯一明确残留是人工 AT 验收。目标在证据充分前**不标记完成**。
+vitest 5 迁移以清剩余 2 条 moderate；发布/版本自动化。
 
-验证：`mvn -B verify` + `cd web && npm run lint && npm run typecheck && npm test && npm run build && npm run test:e2e`。
+## 总评（第 26 轮）
+
+工程化与可观测性再抬一档；Goal 在真人 AT 与更广发布工程完成前**不标记完成**。
+
+## 验证证据（第 26 轮）
+
+- `mvn -B verify`：BUILD SUCCESS（含 HealthControllerWebTest standalone MockMvc）
+- `web`：lint / typecheck / test / build / `test:e2e`（8 passed，含 axe）
+- `npm audit --omit=dev`：0；全量 audit：2 moderate（vitest@3，已文档接受）

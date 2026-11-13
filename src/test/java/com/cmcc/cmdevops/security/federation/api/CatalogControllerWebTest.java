@@ -203,10 +203,6 @@ class CatalogControllerWebTest {
         mockMvc.perform(get("/api/v1/examples"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].name").value("ex"));
-
-        mockMvc.perform(get("/api/v1/health"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("UP"));
     }
 
     @Test

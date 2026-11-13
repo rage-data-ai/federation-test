@@ -105,9 +105,4 @@ public class CatalogController {
     public List<Map<String, String>> examples() {
         return demoSqlLoader.list();
     }
-
-    @GetMapping("/health")
-    public Map<String, String> health() {
-        return Map.of("status", "UP");
-    }
 }

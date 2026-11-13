@@ -25,7 +25,7 @@ HTTP /api/v1/query  ·  /api/v1/ask (SSE)
 
 ## 快速开始
 
-环境：JDK 21、Maven 3.9+、Node 20+。需要一台 MySQL 作为网关配置库（`federal`），以及可选的 Trino。
+环境：JDK 21、Maven 3.9+、Node 22+（与 CI 对齐）。需要一台 MySQL 作为网关配置库（`federal`），以及可选的 Trino。
 
 ```bash
 cp .env.example .env   # 填写 FEDERAL_DB_* 等
@@ -64,7 +64,7 @@ docker compose up -d --build
 | PUT | `/api/v1/catalogs/{name}` | 更新数据源 |
 | DELETE | `/api/v1/catalogs/{name}` | 删除数据源 |
 | POST | `/api/v1/catalogs/test` | 测试连接 |
-| GET | `/api/v1/health` | 健康检查 |
+| GET | `/api/v1/health` | 健康检查（含问数嵌入/pgvector 信号，无密钥） |
 | GET | `/api/v1/auth/me` | 当前身份（Bearer / JWT） |
 | GET | `/api/v1/llm/status` | 大模型是否已配置 |
 | PUT | `/api/v1/llm/config` | 写入大模型配置 |
@@ -92,7 +92,7 @@ docker compose up -d --build
 | `demo` | `FEDERATION_DEMO_TOKEN` | `QUERY,ADMIN` |
 | `reader` | `FEDERATION_READER_TOKEN` | `QUERY`（只读查询/问数） |
 
-写入数据源、元数据、本体、模型配置需要 `ADMIN`。可选 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出 tracing。多实例吊销可配 `FEDERATION_SECURITY_REVOCATION_REDIS_URI`（或 `federation.security.revocation-redis-uri`）。问数术语嵌入可配 `FEDERATION_ASK_EMBED_ENDPOINT` / `FEDERATION_ASK_EMBED_API_KEY` / `FEDERATION_ASK_EMBED_MODEL`（OpenAI 兼容，含 NVIDIA NIM）；未配置时用本地哈希嵌入。术语向量默认缓存到 `data/ontology-embeddings`（或 `FEDERATION_ASK_EMBED_CACHE_DIR`）。API 文档：`/swagger-ui.html`、`/v3/api-docs`。嵌入策略见 [`docs/adr/0001-term-embedding.md`](docs/adr/0001-term-embedding.md)。
+写入数据源、元数据、本体、模型配置需要 `ADMIN`。可选 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出 tracing。多实例吊销可配 `FEDERATION_SECURITY_REVOCATION_REDIS_URI`（或 `federation.security.revocation-redis-uri`）。问数术语嵌入可配 `FEDERATION_ASK_EMBED_ENDPOINT` / `FEDERATION_ASK_EMBED_API_KEY` / `FEDERATION_ASK_EMBED_MODEL`（OpenAI 兼容，含 NVIDIA NIM）；未配置时用本地哈希嵌入。术语向量默认 `FEDERATION_ASK_EMBED_STORE=both`（联邦库 + 落盘）。可选 pgvector：`FEDERATION_ASK_PGVECTOR_URL`、`FEDERATION_ASK_PGVECTOR_INDEX`（`hnsw`/`ivfflat`/`none`）。API 文档：`/swagger-ui.html`、`/v3/api-docs`。嵌入策略见 [`docs/adr/0001-term-embedding.md`](docs/adr/0001-term-embedding.md)；人工 AT 清单见 [`docs/a11y-checklist.md`](docs/a11y-checklist.md)。
 
 ## 示例
 
@@ -159,11 +159,13 @@ SQL 以 `EXPLAIN` 开头时，前缀会原样下发给引擎。`/explain` 只返
 ## 开发
 
 ```bash
-mvn -B verify          # 单测 + JaCoCo 门槛 + Spotless
-cd web && npm ci && npm run lint && npm test && npm run build
+./scripts/verify-all.sh   # 对齐 CI：mvn verify + web lint/typecheck/test/build/e2e(+axe)
+# 或分步：
+mvn -B verify
+cd web && npm ci && npm run lint && npm run typecheck && npm test && npm run build && npm run test:e2e
 ```
 
-CI：`.github/workflows/ci.yml`（后端 `verify` + 前端 lint/test/build）。License：Apache-2.0。
+CI：`.github/workflows/ci.yml`（ubuntu-24.04；后端 `verify` + 前端 lint/typecheck/test/build/e2e）。License：Apache-2.0。
 
 ## 文档中尚未纳入默认 Compose 的部分
 

@@ -372,7 +372,13 @@ function catalogEndpoint(item: CatalogRecord | null | undefined) {
         <div class="head-left">
           <button class="icon burger" type="button" title="数据源" aria-label="打开数据源列表" @click="sideOpen = !sideOpen">☰</button>
           <h1 id="ds-title">数据源管理</h1>
-          <span class="dot" :class="gatewayOk === false ? 'down' : gatewayOk ? 'up' : ''" :title="gatewayLabel" :aria-label="gatewayLabel" />
+          <span
+            class="dot"
+            role="img"
+            :class="gatewayOk === false ? 'down' : gatewayOk ? 'up' : ''"
+            :title="gatewayLabel"
+            :aria-label="gatewayLabel"
+          />
         </div>
         <div class="head-right">
           <button type="button" :disabled="loading" @click="submit(true)">查看计划</button>
