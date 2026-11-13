@@ -15,7 +15,10 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Unit tests and quality gates
+      - name: Unit tests, Testcontainers IT, and quality gates
+        # ubuntu-latest 提供 Docker，Jdbc*StoreIT 会真实跑 MySQL 容器（本地无 Docker 时自动跳过）
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: 'true'
         run: mvn -B verify
 
   frontend:

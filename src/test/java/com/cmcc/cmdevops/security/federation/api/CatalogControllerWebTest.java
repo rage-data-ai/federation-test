@@ -141,4 +141,77 @@ class CatalogControllerWebTest {
                                 """))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void updateTestMetadataExamplesAndHealth() throws Exception {
+        CatalogRecord saved = new CatalogRecord();
+        saved.setName("mysql_shop");
+        saved.setType("mysql");
+        saved.setRoute("DIRECT");
+        saved.setHost("db.example");
+        saved.setPort(3306);
+        saved.setDatabase("shop");
+        saved.setUsername("u");
+        when(catalogRegistry.save(any(CatalogRecord.class), eq(true))).thenReturn(saved);
+        when(catalogRegistry.test(any(CatalogRecord.class))).thenReturn(java.util.Map.of("success", true, "message", "ok"));
+
+        TableSnapshot snapshot = new TableSnapshot();
+        snapshot.setCatalog("mysql_shop");
+        snapshot.setSchema("shop");
+        snapshot.setTable("orders");
+        when(metadataService.list()).thenReturn(List.of(snapshot));
+        when(metadataService.collect(any())).thenReturn(List.of(snapshot));
+        when(metadataService.delete("mysql_shop", "shop", "orders")).thenReturn(true);
+        when(demoSqlLoader.list()).thenReturn(List.of(java.util.Map.of("name", "ex", "sql", "SELECT 1")));
+
+        mockMvc.perform(put("/api/v1/catalogs/mysql_shop")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "type": "mysql",
+                                  "host": "db.example",
+                                  "port": 3306,
+                                  "database": "shop",
+                                  "username": "u"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("mysql_shop"));
+
+        mockMvc.perform(post("/api/v1/catalogs/test")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"mysql_shop\",\"type\":\"mysql\",\"host\":\"db.example\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        mockMvc.perform(get("/api/v1/metadata"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].table").value("orders"));
+
+        mockMvc.perform(post("/api/v1/metadata/collect")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"catalog\":\"mysql_shop\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].catalog").value("mysql_shop"));
+
+        mockMvc.perform(delete("/api/v1/metadata/mysql_shop/shop/orders"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        mockMvc.perform(get("/api/v1/examples"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("ex"));
+
+        mockMvc.perform(get("/api/v1/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"));
+    }
+
+    @Test
+    void deleteMetadataMissingReturnsBadRequest() throws Exception {
+        when(metadataService.delete("c", "s", "t")).thenReturn(false);
+        mockMvc.perform(delete("/api/v1/metadata/c/s/t"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
 }

@@ -1,14 +1,26 @@
-<script setup>
+<script setup lang="ts">
 import { SOURCE_LABEL, cell } from '../../composables/useAskStream'
 
-defineProps({
-  clarify: { type: Object, default: null },
-  answer: { type: Object, default: null },
-  busy: { type: Boolean, default: false },
-  canReply: { type: Boolean, default: false }
-})
+defineProps<{
+  clarify?: {
+    question?: string
+    options?: string[]
+  } | null
+  answer?: {
+    answer?: string
+    columns?: Array<{ name: string }>
+    rows?: unknown[][]
+    rowCount?: number
+    caliber?: Array<{ source?: string; item?: string; detail?: string }>
+    sql?: string
+  } | null
+  busy?: boolean
+  canReply?: boolean
+}>()
 
-defineEmits(['pick'])
+defineEmits<{
+  pick: [opt: string]
+}>()
 </script>
 
 <template>
@@ -41,14 +53,14 @@ defineEmits(['pick'])
         </tbody>
       </table>
     </div>
-    <p v-if="answer.rowCount > (answer.rows?.length || 0)" class="hint small">
-      共 {{ answer.rowCount }} 行，仅展示前 {{ answer.rows.length }} 行
+    <p v-if="(answer.rowCount || 0) > (answer.rows?.length || 0)" class="hint small">
+      共 {{ answer.rowCount }} 行，仅展示前 {{ answer.rows?.length || 0 }} 行
     </p>
     <div v-if="answer.caliber?.length" class="caliber">
       <h4>口径来源</h4>
       <ul>
         <li v-for="(c, cidx) in answer.caliber" :key="cidx">
-          <span class="source" :class="c.source">{{ SOURCE_LABEL[c.source] || c.source }}</span>
+          <span class="source" :class="c.source">{{ SOURCE_LABEL[c.source || ''] || c.source }}</span>
           <b>{{ c.item }}</b> <span class="hint">{{ c.detail }}</span>
         </li>
       </ul>
