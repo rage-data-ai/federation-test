@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: federation-gateway
+  jackson:
+    deserialization:
+      fail-on-null-for-primitives: false
 
 management:
   endpoints:
@@ -24,7 +27,21 @@ federation:
     ttl-seconds: 30
     max-size: 256
   max-rows: 10000
-  catalog-store: data/catalogs.json
+  ontology-store: data/tdb2
+  repository:
+    url: jdbc:mysql://192.168.19.70:3308/federal?sslMode=DISABLED&allowPublicKeyRetrieval=true&characterEncoding=utf8
+    username: ${FEDERAL_DB_USER:tsoc}
+    password: ${FEDERAL_DB_PASSWORD:}
+  llm:
+    protocol: ${LLM_PROTOCOL:openai}
+    base-url: ${LLM_BASE_URL:}
+    api-key: ${LLM_API_KEY:}
+    model: ${LLM_MODEL:}
+  ask:
+    min-confidence: 0.5
+    max-path-depth: 4
+    sample-rows: 3
+    result-preview-rows: 50
   kafka-mappings: {}
   vector:
     default-k: 10

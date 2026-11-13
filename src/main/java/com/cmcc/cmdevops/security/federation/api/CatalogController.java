@@ -15,6 +15,9 @@ import org.springframework.web.bind.annotation.RestController;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogRecord;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogRegistry;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogView;
+import com.cmcc.cmdevops.security.federation.metadata.CollectRequest;
+import com.cmcc.cmdevops.security.federation.metadata.MetadataService;
+import com.cmcc.cmdevops.security.federation.metadata.TableSnapshot;
 import com.cmcc.cmdevops.security.federation.service.QueryService;
 import com.cmcc.cmdevops.security.federation.sql.DemoSqlLoader;
 
@@ -25,11 +28,17 @@ public class CatalogController {
     private final QueryService queryService;
     private final CatalogRegistry catalogRegistry;
     private final DemoSqlLoader demoSqlLoader;
+    private final MetadataService metadataService;
 
-    public CatalogController(QueryService queryService, CatalogRegistry catalogRegistry, DemoSqlLoader demoSqlLoader) {
+    public CatalogController(
+            QueryService queryService,
+            CatalogRegistry catalogRegistry,
+            DemoSqlLoader demoSqlLoader,
+            MetadataService metadataService) {
         this.queryService = queryService;
         this.catalogRegistry = catalogRegistry;
         this.demoSqlLoader = demoSqlLoader;
+        this.metadataService = metadataService;
     }
 
     @GetMapping("/catalogs")
@@ -43,13 +52,13 @@ public class CatalogController {
     }
 
     @PutMapping("/catalogs/{name}")
-    public CatalogView update(@PathVariable String name, @RequestBody CatalogRecord record) {
+    public CatalogView update(@PathVariable("name") String name, @RequestBody CatalogRecord record) {
         record.setName(name);
         return CatalogView.from(catalogRegistry.save(record, true));
     }
 
     @DeleteMapping("/catalogs/{name}")
-    public Map<String, Object> delete(@PathVariable String name) {
+    public Map<String, Object> delete(@PathVariable("name") String name) {
         catalogRegistry.delete(name);
         return Map.of("success", true);
     }
@@ -57,6 +66,27 @@ public class CatalogController {
     @PostMapping("/catalogs/test")
     public Map<String, Object> test(@RequestBody CatalogRecord record) {
         return catalogRegistry.test(record);
+    }
+
+    @GetMapping("/metadata")
+    public List<TableSnapshot> metadata() {
+        return metadataService.list();
+    }
+
+    @PostMapping("/metadata/collect")
+    public List<TableSnapshot> collect(@RequestBody CollectRequest request) {
+        return metadataService.collect(request);
+    }
+
+    @DeleteMapping("/metadata/{catalog}/{schema}/{table}")
+    public Map<String, Object> deleteMetadata(
+            @PathVariable("catalog") String catalog,
+            @PathVariable("schema") String schema,
+            @PathVariable("table") String table) {
+        if (!metadataService.delete(catalog, schema, table)) {
+            throw new IllegalArgumentException("元数据中没有表 " + catalog + "." + schema + "." + table);
+        }
+        return Map.of("success", true);
     }
 
     @GetMapping("/examples")

@@ -1,6 +1,8 @@
 package com.cmcc.cmdevops.security.federation.catalog;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
@@ -15,6 +17,33 @@ public final class TrinoCatalogFactory {
 
     public static String fileName(CatalogRecord record) {
         return record.getName().toLowerCase(Locale.ROOT) + ".properties";
+    }
+
+    public static String dropCatalogSql(String name) {
+        return "DROP CATALOG IF EXISTS " + name;
+    }
+
+    public static String createCatalogSql(CatalogRecord record) {
+        String connector = null;
+        List<String> properties = new ArrayList<>();
+        for (String line : render(record).split("\n")) {
+            int eq = line.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String key = line.substring(0, eq);
+            String value = line.substring(eq + 1);
+            if ("connector.name".equals(key)) {
+                connector = value;
+                continue;
+            }
+            properties.add("\"" + key + "\" = '" + value.replace("'", "''") + "'");
+        }
+        if (connector == null || connector.isBlank()) {
+            throw new IllegalArgumentException("catalog 缺少 connector.name");
+        }
+        return "CREATE CATALOG " + record.getName() + " USING " + connector
+                + "\nWITH (\n  " + String.join(",\n  ", properties) + "\n)";
     }
 
     public static String render(CatalogRecord record) {
@@ -41,6 +70,7 @@ public final class TrinoCatalogFactory {
         text.append("connection-password=").append(nullToEmpty(record.getPassword())).append('\n');
         if ("clickhouse".equals(connector)) {
             text.append("join-pushdown.enabled=true\n");
+            text.append("clickhouse.map-string-as-varchar=true\n");
         }
         return text.toString();
     }

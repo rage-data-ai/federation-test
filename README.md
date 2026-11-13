@@ -10,7 +10,7 @@
 HTTP /api/v1/query
         │
         ▼
-┌────────────────── 自研网关（Java 17 / Spring Boot） ──────────────────┐
+┌────────────────── 自研网关（Java 21 / Spring Boot） ──────────────────┐
 │ 鉴权 / 配额 / 审计 / 结果缓存                                         │
 │ Calcite 解析 · Kafka 落湖映射 · vector_search() 两阶段召回            │
 │ 路由：单源直连 MySQL/PG/CK/Doris → 跨源 Trino → 超大批 Spark（未接入） │
@@ -22,7 +22,7 @@ HTTP /api/v1/query
 
 ## 快速开始
 
-环境：JDK 17、Maven 3.9+。数据源用你本机已安装的 MySQL / ClickHouse / PostgreSQL / Doris，在控制台里注册，不依赖 Docker。
+环境：JDK 21、Maven 3.9+。数据源用你本机已安装的 MySQL / ClickHouse / PostgreSQL / Doris，在控制台里注册，不依赖 Docker。
 
 ```bash
 mvn test
@@ -30,7 +30,7 @@ mvn spring-boot:run
 cd web && npm install && npm run dev
 ```
 
-打开 http://localhost:5173 → **添加数据库** → 填主机/端口/库名/账号 → 测试连接 → 保存。SQL 使用三部分表名：`catalog.schema.table`，例如 `mysql.shop.customer`。配置落在 `data/catalogs.json`。
+打开 http://localhost:5173 → **添加数据库** → 填主机/端口/库名/账号 → 测试连接 → 保存。SQL 使用三部分表名：`catalog.schema.table`，例如 `mysql.shop.customer`。数据源、元数据和模型配置存在 MySQL `192.168.19.70` 的 `federal` 库，分别是 `fed_catalog`、`fed_meta_table`、`fed_meta_column`、`fed_llm`。`fed_meta_table.catalog_id` 外键指向 `fed_catalog.id`。
 
 ## 接口
 

@@ -1,12 +1,8 @@
 package com.cmcc.cmdevops.security.federation.catalog;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,40 +10,33 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.cmcc.cmdevops.security.federation.config.FederationProperties;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.cmcc.cmdevops.security.federation.metadata.MetadataStore;
 
 import jakarta.annotation.PostConstruct;
 
 @Service
 public class CatalogRegistry {
 
-    private static final TypeReference<LinkedHashMap<String, CatalogRecord>> TYPE =
-            new TypeReference<>() {
-            };
-
-    private final Path storePath;
-    private final ObjectMapper objectMapper;
+    private final CatalogStore catalogStore;
     private final TrinoCatalogSync trinoCatalogSync;
+    private final TrinoCatalogApplier trinoCatalogApplier;
+    private final MetadataStore metadataStore;
     private final Map<String, CatalogRecord> catalogs = new ConcurrentHashMap<>();
 
     @Autowired
     public CatalogRegistry(
-            FederationProperties properties,
-            ObjectMapper objectMapper,
-            TrinoCatalogSync trinoCatalogSync) {
-        this(Path.of(properties.getCatalogStore()), objectMapper, trinoCatalogSync);
-    }
-
-    private CatalogRegistry(Path storePath, ObjectMapper objectMapper, TrinoCatalogSync trinoCatalogSync) {
-        this.storePath = storePath;
-        this.objectMapper = objectMapper;
+            CatalogStore catalogStore,
+            TrinoCatalogSync trinoCatalogSync,
+            TrinoCatalogApplier trinoCatalogApplier,
+            MetadataStore metadataStore) {
+        this.catalogStore = catalogStore;
         this.trinoCatalogSync = trinoCatalogSync;
+        this.trinoCatalogApplier = trinoCatalogApplier;
+        this.metadataStore = metadataStore;
     }
 
     public static CatalogRegistry inMemory() {
-        return new CatalogRegistry((Path) null, new ObjectMapper(), null);
+        return new CatalogRegistry(new MemoryCatalogStore(), null, null, null);
     }
 
     @PostConstruct
@@ -84,10 +73,13 @@ public class CatalogRegistry {
         }
         incoming.setRoute("TRINO");
         catalogs.put(incoming.getName(), incoming);
+        catalogStore.upsert(incoming);
         if (trinoCatalogSync != null) {
             trinoCatalogSync.write(incoming);
         }
-        persist();
+        if (trinoCatalogApplier != null) {
+            trinoCatalogApplier.apply(incoming);
+        }
         return incoming;
     }
 
@@ -105,7 +97,13 @@ public class CatalogRegistry {
         if (trinoCatalogSync != null) {
             trinoCatalogSync.delete(removed.getName());
         }
-        persist();
+        if (trinoCatalogApplier != null) {
+            trinoCatalogApplier.drop(removed.getName());
+        }
+        if (metadataStore != null) {
+            metadataStore.deleteCatalog(removed.getName());
+        }
+        catalogStore.delete(removed.getName());
     }
 
     public Map<String, Object> test(CatalogRecord incoming) {
@@ -141,33 +139,12 @@ public class CatalogRegistry {
     }
 
     private void load() {
-        if (storePath == null || !Files.exists(storePath)) {
-            return;
-        }
-        try {
-            Map<String, CatalogRecord> loaded = objectMapper.readValue(storePath.toFile(), TYPE);
-            loaded.forEach((name, record) -> {
-                record.setName(name);
-                record.setRoute("TRINO");
-                catalogs.put(name, record);
-                if (trinoCatalogSync != null) {
-                    trinoCatalogSync.write(record);
-                }
-            });
-        } catch (IOException e) {
-            throw new IllegalStateException("读取数据源配置失败: " + storePath, e);
-        }
-    }
-
-    private void persist() {
-        if (storePath == null) {
-            return;
-        }
-        try {
-            Files.createDirectories(storePath.getParent() == null ? Path.of(".") : storePath.getParent());
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(storePath.toFile(), catalogs);
-        } catch (IOException e) {
-            throw new IllegalStateException("保存数据源配置失败: " + storePath, e);
+        for (CatalogRecord record : catalogStore.list()) {
+            record.setRoute("TRINO");
+            catalogs.put(record.getName(), record);
+            if (trinoCatalogSync != null) {
+                trinoCatalogSync.write(record);
+            }
         }
     }
 }

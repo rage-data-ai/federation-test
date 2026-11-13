@@ -24,11 +24,15 @@ public class QueryExecutor {
     }
 
     public QueryResponse.ResultSetData execute(String sql) {
-        return jdbcQueryEngine.execute(
-                trinoDataSource,
-                sql,
-                properties.getMaxRows(),
-                properties.getTrino().getQueryTimeoutSeconds());
+        return execute(sql, properties.getMaxRows());
+    }
+
+    public QueryResponse.ResultSetData execute(String sql, int maxRows) {
+        return execute(sql, maxRows, properties.getTrino().getQueryTimeoutSeconds());
+    }
+
+    public QueryResponse.ResultSetData execute(String sql, int maxRows, int timeoutSeconds) {
+        return jdbcQueryEngine.execute(trinoDataSource, sql, maxRows, timeoutSeconds);
     }
 
     public QueryResponse.ResultSetData execute(RoutePlan plan) {

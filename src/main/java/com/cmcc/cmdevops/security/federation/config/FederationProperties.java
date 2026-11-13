@@ -13,10 +13,13 @@ public class FederationProperties {
     private final Quota quota = new Quota();
     private final Cache cache = new Cache();
     private final Vector vector = new Vector();
+    private final Llm llm = new Llm();
+    private final Ask ask = new Ask();
     private Map<String, Catalog> catalogs = new LinkedHashMap<>();
     private Map<String, String> kafkaMappings = new LinkedHashMap<>();
     private int maxRows = 10_000;
-    private String catalogStore = "data/catalogs.json";
+    private String ontologyStore = "data/tdb2";
+    private final Repository repository = new Repository();
 
     public Trino getTrino() {
         return trino;
@@ -36,6 +39,14 @@ public class FederationProperties {
 
     public Vector getVector() {
         return vector;
+    }
+
+    public Llm getLlm() {
+        return llm;
+    }
+
+    public Ask getAsk() {
+        return ask;
     }
 
     public Map<String, Catalog> getCatalogs() {
@@ -62,12 +73,48 @@ public class FederationProperties {
         this.maxRows = maxRows;
     }
 
-    public String getCatalogStore() {
-        return catalogStore;
+    public String getOntologyStore() {
+        return ontologyStore;
     }
 
-    public void setCatalogStore(String catalogStore) {
-        this.catalogStore = catalogStore;
+    public void setOntologyStore(String ontologyStore) {
+        this.ontologyStore = ontologyStore;
+    }
+
+    public Repository getRepository() {
+        return repository;
+    }
+
+    /** 网关自己的配置库，替代 data/*.json。 */
+    public static class Repository {
+        private String url = "jdbc:mysql://192.168.19.70:3308/federal"
+                + "?sslMode=DISABLED&allowPublicKeyRetrieval=true&characterEncoding=utf8";
+        private String username = "tsoc";
+        private String password = "";
+
+        public String getUrl() {
+            return url;
+        }
+
+        public void setUrl(String url) {
+            this.url = url;
+        }
+
+        public String getUsername() {
+            return username;
+        }
+
+        public void setUsername(String username) {
+            this.username = username;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public void setPassword(String password) {
+            this.password = password;
+        }
     }
 
     public static class Trino {
@@ -208,6 +255,117 @@ public class FederationProperties {
 
         public void setMilvusUri(String milvusUri) {
             this.milvusUri = milvusUri;
+        }
+    }
+
+    public static class Llm {
+        /** openai 或 anthropic */
+        private String protocol = "openai";
+        private String baseUrl = "";
+        private String apiKey = "";
+        private String model = "";
+        private double temperature = 0.0;
+        private int maxTokens = 8192;
+        private int timeoutSeconds = 180;
+
+        public boolean isConfigured() {
+            return !baseUrl.isBlank() && !model.isBlank();
+        }
+
+        public String getProtocol() {
+            return protocol;
+        }
+
+        public void setProtocol(String protocol) {
+            this.protocol = protocol;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl == null ? "" : baseUrl;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey == null ? "" : apiKey;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public void setModel(String model) {
+            this.model = model == null ? "" : model;
+        }
+
+        public double getTemperature() {
+            return temperature;
+        }
+
+        public void setTemperature(double temperature) {
+            this.temperature = temperature;
+        }
+
+        public int getMaxTokens() {
+            return maxTokens;
+        }
+
+        public void setMaxTokens(int maxTokens) {
+            this.maxTokens = maxTokens;
+        }
+
+        public int getTimeoutSeconds() {
+            return timeoutSeconds;
+        }
+
+        public void setTimeoutSeconds(int timeoutSeconds) {
+            this.timeoutSeconds = timeoutSeconds;
+        }
+    }
+
+    public static class Ask {
+        /** get_business_context 置信度低于该值时升级到多轮工具检索 */
+        private double minConfidence = 0.5;
+        private int maxPathDepth = 4;
+        private int sampleRows = 3;
+        private int resultPreviewRows = 50;
+
+        public double getMinConfidence() {
+            return minConfidence;
+        }
+
+        public void setMinConfidence(double minConfidence) {
+            this.minConfidence = minConfidence;
+        }
+
+        public int getMaxPathDepth() {
+            return maxPathDepth;
+        }
+
+        public void setMaxPathDepth(int maxPathDepth) {
+            this.maxPathDepth = maxPathDepth;
+        }
+
+        public int getSampleRows() {
+            return sampleRows;
+        }
+
+        public void setSampleRows(int sampleRows) {
+            this.sampleRows = sampleRows;
+        }
+
+        public int getResultPreviewRows() {
+            return resultPreviewRows;
+        }
+
+        public void setResultPreviewRows(int resultPreviewRows) {
+            this.resultPreviewRows = resultPreviewRows;
         }
     }
 

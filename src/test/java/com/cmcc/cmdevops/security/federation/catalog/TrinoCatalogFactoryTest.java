@@ -23,6 +23,49 @@ class TrinoCatalogFactoryTest {
     }
 
     @Test
+    void createCatalogSqlEscapesProperties() {
+        CatalogRecord record = new CatalogRecord();
+        record.setName("ck81");
+        record.setType("clickhouse");
+        record.setHost("192.168.75.81");
+        record.setPort(8123);
+        record.setDatabase("pangu");
+        record.setUsername("pangu");
+        record.setPassword("pangu.CK@2021");
+        String sql = TrinoCatalogFactory.createCatalogSql(record);
+        assertTrue(sql.startsWith("CREATE CATALOG ck81 USING clickhouse"));
+        assertTrue(sql.contains("\"connection-url\" = 'jdbc:clickhouse://192.168.75.81:8123/pangu'"));
+        assertTrue(sql.contains("\"clickhouse.map-string-as-varchar\" = 'true'"));
+        assertEquals("DROP CATALOG IF EXISTS ck81", TrinoCatalogFactory.dropCatalogSql("ck81"));
+        String kafkaSql = TrinoCatalogFactory.createCatalogSql(kafkaRecord());
+        assertTrue(kafkaSql.contains("\"kafka.table-names\" = 'orders,events.clicks'"));
+    }
+
+    private CatalogRecord kafkaRecord() {
+        CatalogRecord record = new CatalogRecord();
+        record.setName("kafka");
+        record.setType("kafka");
+        record.setHost("192.168.1.10");
+        record.setPort(9092);
+        record.setDatabase("default");
+        record.setExtra("orders,events.clicks");
+        return record;
+    }
+
+    @Test
+    void renderClickhouseMapsStringAsVarchar() {
+        CatalogRecord record = new CatalogRecord();
+        record.setName("ck81");
+        record.setType("clickhouse");
+        record.setHost("192.168.75.81");
+        record.setPort(8123);
+        record.setDatabase("pangu");
+        String text = TrinoCatalogFactory.render(record);
+        assertTrue(text.contains("connector.name=clickhouse"));
+        assertTrue(text.contains("clickhouse.map-string-as-varchar=true"));
+    }
+
+    @Test
     void renderElasticsearch() {
         CatalogRecord record = new CatalogRecord();
         record.setName("es_prod");

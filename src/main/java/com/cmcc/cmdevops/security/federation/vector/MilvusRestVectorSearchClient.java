@@ -7,8 +7,8 @@ import java.util.Map;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 public class MilvusRestVectorSearchClient implements VectorSearchClient {
 

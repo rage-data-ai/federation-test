@@ -53,6 +53,11 @@
 - 使用 **Jena 内置规则推理器**，负责子类、传递、逆属性、domain/range 推理。
 - "level ≥ 3"这类数值区间的等价类，规则推理器不支持，**在编译 SQL 时转成 WHERE 条件处理**。
 - 不用 Openllet。它最新的 2.6.5 发布于 2019 年，Jena 集成模块绑定 Jena 3.10，和 TDB2 新版冲突。
+- **推理先在内存中做，再落到 TDB2**：
+  - 断言三元组存在 TDB2 默认图，推理结果存在命名图 `urn:fed:graph:inferred`，两者分开。
+  - 每次写入在同一个写事务里完成：执行修改 → 把断言图复制到内存 → OWL Micro 推理 → 推理出的新三元组整体替换推理图 → 提交。删除实体后，它的旧推理结果也随之清除。
+  - 启动时如果有断言但推理图为空（例如旧数据），自动补做一次推理。也可以调用 `POST /api/v1/ontology/reason` 手动重新推理。
+  - 带推理的查询直接读"默认图 + 推理图"，不再临时推理；读出的内存快照缓存到下一次写入。
 
 ## 5. 版本基线
 
@@ -85,7 +90,7 @@
   - `get_business_context` 返回 `status` 和 `confidence`。状态不是 `ok`，或者置信度低于阈值时，转入多轮工具探索（Part 3 第 3.4 节）。
 - **Metadata 智能体**：只回答物理事实问题。
   - **只使用本体里已映射的表**，未映射的表一律不用。
-  - 用现有的 `MetadataStore`（`data/metadata.json`）核对表、列、类型是否真实存在。
+  - 用现有的 `MetadataStore`（MySQL `federal.fed_meta_table` / `fed_meta_column`）核对表、列、类型是否真实存在。
   - 核对时按属性的声明 domain 分组（Part 3 第 5.2 节）。
 - **DataInsight 智能体**：结合语义和物理两份证据规划 SQL、执行，并给出解释。规划步骤参照 Part 3 第 6.2 节的 `sql-planning` 六步。
 
@@ -140,3 +145,35 @@
 4. Ontology 智能体的工具集，包括 `get_business_context` 和置信度计算。
 5. Metadata 智能体与 DataInsight 智能体、SQL 五道校验、恢复和诊断。
 6. `/api/v1/ask` SSE 接口和前端问数页面。
+
+## 11. 实现情况（2026-10-20）
+
+六步均已实现，单元测试覆盖本体存储与推理、起草写入、业务上下文与置信度、SQL 校验、三智能体编排（用脚本化的假模型跑通工具调用）。连真实数据库和大模型的端到端验证尚未做。
+
+### 11.1 配置
+
+大模型在控制台左侧「模型」里配置，写入 MySQL `federal.fed_llm`，保存后立即生效，不用重启。环境变量 `LLM_*` 只作为库里还没有配置时的初始值。数据源在 `fed_catalog`（自增 `id` 主键，名称唯一），元数据在 `fed_meta_table` 和 `fed_meta_column`。`fed_meta_table.catalog_id` 外键指向 `fed_catalog.id`，删除数据源时一并删除它的表和列。不再写 `data/*.json`。本体图仍在 `data/tdb2`。账号沿用已注册的 `192.168.19.70` MySQL，库为 `federal`。
+
+| 变量 | 说明 |
+| --- | --- |
+| `LLM_PROTOCOL` | `openai` 或 `anthropic`，默认 `openai` |
+| `LLM_BASE_URL` | 兼容接口地址，如 `https://api.openai.com/v1` |
+| `LLM_API_KEY` | 密钥 |
+| `LLM_MODEL` | 模型名 |
+
+`federation.ask.*` 可调：`min-confidence`（默认 0.5，低于它转多轮工具探索）、`max-path-depth`（关系路径最大跳数，默认 4）、`sample-rows`（起草时每表样例行数，默认 3）、`result-preview-rows`（返回给大模型和页面的结果行数，默认 50）。
+
+### 11.2 与上文设计的差异
+
+- **Metadata 环节是确定性代码，不是大模型智能体**。它只做"核对本体映射的表和列是否在 `MetadataStore` 中存在"，用代码更可靠也更快。缺表时自动按表重采一次，算作本次请求的那 1 次元数据恢复；DataInsight 仍可在 Trino 报错时调用 `recoverMetadata`，但同样受"每次请求 1 次"约束。
+- **预校验用 `EXPLAIN (TYPE VALIDATE)`**，不用 IO/分布式计划。`ck81.pangu.alert` 上 `EXPLAIN (TYPE IO)` 曾 61 秒超时，VALIDATE 只做语义检查。预校验直接走 `QueryExecutor`（`QueryService` 会把 `EXPLAIN (TYPE …)` 再包一层 `EXPLAIN`），真正的执行仍走 `QueryService`。
+- **Calcite 解析使用双引号标识符、大小写不敏感、LENIENT 方言**。解析失败即拒绝，并把原因回给大模型让它改写。表范围检查遍历整棵语法树（CTE、子查询、UNION 分支、IN 子查询），表必须写 `catalog.schema.table` 全限定名。Trino 476 自带解析器需要 Java 24，故未采用。
+- **大表时间过滤**：同一层 SELECT 的 WHERE 或 JOIN ON 中，必须有对该表时间列（按别名匹配）的 `>`、`>=`、`<`、`<=` 或 `BETWEEN` 比较；放在 CTE 或子查询里过滤也算。OR 需要每个分支都带时间条件。
+- **多轮工具探索的输出**是一组实体名，随后用这组实体（不再做词面匹配）重建业务上下文，从而消解歧义；探索智能体也可以直接向用户澄清。
+- 大模型返回 JSON 时容忍代码块和多余字段，缺失的布尔字段按 false 处理。
+
+### 11.3 接口
+
+- `GET /api/v1/llm/status`：是否已配置、协议、模型名。
+- `POST /api/v1/ontology/draft`：`{tables: ["ck81.pangu.alert"], instructions}` → 写入数量与警告。
+- `POST /api/v1/ask`（SSE）：`{question, history: [{role, content}]}`。事件依次为 `stage`、`ontology`、`metadata`、`sql`（每次尝试，状态 executed / rejected / failed）、`result`、最后是 `answer`（结论、SQL、结果、口径来源）或 `clarify`（问题与选项），出错为 `error`，结束发 `done`。
