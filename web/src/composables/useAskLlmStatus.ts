@@ -1,6 +1,6 @@
 import { computed, inject, onActivated, ref, watch, type Ref } from 'vue'
-import { llmStatus } from '../api'
-import type { LlmStatus } from '../types'
+import { llmConfig } from '../api'
+import type { LlmConfig, LlmStatus } from '../types'
 
 export type { LlmStatus }
 
@@ -8,15 +8,16 @@ export type { LlmStatus }
  * LLM readiness for AskView: status fetch, injects, and ready flag.
  */
 export function useAskLlmStatus() {
-  const status = ref<LlmStatus | null>(null)
+  const status = ref<LlmConfig | null>(null)
   const statusError = ref('')
   const openLlmSettings = inject<() => void>('openLlmSettings', () => {})
   const llmRevision = inject<Ref<number>>('llmRevision', ref(0))
-  const ready = computed(() => !!status.value?.configured)
+  const ready = computed(() => !!(status.value?.configured && status.value?.apiKeySet))
+  const needsKey = computed(() => !!(status.value?.configured && !status.value?.apiKeySet))
 
   async function loadStatus() {
     try {
-      status.value = await llmStatus()
+      status.value = await llmConfig()
       statusError.value = ''
     } catch (e) {
       statusError.value = e instanceof Error ? e.message : String(e)
@@ -30,6 +31,7 @@ export function useAskLlmStatus() {
     status,
     statusError,
     ready,
+    needsKey,
     openLlmSettings,
     loadStatus
   }

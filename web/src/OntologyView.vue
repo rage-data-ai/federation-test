@@ -7,7 +7,7 @@ import {
   listCatalogs,
   listMetadata,
   listOntologyVersions,
-  llmStatus,
+  llmConfig,
   renameSubject,
   restoreOntologyVersion,
   type OntologyVersionInfo
@@ -17,7 +17,7 @@ import DraftDialog from './components/ontology/DraftDialog.vue'
 import { useFocusTrap } from './composables/useFocusTrap'
 import { qualified, useOntologyDraft } from './composables/useOntologyDraft'
 import { KINDS, OPERATORS, useOntologyEditor, type KindKey } from './composables/useOntologyEditor'
-import type { CatalogRecord, LlmStatus, MetadataTable, OntologyBundle, OntologyEntity } from './types'
+import type { CatalogRecord, LlmConfig, MetadataTable, OntologyBundle, OntologyEntity } from './types'
 import { emptyOntology, errMessage } from './types'
 
 type TreeAdd = { kind: KindKey; preset?: Record<string, unknown> } | null
@@ -92,7 +92,7 @@ const subjectNames = computed(() => subjects.value.map((item) => item.name).filt
 const snapshot = computed(() => scopeTo(everything.value, subject.value))
 
 const query = ref('')
-const llm = ref<LlmStatus | null>(null)
+const llm = ref<LlmConfig | null>(null)
 const fresh = ref<string[]>([])
 const renaming = ref<RenameState | null>(null)
 const turtle = ref('')
@@ -476,7 +476,7 @@ onActivated(async () => {
 
 async function refreshLlm() {
   try {
-    llm.value = await llmStatus()
+    llm.value = await llmConfig()
   } catch {
     llm.value = null
   }
@@ -619,7 +619,7 @@ function ensureConditions() {
         </span>
         <button type="button" @click="openVersions">版本</button>
         <button type="button" @click="showTurtle">导出 Turtle</button>
-        <button v-if="llm && !llm.configured" type="button" @click="openLlmSettings">配置大模型</button>
+        <button v-if="llm && (!llm.configured || !llm.apiKeySet)" type="button" @click="openLlmSettings">配置大模型</button>
         <button v-else class="primary" type="button" @click="openDraft">大模型起草</button>
       </div>
     </header>
@@ -719,7 +719,7 @@ function ensureConditions() {
             <span>概念、属性、关系、码值直接进本体，图上用琥珀色描边标出。</span>
           </li>
         </ol>
-        <button v-if="llm && !llm.configured" type="button" @click="openLlmSettings">先配置大模型</button>
+        <button v-if="llm && (!llm.configured || !llm.apiKeySet)" type="button" @click="openLlmSettings">先配置大模型</button>
         <button v-else class="primary" type="button" @click="openDraft">选择表并起草</button>
       </div>
       <div v-if="fresh.length" class="draft-note">

@@ -9,7 +9,7 @@ import {
 } from './composables/useAskStream'
 import { useAskLlmStatus } from './composables/useAskLlmStatus'
 
-const { status, statusError, ready, openLlmSettings } = useAskLlmStatus()
+const { status, statusError, ready, needsKey, openLlmSettings } = useAskLlmStatus()
 const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskStream()
 </script>
 
@@ -18,7 +18,7 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
     <header class="module-head">
       <h1 id="ask-title">智能问数</h1>
       <div class="head-side">
-        <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">未配置，去设置</button>
+        <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">{{ needsKey ? '填写 API Key' : '未配置，去设置' }}</button>
         <span v-else-if="status" class="head-note">{{ status.protocol }} · {{ status.model }}</span>
         <button type="button" :disabled="busy || !turns.length" @click="clearTurns">新对话</button>
       </div>
@@ -36,6 +36,10 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
         <h2>智能问数</h2>
         <p class="hint">用业务语言提问，系统按 本体 → 元数据 → SQL 的顺序检索、校验并执行，口径缺失时会先问你。</p>
         <p v-if="statusError" class="err" role="alert">{{ statusError }}</p>
+        <p v-else-if="needsKey" class="err" role="status">
+          已选择 {{ status?.model }}，还差 API Key。
+          <button class="link" type="button" @click="openLlmSettings">去填写</button>
+        </p>
         <p v-else-if="status && !ready" class="err" role="status">
           还没有配置大模型。
           <button class="link" type="button" @click="openLlmSettings">去配置</button>
