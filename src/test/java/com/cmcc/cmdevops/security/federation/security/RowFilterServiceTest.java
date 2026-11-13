@@ -1,6 +1,7 @@
 package com.cmcc.cmdevops.security.federation.security;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -75,4 +76,26 @@ class RowFilterServiceTest {
         String sql = "SELECT * FROM mysql_shop.public.orders";
         assertFalse(filters.apply(sql, List.of(table)).toLowerCase().contains("tenant_id"));
     }
+
+    @Test
+    void qualifyBareColumnWithAlias() {
+        assertEquals("o.tenant_id = 'acme'",
+                RowFilterService.qualifyPredicate("tenant_id = 'acme'", "o"));
+        assertEquals("o.tenant_id = 'acme'",
+                RowFilterService.qualifyPredicate("o.tenant_id = 'acme'", "o"));
+    }
+
+    @Test
+    void applyQualifiesPredicateUsingTableAlias() {
+        TableRef table = new TableRef("mysql_shop", "public", "orders", "o");
+        String rewritten = filters.apply(
+                "SELECT o.id FROM mysql_shop.public.orders o JOIN mysql_shop.public.items i ON o.id = i.order_id",
+                List.of(table));
+        String lower = rewritten.toLowerCase();
+        assertTrue(lower.contains("o.tenant_id")
+                || lower.contains("`o`.`tenant_id`")
+                || lower.contains("\"o\".\"tenant_id\"")
+                || lower.contains("\"o\".tenant_id"), rewritten);
+    }
+
 }

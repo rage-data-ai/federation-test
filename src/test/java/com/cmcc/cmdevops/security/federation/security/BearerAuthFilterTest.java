@@ -130,4 +130,20 @@ class BearerAuthFilterTest {
         assertTrue(response.getContentAsString().contains("吊销"));
     }
 
+
+    @Test
+    void allowsBackchannelLogoutWithSharedSecret() throws Exception {
+        FederationProperties properties = new FederationProperties();
+        properties.getSecurity().setEnabled(true);
+        properties.getSecurity().setBackchannelLogoutSecret("s3cret");
+        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt(), new TokenRevocationService());
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/backchannel-logout");
+        request.addHeader("X-Backchannel-Secret", "s3cret");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean passed = new AtomicBoolean();
+        filter.doFilter(request, response, (req, res) -> passed.set(true));
+        assertTrue(passed.get());
+        assertEquals(200, response.getStatus());
+    }
+
 }

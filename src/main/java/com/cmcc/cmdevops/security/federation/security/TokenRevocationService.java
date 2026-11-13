@@ -4,35 +4,51 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
-import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Component;
 
 /**
- * 进程内令牌吊销表（denylist）。用于登出与管理吊销；重启后清空。
- * 生产可替换为 Redis / 共享存储。
+ * 令牌吊销门面：指纹化后写入 {@link TokenRevocationStore}。
+ * 默认内存；配置 {@code federation.security.revocation-store-path} 可跨实例共享文件 denylist。
  */
 @Component
 public class TokenRevocationService {
 
-    private final ConcurrentHashMap<String, Long> revokedAtMs = new ConcurrentHashMap<>();
+    private final TokenRevocationStore store;
+
+    public TokenRevocationService(TokenRevocationStore store) {
+        this.store = store;
+    }
+
+    /** 测试 / WebMvc 切片默认内存 store。 */
+    public TokenRevocationService() {
+        this(new InMemoryTokenRevocationStore());
+    }
 
     public void revoke(String token) {
         if (token == null || token.isBlank()) {
             return;
         }
-        revokedAtMs.put(fingerprint(token), System.currentTimeMillis());
+        store.revoke(fingerprint(token), System.currentTimeMillis());
+    }
+
+    /** 按已计算指纹吊销（供 back-channel 仅传 jti/hash 场景）。 */
+    public void revokeFingerprint(String fingerprint) {
+        if (fingerprint == null || fingerprint.isBlank()) {
+            return;
+        }
+        store.revoke(fingerprint.trim().toLowerCase(), System.currentTimeMillis());
     }
 
     public boolean isRevoked(String token) {
         if (token == null || token.isBlank()) {
             return false;
         }
-        return revokedAtMs.containsKey(fingerprint(token));
+        return store.isRevoked(fingerprint(token));
     }
 
     public int size() {
-        return revokedAtMs.size();
+        return store.size();
     }
 
     static String fingerprint(String token) {

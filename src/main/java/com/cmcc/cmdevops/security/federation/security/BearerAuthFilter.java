@@ -65,6 +65,11 @@ public class BearerAuthFilter extends OncePerRequestFilter {
                 filterChain.doFilter(request, response);
                 return;
             }
+            if (allowBackchannelWithoutBearer(request)) {
+                GatewayUser.set(GatewayUser.ANONYMOUS);
+                filterChain.doFilter(request, response);
+                return;
+            }
             String header = request.getHeader(HttpHeaders.AUTHORIZATION);
             if (header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) {
                 unauthorized(response, "缺少 Authorization: Bearer <token>");
@@ -85,6 +90,20 @@ public class BearerAuthFilter extends OncePerRequestFilter {
         } finally {
             GatewayUser.clear();
         }
+    }
+
+
+    private boolean allowBackchannelWithoutBearer(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        if (path == null || !path.equals("/api/v1/auth/backchannel-logout")) {
+            return false;
+        }
+        String configured = properties.getSecurity().getBackchannelLogoutSecret();
+        if (configured == null || configured.isBlank()) {
+            return false;
+        }
+        String provided = request.getHeader("X-Backchannel-Secret");
+        return configured.equals(provided);
     }
 
     private GatewayUser resolveUser(String token) {

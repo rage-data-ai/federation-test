@@ -5,6 +5,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.avatica.util.Quoting;
@@ -12,12 +14,12 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlOrderBy;
 import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlWith;
+import org.apache.calcite.sql.dialect.AnsiSqlDialect;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
-import org.apache.calcite.sql.dialect.AnsiSqlDialect;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -28,7 +30,7 @@ import com.cmcc.cmdevops.security.federation.model.TableRef;
 /**
  * 行级过滤：配置 {@code federation.security.row-filters}
  * （用户 → {@code catalog.schema.table: predicate}）。
- * 优先用 Calcite 将谓词 AND 进最外层 SELECT 的 WHERE；解析失败时回退为子查询包裹。
+ * 注入时若 SQL 中该表有别名，则把谓词左侧裸列名限定为 {@code alias.column}，避免 JOIN 歧义。
  */
 @Component
 public class RowFilterService {
@@ -39,6 +41,9 @@ public class RowFilterService {
             .withQuotedCasing(Casing.UNCHANGED)
             .withCaseSensitive(false)
             .withConformance(SqlConformanceEnum.LENIENT);
+
+    private static final Pattern BARE_COLUMN = Pattern.compile(
+            "(?i)^([a-z_][a-z0-9_]*)(\\s*[=<>]|\\s+is\\b|\\s+in\\b|\\s+like\\b|\\s+between\\b)");
 
     private final FederationProperties properties;
 
@@ -82,9 +87,8 @@ public class RowFilterService {
         return rules;
     }
 
-    /** 将适用谓词注入 SQL；无规则时原样返回。 */
     public String apply(String sql, List<TableRef> tables) {
-        List<Rule> rules = applicable(tables);
+        List<BoundRule> rules = applicable(tables);
         if (rules.isEmpty() || sql == null || sql.isBlank()) {
             return sql;
         }
@@ -95,17 +99,17 @@ public class RowFilterService {
         }
     }
 
-    /**
-     * @deprecated 保留兼容测试；生产路径请用 {@link #apply} 自动注入。
-     */
     public void assertSatisfied(String sql, List<TableRef> tables) {
-        List<Rule> rules = applicable(tables);
+        List<BoundRule> rules = applicable(tables);
         if (rules.isEmpty() || sql == null) {
             return;
         }
         String lower = sql.toLowerCase(Locale.ROOT);
-        for (Rule rule : rules) {
+        for (BoundRule rule : rules) {
             String token = rule.predicate().toLowerCase(Locale.ROOT).split("[=<> ]+", 2)[0].trim();
+            if (token.contains(".")) {
+                token = token.substring(token.lastIndexOf('.') + 1);
+            }
             if (token.isEmpty() || !lower.contains(token)) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                         "查询缺少行级过滤条件: " + rule.table() + " 需要 " + rule.predicate());
@@ -113,7 +117,27 @@ public class RowFilterService {
         }
     }
 
-    private List<Rule> applicable(List<TableRef> tables) {
+    /** 将裸列谓词限定为 alias.column；已带限定符则不变。 */
+    static String qualifyPredicate(String predicate, String alias) {
+        if (predicate == null || predicate.isBlank()) {
+            return predicate;
+        }
+        if (alias == null || alias.isBlank()) {
+            return predicate;
+        }
+        String trimmed = predicate.strip();
+        Matcher matcher = BARE_COLUMN.matcher(trimmed);
+        if (!matcher.find()) {
+            return trimmed;
+        }
+        String column = matcher.group(1);
+        if (column.contains(".")) {
+            return trimmed;
+        }
+        return alias + "." + trimmed;
+    }
+
+    private List<BoundRule> applicable(List<TableRef> tables) {
         List<Rule> all = rulesForCurrentUser();
         if (all.isEmpty() || tables == null || tables.isEmpty()) {
             return List.of();
@@ -122,17 +146,22 @@ public class RowFilterService {
         for (Rule rule : all) {
             byTable.put(rule.table(), rule);
         }
-        List<Rule> matched = new ArrayList<>();
+        List<BoundRule> matched = new ArrayList<>();
         for (TableRef table : tables) {
             Rule rule = byTable.get(table.qualifiedName().toLowerCase(Locale.ROOT));
-            if (rule != null) {
-                matched.add(rule);
+            if (rule == null) {
+                continue;
             }
+            String alias = table.alias();
+            if (alias == null || alias.isBlank()) {
+                alias = table.table();
+            }
+            matched.add(new BoundRule(rule.table(), qualifyPredicate(rule.predicate(), alias), alias));
         }
         return matched;
     }
 
-    private String injectWhere(String sql, List<Rule> rules) throws SqlParseException {
+    private String injectWhere(String sql, List<BoundRule> rules) throws SqlParseException {
         String text = sql.strip();
         while (text.endsWith(";")) {
             text = text.substring(0, text.length() - 1).strip();
@@ -143,7 +172,7 @@ public class RowFilterService {
             return wrapSubquery(sql, rules);
         }
         SqlNode where = select.getWhere();
-        for (Rule rule : rules) {
+        for (BoundRule rule : rules) {
             SqlNode pred = SqlParser.create(rule.predicate(), PARSER).parseExpression();
             where = where == null
                     ? pred
@@ -166,17 +195,26 @@ public class RowFilterService {
         return null;
     }
 
-    private static String wrapSubquery(String sql, List<Rule> rules) {
+    private static String wrapSubquery(String sql, List<BoundRule> rules) {
+        // 子查询包裹后外层看不到原别名，去掉 alias. 前缀只保留列名
         StringBuilder where = new StringBuilder();
         for (int i = 0; i < rules.size(); i++) {
             if (i > 0) {
                 where.append(" AND ");
             }
-            where.append('(').append(rules.get(i).predicate()).append(')');
+            String pred = rules.get(i).predicate();
+            String alias = rules.get(i).alias();
+            if (alias != null && !alias.isBlank() && pred.regionMatches(true, 0, alias + ".", 0, alias.length() + 1)) {
+                pred = pred.substring(alias.length() + 1);
+            }
+            where.append('(').append(pred).append(')');
         }
         return "SELECT * FROM (" + sql.strip() + ") AS __fed_rls WHERE " + where;
     }
 
     public record Rule(String table, String predicate) {
+    }
+
+    record BoundRule(String table, String predicate, String alias) {
     }
 }

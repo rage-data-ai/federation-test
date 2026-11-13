@@ -194,6 +194,16 @@ public class FederationProperties {
          * 例：{@code reader: mysql_shop.public.orders:tenant_id = 'acme'}
          */
         private Map<String, String> rowFilters = new LinkedHashMap<>();
+        /**
+         * 吊销 denylist 持久化路径。空则仅进程内存；非空则读写该文件（多实例可挂共享卷）。
+         * 例：{@code /var/lib/federation/revoked-tokens.tsv}
+         */
+        private String revocationStorePath = "";
+        /**
+         * OIDC back-channel logout 共享密钥。非空时 {@code POST /api/v1/auth/backchannel-logout}
+         * 可用 {@code X-Backchannel-Secret} 头代替 ADMIN Bearer。
+         */
+        private String backchannelLogoutSecret = "";
         private final Jwt jwt = new Jwt();
 
         public boolean isEnabled() {
@@ -234,6 +244,22 @@ public class FederationProperties {
 
         public void setRowFilters(Map<String, String> rowFilters) {
             this.rowFilters = rowFilters == null ? new LinkedHashMap<>() : rowFilters;
+        }
+
+        public String getRevocationStorePath() {
+            return revocationStorePath;
+        }
+
+        public void setRevocationStorePath(String revocationStorePath) {
+            this.revocationStorePath = revocationStorePath == null ? "" : revocationStorePath;
+        }
+
+        public String getBackchannelLogoutSecret() {
+            return backchannelLogoutSecret;
+        }
+
+        public void setBackchannelLogoutSecret(String backchannelLogoutSecret) {
+            this.backchannelLogoutSecret = backchannelLogoutSecret == null ? "" : backchannelLogoutSecret;
         }
 
         public Jwt getJwt() {

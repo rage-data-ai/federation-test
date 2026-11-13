@@ -5,11 +5,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 import com.cmcc.cmdevops.security.federation.security.CatalogAclService;
@@ -23,6 +25,8 @@ import jakarta.servlet.http.HttpServletRequest;
 @RestController
 @RequestMapping("/api/v1/auth")
 public class AuthController {
+
+    public static final String BACKCHANNEL_SECRET_HEADER = "X-Backchannel-Secret";
 
     private final FederationProperties properties;
     private final CatalogAclService catalogAcl;
@@ -63,7 +67,7 @@ public class AuthController {
 
     /**
      * 管理员吊销任意 token（body.token）或当前 token。
-     * 用于配合 IdP back-channel / 应急吊销。
+     * 用于配合 IdP / 应急吊销。
      */
     @RequireRole(GatewayRole.ADMIN)
     @PostMapping("/revoke")
@@ -77,6 +81,47 @@ public class AuthController {
         }
         revocations.revoke(token.trim());
         return Map.of("success", true, "revoked", true, "denylistSize", revocations.size());
+    }
+
+    /**
+     * OIDC / IdP back-channel logout。
+     * 鉴权：ADMIN Bearer，或配置了 {@code federation.security.backchannel-logout-secret}
+     * 时的 {@code X-Backchannel-Secret} 头。
+     * Body：{@code token}（原始 access_token）或 {@code fingerprint}（SHA-256 hex）。
+     */
+    @PostMapping("/backchannel-logout")
+    public Map<String, Object> backchannelLogout(
+            @RequestBody(required = false) Map<String, String> body,
+            HttpServletRequest request) {
+        assertBackchannelAuthorized(request);
+        if (body == null || body.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "需要 token 或 fingerprint");
+        }
+        String token = body.get("token");
+        String fingerprint = body.get("fingerprint");
+        if (token != null && !token.isBlank()) {
+            revocations.revoke(token.trim());
+        } else if (fingerprint != null && !fingerprint.isBlank()) {
+            revocations.revokeFingerprint(fingerprint.trim());
+        } else {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "需要 token 或 fingerprint");
+        }
+        return Map.of("success", true, "revoked", true, "denylistSize", revocations.size());
+    }
+
+    private void assertBackchannelAuthorized(HttpServletRequest request) {
+        String configured = properties.getSecurity().getBackchannelLogoutSecret();
+        if (configured != null && !configured.isBlank()) {
+            String provided = request.getHeader(BACKCHANNEL_SECRET_HEADER);
+            if (configured.equals(provided)) {
+                return;
+            }
+        }
+        GatewayUser user = GatewayUser.current();
+        if (user.hasRole(GatewayRole.ADMIN)) {
+            return;
+        }
+        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "back-channel logout 未授权");
     }
 
     private static String bearer(HttpServletRequest request) {

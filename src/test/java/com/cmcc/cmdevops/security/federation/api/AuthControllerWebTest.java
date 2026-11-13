@@ -53,6 +53,7 @@ class AuthControllerWebTest {
         GatewayUser.clear();
         properties.getSecurity().setEnabled(false);
         properties.getSecurity().getJwt().setIssuerUri("");
+        properties.getSecurity().setBackchannelLogoutSecret("");
     }
 
     @Test
@@ -74,6 +75,30 @@ class AuthControllerWebTest {
                         .header("Authorization", "Bearer unused"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void backchannelLogoutWithSecret() throws Exception {
+        properties.getSecurity().setBackchannelLogoutSecret("bc-secret");
+        GatewayUser.set(new GatewayUser("anon", Set.of(GatewayRole.QUERY)));
+        mockMvc.perform(post("/api/v1/auth/backchannel-logout")
+                        .contentType("application/json")
+                        .header("X-Backchannel-Secret", "bc-secret")
+                        .content("{\"token\":\"victim-token\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.revoked").value(true));
+        properties.getSecurity().setBackchannelLogoutSecret("");
+    }
+
+    @Test
+    void backchannelLogoutRejectedWithoutAuth() throws Exception {
+        properties.getSecurity().setBackchannelLogoutSecret("bc-secret");
+        GatewayUser.set(new GatewayUser("reader", Set.of(GatewayRole.QUERY)));
+        mockMvc.perform(post("/api/v1/auth/backchannel-logout")
+                        .contentType("application/json")
+                        .content("{\"token\":\"x\"}"))
+                .andExpect(status().isForbidden());
+        properties.getSecurity().setBackchannelLogoutSecret("");
     }
 
 }
