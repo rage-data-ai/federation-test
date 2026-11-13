@@ -25,7 +25,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <calcite.version>1.39.0</calcite.version>
         <jena.version>6.2.0</jena.version>
-        <trino.jdbc.version>476</trino.jdbc.version>
+        <trino.jdbc.version>484</trino.jdbc.version>
         <clickhouse.jdbc.version>0.8.2</clickhouse.jdbc.version>
         <langchain4j.version>1.22.0</langchain4j.version>
     </properties>
