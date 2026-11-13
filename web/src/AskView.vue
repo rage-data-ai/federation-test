@@ -50,6 +50,17 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
           </div>
 
           <div v-if="turn.showTrace" class="trace">
+            <section v-if="turn.answerability" class="step">
+              <h4>
+                <span class="tag">可答性</span>
+                {{ turn.answerability.answerable === false ? '覆盖不足' : '可继续' }}
+                <em v-if="turn.answerability.coverage != null">· coverage {{ turn.answerability.coverage }}</em>
+              </h4>
+              <p v-if="Array.isArray(turn.answerability.gaps) && turn.answerability.gaps.length" class="line warn">
+                缺口：{{ (turn.answerability.gaps as string[]).join('；') }}
+              </p>
+              <p v-if="typeof turn.answerability.suggestion === 'string'" class="line">{{ turn.answerability.suggestion }}</p>
+            </section>
             <section v-if="turn.ontology" class="step">
               <h4>
                 <span class="tag">{{ STAGE_LABEL.ontology }}</span>

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.BusinessContextBuilder;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.BusinessContextBuilder.Term;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.HashingTermEmbedder;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.NgramTermRetriever;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyEntityViews;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyIndex;
@@ -79,12 +80,18 @@ public class OntologyTools {
                 // 轻量模糊召回（编辑距离 ≤1），弥补无向量检索时的近邻词
                 score = term.quality() * 0.35;
             } else {
-                double sim = NgramTermRetriever.cosine(
-                        NgramTermRetriever.grams(needle), NgramTermRetriever.grams(term.text()));
-                if (sim < 0.55) {
-                    continue;
+                HashingTermEmbedder embedder = new HashingTermEmbedder();
+                double embedSim = HashingTermEmbedder.cosine(embedder.embed(needle), embedder.embed(term.text()));
+                if (embedSim >= 0.45) {
+                    score = term.quality() * (0.35 + 0.45 * embedSim);
+                } else {
+                    double sim = NgramTermRetriever.cosine(
+                            NgramTermRetriever.grams(needle), NgramTermRetriever.grams(term.text()));
+                    if (sim < 0.55) {
+                        continue;
+                    }
+                    score = term.quality() * (0.3 + 0.4 * sim);
                 }
-                score = term.quality() * (0.3 + 0.4 * sim);
             }
             hits.add(new EntityHit(term.entity(), term.kind(), term.label(), term.original(), term.source(),
                     BusinessContextBuilder.round(score)));

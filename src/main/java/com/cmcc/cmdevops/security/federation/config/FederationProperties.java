@@ -210,6 +210,10 @@ public class FederationProperties {
          */
         private String revocationStorePath = "";
         /**
+         * Redis URI 优先于文件 denylist（多实例推荐）。例：{@code redis://localhost:6379/0}
+         */
+        private String revocationRedisUri = "";
+        /**
          * OIDC back-channel logout 共享密钥。非空时 {@code POST /api/v1/auth/backchannel-logout}
          * 可用 {@code X-Backchannel-Secret} 头代替 ADMIN Bearer。
          */
@@ -262,6 +266,14 @@ public class FederationProperties {
 
         public void setRevocationStorePath(String revocationStorePath) {
             this.revocationStorePath = revocationStorePath == null ? "" : revocationStorePath;
+        }
+
+        public String getRevocationRedisUri() {
+            return revocationRedisUri;
+        }
+
+        public void setRevocationRedisUri(String revocationRedisUri) {
+            this.revocationRedisUri = revocationRedisUri == null ? "" : revocationRedisUri;
         }
 
         public String getBackchannelLogoutSecret() {

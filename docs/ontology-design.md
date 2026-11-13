@@ -128,15 +128,15 @@
 | 语义编译同义词 | 起草规则要求 aliases；码值别名利于词表命中 |
 | certify 审定 | `certified` 字段 + `PUT /api/v1/ontology/{name}/certified` + 控制台勾选；问数优先已审定 |
 | SQL attributes | `definedConcept.sqlExpression`（度量）与 `sqlCondition`（过滤） |
-| embedding 术语检索 | 无外部向量库时用字符 n-gram 余弦召回（`NgramTermRetriever`）+ 编辑距离模糊 |
+| embedding 术语检索 | 本地哈希嵌入（`HashingTermEmbedder` / `EmbeddingTermRetriever`）+ n-gram / 编辑距离；可选外接 EMBED API / pgvector |
 
-未搬迁（体量大 / 依赖不同）：真 embedding / pgvector、Redis 语义目录。
+未搬迁（体量大 / 依赖不同）：外接 NIM embedding / pgvector 持久索引、Redis 语义目录。
 
 ### 7.7 后续再做
 
 - 治理 SQL 模板快速通道（Part 3 的 `analytics-spec`）。
 - Kafka 数据源的本体映射。
-- 可选：外部 embedding / pgvector 替换 n-gram 召回。
+- 可选：外接 embedding 端点或 pgvector 替换本地哈希嵌入。
 
 ## 8. 已知风险
 

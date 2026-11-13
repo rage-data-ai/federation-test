@@ -57,12 +57,11 @@ public final class BusinessContextBuilder {
         List<Term> lexicon = lexicon(snapshot);
         List<Match> matches = exclusive ? new ArrayList<>()
                 : match(question == null ? "" : question, lexicon, warnings);
-        if (!exclusive && question != null && matches.size() < 2) {
-            // 字面命中不足时用字符 n-gram 余弦召回补候选（无外部向量库）
-            for (Match soft : NgramTermRetriever.retrieve(question, lexicon, 5)) {
-                if (matches.stream().noneMatch(m -> m.entity().equals(soft.entity()))) {
-                    matches.add(soft);
-                }
+        if (!exclusive && question != null && matches.isEmpty()) {
+            // 无字面命中时：先本地哈希嵌入召回，再 n-gram 补漏（无需 pgvector / EMBED API）
+            matches.addAll(EmbeddingTermRetriever.retrieve(question, lexicon, 5));
+            if (matches.isEmpty()) {
+                matches.addAll(NgramTermRetriever.retrieve(question, lexicon, 5));
             }
         }
         for (String entity : extraEntities) {

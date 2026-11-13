@@ -62,9 +62,11 @@ federation.security.row-filters:
 - `POST /api/v1/auth/logout`：吊销当前 Bearer（登出）。
 - `POST /api/v1/auth/revoke`（ADMIN）：body `{"token":"..."}` 或吊销当前 token。
 - `POST /api/v1/auth/backchannel-logout`：IdP/运维 back-channel；ADMIN Bearer 或头 `X-Backchannel-Secret`（`federation.security.backchannel-logout-secret`）；body `{"token":"..."}` 或 `{"fingerprint":"<sha256-hex>"}`。
-- 默认进程内 denylist；配置 `federation.security.revocation-store-path` 使用共享文件实现跨实例。控制台注销会先调 logout 再跳转 IdP。
+- 默认进程内 denylist；`federation.security.revocation-redis-uri` 优先（多实例推荐），否则 `revocation-store-path` 用共享文件。控制台注销会先调 logout 再跳转 IdP。
 
 ```yaml
+federation.security.revocation-redis-uri: redis://localhost:6379/0
+# 或
 federation.security.revocation-store-path: /var/lib/federation/revoked-tokens.tsv
 federation.security.backchannel-logout-secret: ${BACKCHANNEL_LOGOUT_SECRET:}
 ```

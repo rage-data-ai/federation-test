@@ -10,8 +10,12 @@ import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 @Configuration
 public class TokenRevocationConfiguration {
 
-    @Bean
+    @Bean(destroyMethod = "close")
     TokenRevocationStore tokenRevocationStore(FederationProperties properties) {
+        String redisUri = properties.getSecurity().getRevocationRedisUri();
+        if (redisUri != null && !redisUri.isBlank()) {
+            return new RedisTokenRevocationStore(redisUri.trim());
+        }
         String path = properties.getSecurity().getRevocationStorePath();
         if (path == null || path.isBlank()) {
             return new InMemoryTokenRevocationStore();

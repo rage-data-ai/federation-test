@@ -157,6 +157,10 @@
             <version>4.8.6</version>
             <optional>true</optional>
         </dependency>
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

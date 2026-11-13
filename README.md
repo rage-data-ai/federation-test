@@ -92,7 +92,7 @@ docker compose up -d --build
 | `demo` | `FEDERATION_DEMO_TOKEN` | `QUERY,ADMIN` |
 | `reader` | `FEDERATION_READER_TOKEN` | `QUERY`（只读查询/问数） |
 
-写入数据源、元数据、本体、模型配置需要 `ADMIN`。可选 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出 tracing。
+写入数据源、元数据、本体、模型配置需要 `ADMIN`。可选 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出 tracing。多实例吊销可配 `FEDERATION_SECURITY_REVOCATION_REDIS_URI`（或 `federation.security.revocation-redis-uri`）。
 
 ## 示例
 
