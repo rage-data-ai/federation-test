@@ -3,19 +3,20 @@
 ## 开发环境
 
 - JDK 21、Maven 3.9+
-- Node 22+（控制台；与 CI 对齐）
+- Node ≥ 22.12（控制台 / vitest 5；与 CI 对齐）
 - MySQL 作为 `federal` 配置库（见 `.env.example`）
 - 可选 Docker：Jdbc*StoreIT / PgvectorTermRetrieverIT 会在有 Docker 时跑 Testcontainers
 
 ## 提交流程
 
 1. 从 `main` 拉分支，命名建议 `cursor/<topic>-<id>`。
-2. 本地门禁（与 CI 对齐）：
+2. 本地门禁（与 CI 对齐），推荐一键：`./scripts/verify-all.sh`；或分步：
    - 后端：`mvn -B verify`
    - 前端：`cd web && npm ci && npm run lint && npm run typecheck && npm test && npm run build`
    - 有 UI 变更时：`cd web && npm run test:e2e`（需本机 Chromium）
 3. 保持文档与行为一致（尤其是 README / `docs/ontology-design.md` / 鉴权说明 / `SECURITY.md`）。
 4. 提交信息用现在时、说明「为什么」；PR 描述写清动机与验证方式。
+5. 发版见 [`docs/RELEASING.md`](docs/RELEASING.md)（打 `v*` 标签触发 Release 工作流）。
 
 ## 代码约定
 

@@ -13,6 +13,9 @@
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.json && vue-tsc --noEmit -p tsconfig.app.json"
   },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "dependencies": {
     "vue": "^3.5.13"
   },
@@ -26,12 +29,11 @@
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.72.2",
     "vite": "^6.4.6",
-    "vitest": "^3.0.5",
+    "vitest": "^5.1.0",
     "vue-eslint-parser": "^10.4.2",
     "vue-tsc": "^2.2.12"
   },
   "overrides": {
-    "tinypool": "^2.2.0",
     "minimatch": "^11.0.8"
   }
 }

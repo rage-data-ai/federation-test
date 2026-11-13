@@ -21,11 +21,11 @@ HTTP /api/v1/query  ·  /api/v1/ask (SSE)
          MySQL/PG/CK            mysql / postgresql / clickhouse / …
 ```
 
-设计评估见 [`docs/design-review.md`](docs/design-review.md)；本体设计见 [`docs/ontology-design.md`](docs/ontology-design.md)；OIDC/JWT 见 [`docs/oidc.md`](docs/oidc.md)；嵌入 ADR 见 [`docs/adr/0001-term-embedding.md`](docs/adr/0001-term-embedding.md)。`mvn verify` 会生成 CycloneDX SBOM（`target/bom.json`）。前端另跑 `npm run test:e2e`（Playwright 冒烟/视觉基线）。
+设计评估见 [`docs/design-review.md`](docs/design-review.md)；本体设计见 [`docs/ontology-design.md`](docs/ontology-design.md)；OIDC/JWT 见 [`docs/oidc.md`](docs/oidc.md)；嵌入 ADR 见 [`docs/adr/0001-term-embedding.md`](docs/adr/0001-term-embedding.md)；发版见 [`docs/RELEASING.md`](docs/RELEASING.md)。`mvn verify` 会生成 CycloneDX SBOM（`target/bom.json`）。前端另跑 `npm run test:e2e`（Playwright 冒烟/视觉基线 + axe）。
 
 ## 快速开始
 
-环境：JDK 21、Maven 3.9+、Node 22+（与 CI 对齐）。需要一台 MySQL 作为网关配置库（`federal`），以及可选的 Trino。
+环境：JDK 21、Maven 3.9+、Node ≥ 22.12（与 CI / vitest 5 对齐）。需要一台 MySQL 作为网关配置库（`federal`），以及可选的 Trino。
 
 ```bash
 cp .env.example .env   # 填写 FEDERAL_DB_* 等
