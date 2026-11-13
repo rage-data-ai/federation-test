@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import com.cmcc.cmdevops.security.federation.metadata.ColumnSnapshot;
 import com.cmcc.cmdevops.security.federation.metadata.TableSnapshot;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyDraftService.DraftResult;
+import com.cmcc.cmdevops.security.federation.ontology.draft.DraftDimensions;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Attribute;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Code;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Concept;
@@ -934,7 +935,7 @@ class OntologyDraftServiceTest {
         }
         factColumns.add("evtNo");
 
-        List<OntologyDraftService.Dimension> found = OntologyDraftService.findDimensions(snapshot, List.of(dictionary), Map.of(
+        List<DraftDimensions.Dimension> found = OntologyDraftService.findDimensions(snapshot, List.of(dictionary), Map.of(
                 "demo.log.rows", factColumns,
                 "demo.ref.lookup", List.of("evtNo", "detailText", "titleCn")),
                 Map.of(dictionary.key(), List.of(List.of("4624", "An account was successfully logged on and remained active", "账户登录成功"))));

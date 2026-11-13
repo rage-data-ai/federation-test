@@ -55,7 +55,7 @@ import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Snapshot;
 public class OntologyRepository {
 
     static final String XSD = "http://www.w3.org/2001/XMLSchema#";
-    static final Set<String> DATATYPES = Set.of(
+    public static final Set<String> DATATYPES = Set.of(
             "string", "integer", "long", "decimal", "double", "boolean", "date", "dateTime");
 
     private static final Map<String, String> FACETS = Map.of(
