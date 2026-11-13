@@ -118,6 +118,13 @@ export function saveEntity(kind, name, body) {
   })
 }
 
+export function renameSubject(from, to) {
+  return request(`/api/v1/ontology/subjects/${encodeURIComponent(from)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name: to })
+  })
+}
+
 export function deleteEntity(name) {
   return request(`/api/v1/ontology/entities/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }

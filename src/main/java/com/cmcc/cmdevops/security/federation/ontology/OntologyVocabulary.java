@@ -27,6 +27,8 @@ public final class OntologyVocabulary {
     /** 类上的时间列；带 {@link #LARGE_TABLE} 时查询必须过滤该列 */
     public static final Property TIME_COLUMN = property(FED, "timeColumn");
     public static final Property LARGE_TABLE = property(FED, "largeTable");
+    /** 类 → 主题域名称。只有同主题域的类之间能建立关系 */
+    public static final Property SUBJECT = property(FED, "subject");
     /** 对象属性的 Join：domain 表上的列 = range 表上的列 */
     public static final Property JOIN_FROM = property(FED, "joinFromColumn");
     public static final Property JOIN_TO = property(FED, "joinToColumn");

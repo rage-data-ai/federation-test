@@ -10,6 +10,7 @@ import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.LARGE_TABLE;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.MAPPED_COLUMN;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.MAPPED_TABLE;
+import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.SUBJECT;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.TIME_COLUMN;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.UNIT;
 import static com.cmcc.cmdevops.security.federation.ontology.OntologyVocabulary.VALUE_SET;
@@ -21,7 +22,9 @@ import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.apache.jena.datatypes.RDFDatatype;
@@ -71,6 +74,129 @@ public class OntologyRepository {
         return store.read(OntologyRepository::snapshotOf);
     }
 
+    /** 不分主题域的全部实体。实体名是全局唯一的，起名查重要用它。 */
+    public Snapshot all() {
+        return store.read(OntologyRepository::snapshotOf);
+    }
+
+    /**
+     * 只看得到一个主题域的视图：{@link #snapshot()} 只返回这个主题域的实体，保存的概念自动归到这个主题域。
+     * 起草时用它，模型和起草逻辑就看不到别的主题域。
+     */
+    public OntologyRepository within(String subject) {
+        return new Scoped(store, normalizeSubject(subject));
+    }
+
+    private static final class Scoped extends OntologyRepository {
+
+        private final String subject;
+
+        private Scoped(OntologyStore store, String subject) {
+            super(store);
+            this.subject = subject;
+        }
+
+        @Override
+        public Snapshot snapshot() {
+            return scope(all(), subject);
+        }
+
+        @Override
+        public void saveConcept(Concept concept) {
+            super.saveConcept(concept.withSubject(subject));
+        }
+    }
+
+    /** 只保留一个主题域的概念，以及跟随这些概念的属性、关系、码值和派生概念。 */
+    public static Snapshot scope(Snapshot snapshot, String subject) {
+        String wanted = normalizeSubject(subject);
+        List<Concept> concepts = snapshot.concepts().stream()
+                .filter(concept -> Objects.equals(normalizeSubject(concept.subject()), wanted))
+                .toList();
+        Set<String> names = new java.util.LinkedHashSet<>();
+        concepts.forEach(concept -> names.add(concept.name()));
+        List<Attribute> attributes = snapshot.attributes().stream()
+                .filter(attribute -> names.contains(attribute.domain()))
+                .toList();
+        Set<String> lists = new java.util.LinkedHashSet<>();
+        attributes.forEach(attribute -> {
+            if (notBlank(attribute.codeList())) {
+                lists.add(attribute.codeList());
+            }
+        });
+        return new Snapshot(concepts, attributes,
+                snapshot.relations().stream()
+                        .filter(relation -> names.contains(relation.domain()) && names.contains(relation.range()))
+                        .toList(),
+                snapshot.codes().stream().filter(code -> lists.contains(code.codeList())).toList(),
+                snapshot.definedConcepts().stream().filter(defined -> names.contains(defined.base())).toList());
+    }
+
+    /** 把一个主题域整体改名。目标名字已有概念时两个主题域合并。 */
+    public void renameSubject(String from, String to) {
+        String source = normalizeSubject(from);
+        String target = normalizeSubject(to);
+        if (source == null || target == null) {
+            throw new IllegalArgumentException("主题域名称不能为空");
+        }
+        store.write(model -> {
+            List<Resource> concepts = model.listSubjectsWithProperty(SUBJECT).toList().stream()
+                    .filter(concept -> source.equals(string(concept, SUBJECT)))
+                    .toList();
+            if (concepts.isEmpty()) {
+                throw new IllegalArgumentException("主题域不存在: " + source);
+            }
+            for (Resource concept : concepts) {
+                concept.removeAll(SUBJECT);
+                concept.addProperty(SUBJECT, target);
+            }
+        });
+    }
+
+    private static String normalizeSubject(String subject) {
+        return notBlank(subject) ? subject.trim() : null;
+    }
+
+    /** 概念自己的主题域；派生概念跟随它的基类。 */
+    private static String subjectOf(Resource concept) {
+        if (concept.hasProperty(OWL2.equivalentClass)) {
+            Resource base = concept.getPropertyResourceValue(RDFS.subClassOf);
+            return base == null || base.equals(concept) ? null : subjectOf(base);
+        }
+        return normalizeSubject(string(concept, SUBJECT));
+    }
+
+    private static String subjectText(String subject) {
+        return subject == null ? "未分主题域" : "主题域 " + subject;
+    }
+
+    /** 概念换主题域时，和它已有关联的概念必须在同一个主题域里。 */
+    private static void requireSameSubject(Model model, Resource concept, String subject) {
+        Set<Resource> linked = new java.util.LinkedHashSet<>();
+        for (Resource relation : model.listSubjectsWithProperty(RDFS.domain, concept).toList()) {
+            if (relation.hasProperty(RDF.type, OWL2.ObjectProperty) && relation.getPropertyResourceValue(RDFS.range) != null) {
+                linked.add(relation.getPropertyResourceValue(RDFS.range));
+            }
+        }
+        for (Resource relation : model.listSubjectsWithProperty(RDFS.range, concept).toList()) {
+            if (relation.hasProperty(RDF.type, OWL2.ObjectProperty) && relation.getPropertyResourceValue(RDFS.domain) != null) {
+                linked.add(relation.getPropertyResourceValue(RDFS.domain));
+            }
+        }
+        for (Resource child : model.listSubjectsWithProperty(RDFS.subClassOf, concept).toList()) {
+            if (!child.hasProperty(OWL2.equivalentClass)) {
+                linked.add(child);
+            }
+        }
+        for (Resource other : linked) {
+            if (!other.equals(concept) && !other.isAnon() && !Objects.equals(subjectOf(other), subject)) {
+                throw new IllegalArgumentException("概念 " + localName(concept.getURI()) + " 和 " + localName(other.getURI())
+                        + "（" + subjectText(subjectOf(other)) + "）已有关联，不能单独改到" + subjectText(subject)
+                        + "；只有同主题域的概念能关联");
+            }
+        }
+    }
+
     public String turtle() {
         return store.read(model -> {
             Model copy = ModelFactory.createDefaultModel().add(model);
@@ -88,18 +214,96 @@ public class OntologyRepository {
 
     public void saveConcept(Concept concept) {
         requireName(concept.name(), "类");
+        String subject = normalizeSubject(concept.subject());
         store.write(model -> {
+            Resource current = model.getResource(iri(concept.name()));
+            requireSameSubject(model, current, subject);
+            if (notBlank(concept.parent())) {
+                Resource parent = ref(model, concept.parent(), "父类");
+                if (!parent.equals(current) && !Objects.equals(subjectOf(parent), subject)) {
+                    throw new IllegalArgumentException("父类 " + concept.parent() + " 在" + subjectText(subjectOf(parent))
+                            + "，概念 " + concept.name() + " 在" + subjectText(subject) + "；只有同主题域的概念能关联");
+                }
+            }
             Resource r = replace(model, concept.name(), OWL2.Class);
             describe(model, r, concept.labelZh(), concept.labelEn(), concept.aliases(), concept.comment());
             if (notBlank(concept.parent())) {
                 r.addProperty(RDFS.subClassOf, ref(model, concept.parent(), "父类"));
             }
+            addString(r, SUBJECT, subject);
             addString(r, MAPPED_TABLE, concept.table());
             addString(r, TIME_COLUMN, concept.timeColumn());
             if (concept.largeTable()) {
                 r.addLiteral(LARGE_TABLE, true);
             }
         });
+    }
+
+    /**
+     * 码值集合名只由属性映射的表和列决定，同一张表的同一列每次起草都得到同一个名字。
+     * 例如 ck81.pangu.wls_day01 的 Status 列为 Ck81PanguWlsDay01_Status。
+     */
+    public static String codeListName(String table, String column) {
+        String tablePart = pascal(table.trim().toLowerCase(Locale.ROOT));
+        String columnPart = pascal(column.trim());
+        if (columnPart.isEmpty()) {
+            columnPart = "Col" + Integer.toUnsignedString(column.trim().hashCode(), 36);
+        }
+        String name = tablePart + "_" + columnPart;
+        return Character.isLetter(name.charAt(0)) ? name : "T" + name;
+    }
+
+    /**
+     * 概念名由映射表决定，例如 ck81.pangu.wls_day01 为 WlsDay01。
+     * 表名与别的表的概念重名时依次改用 schema+表名、catalog+schema+表名。
+     *
+     * @param tableOf 已占用的概念名及其映射表
+     */
+    public static String conceptName(String table, Map<String, String> tableOf) {
+        String[] parts = table.trim().toLowerCase(Locale.ROOT).split("\\.");
+        List<String> candidates = new ArrayList<>();
+        for (int from = parts.length - 1; from >= 0; from--) {
+            String name = pascal(String.join("_", List.of(parts).subList(from, parts.length)));
+            candidates.add(name.isEmpty() || !Character.isLetter(name.charAt(0)) ? "T" + name : name);
+        }
+        for (String candidate : candidates) {
+            String owner = tableOf.get(candidate);
+            if (owner == null || owner.equalsIgnoreCase(table.trim())) {
+                return candidate;
+            }
+        }
+        return candidates.get(candidates.size() - 1);
+    }
+
+    /**
+     * 属性名由概念和列决定，例如概念 WlsDay01 的 LogonType 列为 wlsDay01_LogonType。
+     * 首字母小写，不会与概念、码值集合、码值重名；列名不是合法标识符时改用 PascalCase。
+     */
+    public static String attributeName(String concept, String column) {
+        String trimmed = column.trim();
+        String columnPart = trimmed.matches("[A-Za-z0-9_]+") ? trimmed : pascal(trimmed);
+        if (columnPart.isEmpty()) {
+            columnPart = "Col" + Integer.toUnsignedString(trimmed.hashCode(), 36);
+        }
+        return Character.toLowerCase(concept.charAt(0)) + concept.substring(1) + "_" + columnPart;
+    }
+
+    /** 属性有映射的表和列时，码值集合名由表和列生成；否则沿用填写的名字。 */
+    public String codeListFor(Attribute attribute) {
+        if (!notBlank(attribute.codeList())) {
+            return null;
+        }
+        String table = store.read(model -> notBlank(attribute.domain())
+                ? string(model.getResource(iri(attribute.domain())), MAPPED_TABLE)
+                : null);
+        return resolveCodeList(table, attribute);
+    }
+
+    private static String resolveCodeList(String table, Attribute attribute) {
+        if (notBlank(table) && notBlank(attribute.column())) {
+            return codeListName(table, attribute.column());
+        }
+        return attribute.codeList().trim();
     }
 
     public void saveAttribute(Attribute attribute) {
@@ -109,6 +313,18 @@ public class OntologyRepository {
             throw new IllegalArgumentException("不支持的数据类型: " + datatype + "，可选 " + DATATYPES);
         }
         store.write(model -> {
+            Resource existing = model.getResource(iri(attribute.name()));
+            Resource previousList = existing.getPropertyResourceValue(CODE_LIST);
+            String listName = null;
+            if (notBlank(attribute.codeList())) {
+                String table = notBlank(attribute.domain())
+                        ? string(model.getResource(iri(attribute.domain())), MAPPED_TABLE)
+                        : null;
+                listName = resolveCodeList(table, attribute);
+                requireName(listName, "码值集合");
+                requireSingleOwner(model, model.getResource(iri(listName)), existing, attribute.domain());
+            }
+
             Resource r = replace(model, attribute.name(), OWL2.DatatypeProperty);
             describe(model, r, attribute.labelZh(), attribute.labelEn(), attribute.aliases(), attribute.comment());
             if (notBlank(attribute.domain())) {
@@ -120,16 +336,59 @@ public class OntologyRepository {
             if (attribute.identifier()) {
                 r.addLiteral(IDENTIFIER, true);
             }
-            if (notBlank(attribute.codeList())) {
-                requireName(attribute.codeList(), "码值集合");
-                r.addProperty(CODE_LIST, valueSet(model, attribute.codeList()));
+            Resource list = listName == null ? null : valueSet(model, listName);
+            if (list != null) {
+                r.addProperty(CODE_LIST, list);
+            }
+            if (previousList != null && !previousList.equals(list)) {
+                releaseValueSet(model, previousList, list);
             }
         });
+    }
+
+    /** 一个码值集合只能属于一个概念，命中码值时才能唯一确定概念。 */
+    private static void requireSingleOwner(Model model, Resource list, Resource attribute, String domain) {
+        for (Resource other : model.listSubjectsWithProperty(CODE_LIST, list).toList()) {
+            if (other.equals(attribute)) {
+                continue;
+            }
+            String owner = objectName(other, RDFS.domain);
+            if (!Objects.equals(owner, domain)) {
+                throw new IllegalArgumentException("码值集合 " + localName(list.getURI()) + " 已属于概念 " + owner
+                        + "（属性 " + localName(other.getURI()) + "），一个码值集合只能属于一个概念");
+            }
+        }
+    }
+
+    /** 属性换了码值集合后，旧集合若没有别的属性使用：有新集合就把码值移过去，否则连同码值删除。 */
+    private static void releaseValueSet(Model model, Resource previous, Resource replacement) {
+        if (!model.listSubjectsWithProperty(CODE_LIST, previous).toList().isEmpty()) {
+            return;
+        }
+        for (Resource code : model.listSubjectsWithProperty(RDF.type, previous).toList()) {
+            if (replacement == null) {
+                removeDeep(model, code);
+                model.removeAll(null, null, code);
+            } else {
+                model.remove(code, RDF.type, previous);
+                code.addProperty(RDF.type, replacement);
+            }
+        }
+        removeDeep(model, previous);
+        model.removeAll(null, null, previous);
     }
 
     public void saveRelation(Relation relation) {
         requireName(relation.name(), "关系");
         store.write(model -> {
+            if (notBlank(relation.domain()) && notBlank(relation.range())) {
+                Resource domain = ref(model, relation.domain(), "domain");
+                Resource range = ref(model, relation.range(), "range");
+                if (!Objects.equals(subjectOf(domain), subjectOf(range))) {
+                    throw new IllegalArgumentException(relation.domain() + " 在" + subjectText(subjectOf(domain)) + "，"
+                            + relation.range() + " 在" + subjectText(subjectOf(range)) + "；只有同主题域的概念能建立关系");
+                }
+            }
             Resource existing = model.getResource(iri(relation.name()));
             dropInverse(model, existing);
             Resource r = replace(model, relation.name(), OWL2.ObjectProperty);
@@ -165,6 +424,11 @@ public class OntologyRepository {
             throw new IllegalArgumentException("码值 " + code.name() + " 缺少 value");
         }
         store.write(model -> {
+            Resource list = model.getResource(iri(code.codeList()));
+            if (model.listSubjectsWithProperty(CODE_LIST, list).toList().isEmpty()) {
+                throw new IllegalArgumentException("码值集合 " + code.codeList()
+                        + " 没有对应的属性，请先在属性上设置码表，码值才能归到概念上");
+            }
             Resource r = replace(model, code.name(), OWL2.NamedIndividual);
             r.addProperty(RDF.type, valueSet(model, code.codeList()));
             describe(model, r, code.labelZh(), code.labelEn(), code.aliases(), code.comment());
@@ -177,6 +441,16 @@ public class OntologyRepository {
         requireName(defined.base(), "派生概念的基类");
         List<Condition> conditions = defined.conditions() == null ? List.of() : defined.conditions();
         store.write(model -> {
+            Resource baseConcept = ref(model, defined.base(), "基类");
+            for (Condition condition : conditions) {
+                Resource attribute = model.getResource(iri(String.valueOf(condition.attribute())));
+                Resource owner = attribute.getPropertyResourceValue(RDFS.domain);
+                if (owner != null && !Objects.equals(subjectOf(owner), subjectOf(baseConcept))) {
+                    throw new IllegalArgumentException("条件属性 " + condition.attribute() + " 属于 " + localName(owner.getURI())
+                            + "（" + subjectText(subjectOf(owner)) + "），基类 " + defined.base() + " 在"
+                            + subjectText(subjectOf(baseConcept)) + "；派生概念只能用同主题域的属性");
+                }
+            }
             Resource r = replace(model, defined.name(), OWL2.Class);
             describe(model, r, defined.labelZh(), defined.labelEn(), defined.aliases(), defined.comment());
             Resource base = ref(model, defined.base(), "基类");
@@ -221,7 +495,7 @@ public class OntologyRepository {
                 concepts.add(new Concept(
                         localName(r.getURI()), label(r, "zh"), label(r, "en"), aliases(r), comment(r),
                         objectName(r, RDFS.subClassOf), string(r, MAPPED_TABLE), string(r, TIME_COLUMN),
-                        bool(r, LARGE_TABLE)));
+                        bool(r, LARGE_TABLE), string(r, SUBJECT)));
             }
         });
 
@@ -351,6 +625,16 @@ public class OntologyRepository {
         return ResourceFactory.createProperty(XSD + local);
     }
 
+    private static String pascal(String text) {
+        StringBuilder out = new StringBuilder();
+        for (String part : text.split("[^A-Za-z0-9]+")) {
+            if (!part.isEmpty()) {
+                out.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+            }
+        }
+        return out.toString();
+    }
+
     private static Resource replace(Model model, String name, Resource kind) {
         Resource r = model.getResource(iri(name));
         ensureKind(model, r, kind);
@@ -417,6 +701,17 @@ public class OntologyRepository {
         for (Resource attribute : attributes) {
             removeDeep(model, attribute);
             model.removeAll(null, null, attribute);
+        }
+        Set<Resource> relations = new java.util.LinkedHashSet<>();
+        relations.addAll(model.listSubjectsWithProperty(RDFS.domain, concept).toList());
+        relations.addAll(model.listSubjectsWithProperty(RDFS.range, concept).toList());
+        for (Resource relation : relations) {
+            if (!relation.hasProperty(RDF.type, OWL2.ObjectProperty)) {
+                continue;
+            }
+            dropInverse(model, relation);
+            removeDeep(model, relation);
+            model.removeAll(null, null, relation);
         }
         for (Resource codeList : codeLists) {
             if (!model.listSubjectsWithProperty(CODE_LIST, codeList).toList().isEmpty()) {

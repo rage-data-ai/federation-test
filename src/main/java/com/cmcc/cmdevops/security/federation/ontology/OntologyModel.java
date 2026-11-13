@@ -10,6 +10,10 @@ public final class OntologyModel {
     private OntologyModel() {
     }
 
+    /**
+     * @param subject 主题域。属性、码值、派生概念跟随所属概念；只有同主题域的概念之间能建立关系。
+     *                为空表示未分主题域，未分主题域的概念之间也算同一组。
+     */
     public record Concept(
             String name,
             String labelZh,
@@ -19,7 +23,17 @@ public final class OntologyModel {
             String parent,
             String table,
             String timeColumn,
-            boolean largeTable) {
+            boolean largeTable,
+            String subject) {
+
+        public Concept(String name, String labelZh, String labelEn, List<String> aliases, String comment,
+                       String parent, String table, String timeColumn, boolean largeTable) {
+            this(name, labelZh, labelEn, aliases, comment, parent, table, timeColumn, largeTable, null);
+        }
+
+        public Concept withSubject(String subject) {
+            return new Concept(name, labelZh, labelEn, aliases, comment, parent, table, timeColumn, largeTable, subject);
+        }
     }
 
     public record Attribute(

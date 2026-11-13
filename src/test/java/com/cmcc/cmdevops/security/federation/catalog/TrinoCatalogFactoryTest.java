@@ -23,6 +23,22 @@ class TrinoCatalogFactoryTest {
     }
 
     @Test
+    void mysqlUrlDropsTheDatabase() {
+        CatalogRecord record = new CatalogRecord();
+        record.setName("mysql70");
+        record.setType("mysql");
+        record.setHost("192.168.19.70");
+        record.setPort(3308);
+        record.setDatabase("federal");
+        assertTrue(TrinoCatalogFactory.render(record).contains("connection-url=jdbc:mysql://192.168.19.70:3308\n"));
+
+        record.setUrl("jdbc:mysql://192.168.19.70:3308/federal?sslMode=DISABLED&characterEncoding=utf8");
+        assertTrue(TrinoCatalogFactory.render(record)
+                .contains("connection-url=jdbc:mysql://192.168.19.70:3308/?sslMode=DISABLED&characterEncoding=utf8\n"));
+        assertEquals("jdbc:mysql://h:1?a=b/c", TrinoCatalogFactory.withoutDatabase("jdbc:mysql://h:1?a=b/c"));
+    }
+
+    @Test
     void createCatalogSqlEscapesProperties() {
         CatalogRecord record = new CatalogRecord();
         record.setName("ck81");

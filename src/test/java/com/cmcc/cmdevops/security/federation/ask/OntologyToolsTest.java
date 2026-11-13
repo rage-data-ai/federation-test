@@ -16,6 +16,8 @@ import com.cmcc.cmdevops.security.federation.ask.OntologyTools.DefinedView;
 import com.cmcc.cmdevops.security.federation.ask.OntologyTools.EntityHit;
 import com.cmcc.cmdevops.security.federation.ask.OntologyTools.JoinPath;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyFixtures;
+import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Attribute;
+import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Code;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Concept;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyQueryService;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyRepository;
@@ -68,6 +70,25 @@ class OntologyToolsTest {
         assertEquals("2", context.codes().get(0).value());
         assertEquals("alertLevel", context.attributes().get(0).name());
         assertEquals("Alert", context.concepts().get(0).name());
+        assertEquals("Alert", context.codes().get(0).concept());
+        assertEquals("level", context.codes().get(0).column());
+    }
+
+    @Test
+    void sameCodeLabelInTwoConceptsLocksToTheMentionedConcept() {
+        repository.saveAttribute(new Attribute("assetLevel", "资产等级", null, List.of(), null,
+                "Asset", "integer", "level", null, false, "AnyName"));
+        String assetLevel = OntologyRepository.codeListName("mysql70.tsoc.asset", "level");
+        repository.saveCode(new Code("AssetLevel_2", assetLevel, "2", "中危", null, List.of(), null));
+
+        BusinessContext ambiguous = tools.getBusinessContext("中危的有多少");
+        assertEquals(OntologyTools.STATUS_AMBIGUOUS, ambiguous.status());
+
+        BusinessContext locked = tools.getBusinessContext("中危的资产有多少");
+        assertEquals(OntologyTools.STATUS_OK, locked.status(), locked.warnings().toString());
+        assertEquals(List.of("AssetLevel_2"), locked.codes().stream().map(code -> code.name()).toList());
+        assertEquals(List.of("Asset"), locked.concepts().stream().map(ConceptView::name).toList());
+        assertEquals("level", locked.codes().get(0).column());
     }
 
     @Test

@@ -61,7 +61,14 @@ public class OntologyController {
     @PutMapping("/concepts/{name}")
     public Snapshot saveConcept(@PathVariable("name") String name, @RequestBody Concept body) {
         repository.saveConcept(new Concept(name, body.labelZh(), body.labelEn(), body.aliases(), body.comment(),
-                body.parent(), body.table(), body.timeColumn(), body.largeTable()));
+                body.parent(), body.table(), body.timeColumn(), body.largeTable(), body.subject()));
+        return repository.snapshot();
+    }
+
+    /** 主题域整体改名，请求体 {"name": "新名字"} */
+    @PutMapping("/subjects/{name}")
+    public Snapshot renameSubject(@PathVariable("name") String name, @RequestBody Map<String, String> body) {
+        repository.renameSubject(name, body.get("name"));
         return repository.snapshot();
     }
 

@@ -29,6 +29,7 @@ import com.cmcc.cmdevops.security.federation.model.QueryResponse;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Attribute;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Code;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Concept;
+import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Condition;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.DefinedConcept;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Relation;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Snapshot;
@@ -44,12 +45,14 @@ public class OntologyDraftService {
 
     private static final int MAX_CELL = 40;
     private static final int ATTRIBUTE_BATCH = 10;
+    private static final int DEFINED_PER_CONCEPT = 8;
 
     private static final String STAGE_RULES = """
             你是数据本体建模专家。根据表名、列名、样例和补充说明判断业务，不要套用与当前表无关的行业。
             只输出一个完整闭合的 JSON 对象，不要输出其他文字。
             comment 不超过 40 个字，不要罗列取值清单。name 只能用字母开头的字母、数字、下划线。
-            类用 PascalCase，属性和关系用 camelCase，属性名带上所属对象，例如 orderStatus。
+            类用 PascalCase，属性和关系用 camelCase。属性名由系统按"概念名_列名"生成，例如 order_status；
+            起草属性时 name 写一个英文业务名即可，会留作别名。引用已有属性时写已有本体里的属性名。
             datatype 只能取 string、integer、long、decimal、double、boolean、date、dateTime。
             已有本体里的类直接引用 name，不要重复定义。除 aliases、conditions 外，字段都是字符串或布尔值，不要写成数组。本次没要求的数组必须是 []。
             每个字段必须写成 "键": 值。不能写成 "键", 值，也不能省略冒号。
@@ -82,7 +85,12 @@ public class OntologyDraftService {
 
     public DraftResult draft(DraftRequest request, Consumer<DraftPhase> progress) {
         llm.model();
+        if (request.subject() == null || request.subject().isBlank()) {
+            throw new IllegalArgumentException("请先填写主题域，本次勾选的表都会归到这个主题域");
+        }
+        String subject = request.subject().trim();
         List<TableSnapshot> tables = resolveTables(request.tables());
+        requireTablesInSubject(repository.all(), tables, subject);
         List<String> warnings = new ArrayList<>();
         Map<String, List<List<Object>>> samples = new LinkedHashMap<>();
         begin(progress, "sample", "读取列和样例");
@@ -94,18 +102,49 @@ public class OntologyDraftService {
         for (TableSnapshot table : tables) {
             columns.put(table.key().toLowerCase(Locale.ROOT), columnNames(table));
         }
-        for (Concept concept : repository.snapshot().concepts()) {
-            if (concept.table() != null) {
-                metadataStore.find(concept.table()).ifPresent(snapshot ->
-                        columns.putIfAbsent(snapshot.key().toLowerCase(Locale.ROOT), columnNames(snapshot)));
+        Snapshot ontology = repository.within(subject).snapshot();
+        for (Concept concept : ontology.concepts()) {
+            if (concept.table() == null || concept.table().isBlank()) {
+                continue;
+            }
+            metadataStore.find(concept.table()).ifPresent(snapshot ->
+                    columns.putIfAbsent(snapshot.key().toLowerCase(Locale.ROOT), columnNames(snapshot)));
+            String key = concept.table().toLowerCase(Locale.ROOT);
+            if (!columns.containsKey(key)) {
+                List<String> mapped = ontology.attributes().stream()
+                        .filter(attribute -> concept.name().equals(attribute.domain()) && attribute.column() != null)
+                        .map(Attribute::column)
+                        .distinct()
+                        .toList();
+                if (!mapped.isEmpty()) {
+                    columns.put(key, mapped);
+                    warnings.add("已有概念 " + concept.name() + " 的表 " + concept.table()
+                            + " 不在元数据里，建关系时只能用它已有属性的列");
+                }
             }
         }
-        return runStages(repository, objectMapper, tables, samples, columns, request.instructions(),
+        return runStages(repository, objectMapper, subject, tables, samples, columns, request.instructions(),
                 (system, user) -> llm.complete(system, user),
                 (table, column) -> lookupValues(tables, table, column, warnings),
                 (table, codeColumn, labelColumn, commentColumn) ->
                         lookupDictionary(tables, table, codeColumn, labelColumn, commentColumn, warnings),
                 progress, warnings);
+    }
+
+    /** 一张表只能属于一个主题域：别的主题域已经有这张表的概念时不能再起草。 */
+    static void requireTablesInSubject(Snapshot all, List<TableSnapshot> tables, String subject) {
+        for (TableSnapshot table : tables) {
+            for (Concept concept : all.concepts()) {
+                if (concept.table() == null || !concept.table().equalsIgnoreCase(table.key())) {
+                    continue;
+                }
+                String owner = concept.subject() == null || concept.subject().isBlank() ? null : concept.subject().trim();
+                if (!Objects.equals(owner, subject)) {
+                    throw new IllegalArgumentException("表 " + table.key() + " 已经是" + (owner == null ? "未分主题域" : "主题域 " + owner)
+                            + " 里的概念 " + concept.name() + "，一张表只能属于一个主题域；要换主题域请先删除这个概念");
+                }
+            }
+        }
     }
 
     /** 概念、属性、码值、关系、派生概念分段起草。属性按列分批，码值和关系只根据读到的数据来写。 */
@@ -120,7 +159,7 @@ public class OntologyDraftService {
             ValueLookup values,
             Consumer<DraftPhase> progress,
             List<String> warnings) {
-        return runStages(repository, objectMapper, tables, samples, columns, instructions, caller, values, null,
+        return runStages(repository, objectMapper, null, tables, samples, columns, instructions, caller, values, null,
                 progress, warnings);
     }
 
@@ -136,6 +175,31 @@ public class OntologyDraftService {
             DictionaryLookup dictionaries,
             Consumer<DraftPhase> progress,
             List<String> warnings) {
+        return runStages(repository, objectMapper, null, tables, samples, columns, instructions, caller, values,
+                dictionaries, progress, warnings);
+    }
+
+    /**
+     * @param subject 主题域。本次起草只看得到这个主题域里已有的概念，关系、码值归并和派生概念都不会跨主题域；
+     *                为 null 时不分主题域。
+     */
+    static DraftResult runStages(
+            OntologyRepository whole,
+            ObjectMapper objectMapper,
+            String subject,
+            List<TableSnapshot> tables,
+            Map<String, List<List<Object>>> samples,
+            Map<String, List<String>> columns,
+            String instructions,
+            StageCaller caller,
+            ValueLookup values,
+            DictionaryLookup dictionaries,
+            Consumer<DraftPhase> progress,
+            List<String> warnings) {
+        OntologyRepository repository = subject == null ? whole : whole.within(subject);
+        if (subject != null) {
+            requireTablesInSubject(whole.all(), tables, subject);
+        }
         String note = instructions == null || instructions.isBlank() ? "" : "\n补充要求：" + instructions.trim() + "\n";
         String tablesText = describeTables(tables, samples);
         Map<String, Map<String, String>> physicalTypes = physicalTypes(tables);
@@ -144,6 +208,7 @@ public class OntologyDraftService {
         begin(progress, "concepts", "起草概念");
         int mark = warnings.size();
         String conceptTask = "只起草概念：给出的每张表恰好一个类，table 必须等于表的全名。"
+                + "name 写一个英文业务名即可，系统会改成由表名生成的名字，并把你写的名字留作别名。"
                 + "labelZh 用这张表自己的业务名称，comment 用一句话说明它表示什么。"
                 + "明细、日志、流水、记录这类大表 largeTable=true，timeColumn 填该表真实的时间列。parent 只引用已有本体里更泛的类。";
         String conceptShape = example(
@@ -221,8 +286,7 @@ public class OntologyDraftService {
             DraftResult codes = applyStage(repository, objectMapper, columns, physicalTypes, allowedCodes, "codes",
                     stagePrompt("取值列表里的每一个值都要写一条码值。labelZh 写成这张表业务里的中文含义，不要把中文名留成数字。"
                                     + "例如编码 1 写成启用，不要写成 1。含义要跟当前表一致，不要套用别的行业。列表以外的编码不要写。"
-                                    + "name 写成码值集合加下划线加取值，例如集合 OrderStatus、取值 1 写成 OrderStatus_1。"
-                                    + "不能使用属性名或码值集合名，同一批里的 name 不能重复。",
+                                    + "codeList 照抄上面给出的码值集合名，name 由系统按集合名加取值生成，可以留空。",
                             codeShape),
                     evidence + note,
                     caller, warnings);
@@ -233,8 +297,25 @@ public class OntologyDraftService {
         long mappedConcepts = repository.snapshot().concepts().stream()
                 .filter(concept -> concept.table() != null && !concept.table().isBlank())
                 .count();
-        String joinHints = describeJoinHints(repository.snapshot(), columns);
+        Set<String> draftedTables = new LinkedHashSet<>();
+        tables.forEach(table -> draftedTables.add(table.key().toLowerCase(Locale.ROOT)));
+        List<Concept> mapped = repository.snapshot().concepts().stream()
+                .filter(concept -> concept.table() != null && !concept.table().isBlank())
+                .toList();
+        List<String> added = mapped.stream()
+                .filter(concept -> draftedTables.contains(concept.table().toLowerCase(Locale.ROOT)))
+                .map(Concept::name)
+                .toList();
+        boolean incremental = !added.isEmpty() && added.size() < mapped.size();
+        String joinHints = describeJoinHints(repository.snapshot(), columns, incremental ? draftedTables : null);
+        String focus = incremental
+                ? "\n本次新加的概念：" + String.join("、", added) + "。逐个判断它们和已有本体里每个概念能不能连上，"
+                        + "再判断它们彼此之间的连接。已有关系不要重复写，也不要占用已有关系的名字。\n"
+                : "";
         int relationCount = 0;
+        Set<String> earlierRelations = new LinkedHashSet<>();
+        repository.snapshot().relations().forEach(relation -> earlierRelations.add(relation.name()));
+        Set<String> redraftDefined = new LinkedHashSet<>();
         if (mappedConcepts < 2) {
             finish(progress, "relations", "不足两个概念，跳过关系", 0, List.of());
         } else {
@@ -245,28 +326,73 @@ public class OntologyDraftService {
                                     + "例如一张表的客户编号连接客户表的主键。joinFrom、joinTo 只写列名，例如 customerId，不要写 Order.customerId。"
                                     + "同一对概念可以有多条关系。确实没有连接才返回空数组。",
                             example("{\"relations\":[{\"name\":\"placedBy\",\"labelZh\":\"下单客户\",\"labelEn\":\"\",\"aliases\":[],\"comment\":\"\",\"domain\":\"Order\",\"range\":\"Customer\",\"joinFrom\":\"customerId\",\"joinTo\":\"id\",\"inverse\":\"\",\"transitive\":false,\"functional\":false}]}")),
-                    describeExisting(repository.snapshot()) + describeConceptColumns(repository.snapshot(), columns)
-                            + joinHints + note,
+                    describeExisting(repository.snapshot()) + describeRelations(repository.snapshot())
+                            + describeConceptColumns(repository.snapshot(), columns) + joinHints + focus + note,
                     caller, warnings);
             relationCount = relations.relations();
             finish(progress, "relations", "关系已写入 " + relationCount + " 个", relationCount, since(warnings, mark));
+
+            begin(progress, "relations", "按关系归并码值");
+            mark = warnings.size();
+            Set<String> merged = mergeCodesByRelation(repository, tables, samples, columns, physicalTypes, dictionaries, warnings);
+            Snapshot afterMerge = repository.snapshot();
+            for (String concept : merged) {
+                if (!isDrafted(tables, conceptTable(afterMerge, concept))) {
+                    redraftDefined.add(concept);
+                }
+            }
+            for (Relation relation : afterMerge.relations()) {
+                if (earlierRelations.contains(relation.name())) {
+                    continue;
+                }
+                for (String concept : List.of(Objects.toString(relation.domain(), ""), Objects.toString(relation.range(), ""))) {
+                    if (!concept.isEmpty() && !isDrafted(tables, conceptTable(afterMerge, concept))
+                            && !describeJoinedCodes(afterMerge, concept).isEmpty()) {
+                        redraftDefined.add(concept);
+                    }
+                }
+            }
+            finish(progress, "relations", merged.isEmpty() ? "没有需要归并的码值" : "已把 " + merged.size() + " 个概念的码值归到字典一端",
+                    merged.size(), since(warnings, mark));
         }
 
         int definedCount = 0;
         if (repository.snapshot().attributes().isEmpty()) {
             finish(progress, "defined", "没有属性，跳过派生概念", 0, List.of());
         } else {
-            begin(progress, "defined", "起草派生概念");
-            mark = warnings.size();
-            DraftResult defined = applyStage(repository, objectMapper, columns, physicalTypes, null, "defined",
-                    stagePrompt("只起草派生概念。要写成能直接用于问数的子集，优先用已有码值做等值或比较，例如状态等于已关闭、数量大于等于某个已出现的阈值。"
-                                    + "attribute 必须是已有属性名，value 必须来自码值、样例或补充说明，operator 只能用 =、>、>=、<、<=。"
-                                    + "每张表最多 2 个，每个最多 2 个条件，避免输出被截断。没有可用属性才返回空数组。",
-                            example("{\"definedConcepts\":[{\"name\":\"ClosedOrder\",\"labelZh\":\"已关闭订单\",\"labelEn\":\"\",\"aliases\":[],\"comment\":\"\",\"base\":\"Order\",\"conditions\":[{\"attribute\":\"orderStatus\",\"operator\":\"=\",\"value\":\"closed\"}],\"definitionText\":\"\"}]}")),
-                    describeExisting(repository.snapshot()) + note,
-                    caller, warnings);
-            definedCount = defined.definedConcepts();
-            finish(progress, "defined", "派生概念已写入 " + definedCount + " 个", definedCount, since(warnings, mark));
+            String definedPrompt = stagePrompt("只起草派生概念。要写成能直接用于问数的子集，优先用已有码值做等值或比较，例如状态等于已关闭、数量大于等于某个已出现的阈值。"
+                            + "attribute 写属性名，即括号前的英文名（例如 wlsDay01_LogonType）；"
+                            + "value 写码值的取值（等号左边），不写中文名，也可以来自样例或补充说明；operator 只能用 =、>、>=、<、<=。"
+                            + "业务上常用的子集都要写，最多 " + DEFINED_PER_CONCEPT + " 个，每个最多 2 个条件；已有的派生概念不要重复。"
+                            + "base 只能是本次指定的概念。这个概念没有能区分子集的属性（例如只是字典表）就返回空数组。",
+                    example("{\"definedConcepts\":[{\"name\":\"ClosedOrder\",\"labelZh\":\"已关闭订单\",\"labelEn\":\"\",\"aliases\":[],\"comment\":\"\",\"base\":\"Order\",\"conditions\":[{\"attribute\":\"order_status\",\"operator\":\"=\",\"value\":\"closed\"}],\"definitionText\":\"\"}]}"));
+            List<Concept> targets = new ArrayList<>();
+            for (TableSnapshot table : tables) {
+                repository.snapshot().concepts().stream()
+                        .filter(item -> item.table() != null && item.table().equalsIgnoreCase(table.key()))
+                        .findFirst().ifPresent(targets::add);
+            }
+            for (Concept concept : repository.snapshot().concepts()) {
+                if (redraftDefined.contains(concept.name()) && !targets.contains(concept)) {
+                    targets.add(concept);
+                }
+            }
+            for (Concept concept : targets) {
+                boolean earlier = redraftDefined.contains(concept.name());
+                begin(progress, "defined", (earlier ? "为已有概念补起草派生概念 " : "起草派生概念 ") + concept.name());
+                mark = warnings.size();
+                DraftResult defined = applyStage(repository, objectMapper, columns, physicalTypes, null, "defined",
+                        definedPrompt,
+                        describeExisting(repository.snapshot()) + describeJoinedCodes(repository.snapshot(), concept.name())
+                                + describeDefined(repository.snapshot(), concept.name())
+                                + "\n本次只为概念 " + concept.name()
+                                + "（表 " + concept.table() + "）起草派生概念，base 填 " + concept.name() + "。"
+                                + (earlier ? "它是已有概念，这次新连上了别的概念，只补充用得上新码值的派生概念。" : "") + note,
+                        caller, warnings);
+                definedCount += defined.definedConcepts();
+                finish(progress, "defined", concept.name() + " 的派生概念已写入 " + defined.definedConcepts() + " 个",
+                        defined.definedConcepts(), since(warnings, mark));
+            }
         }
 
         return new DraftResult(concepts.concepts(), attributes, relationCount, codeCount, definedCount, warnings);
@@ -455,7 +581,7 @@ public class OntologyDraftService {
         DraftResult piece = applyStage(repository, objectMapper, columns, physicalTypes, null, "attributes",
                 stagePrompt("只为下面这些列起草属性，每一列都要输出一个属性。column 必须是给出的列名，domain 必须是 " + concept + "。"
                                 + "labelZh 写成这张表业务里的叫法，不要照抄列名。整数、时间列按类型填写 datatype。"
-                                + "类型、状态、级别、结果，以及样例里反复出现的短编码，填写 codeList，不要在这里展开码值。"
+                                + "类型、状态、级别、结果，以及样例里反复出现的短编码，codeList 填任意非空名字标成码值列（系统会按表名和列名重新命名），不要在这里展开码值。"
                                 + "主键、流水号和互不相同的 Id 填 identifier=true，不要当码值。",
                         attributeShape),
                 "这张表的概念是 " + concept + "，domain 必须填 " + concept + "。\n本表业务列：" + siblings + "\n"
@@ -541,20 +667,17 @@ public class OntologyDraftService {
             }
             String table = conceptTable(repository.snapshot(), attribute.domain());
             List<String> seen = sampleValues(tables, samples, table, attribute.column());
-            if (attribute.domain() == null || attribute.column() == null || !codeLike(attribute.column(), seen)) {
+            if (attribute.domain() == null || attribute.column() == null || table == null || table.isBlank()
+                    || !codeLike(attribute.column(), seen)) {
                 continue;
             }
             if (seen.stream().anyMatch(value -> value.length() > 24)) {
                 continue;
             }
-            String codeList = attribute.domain() + capitalize(attribute.column().replaceAll("[^A-Za-z0-9]", ""));
-            if (!codeList.matches("[A-Za-z][A-Za-z0-9_]*")) {
-                continue;
+            String codeList = OntologyRepository.codeListName(table, attribute.column());
+            if (save(notes, "属性 " + attribute.name(), () -> repository.saveAttribute(withCodeList(attribute, codeList))) > 0) {
+                notes.add(attribute.column() + " 标成码值 " + codeList);
             }
-            repository.saveAttribute(new Attribute(attribute.name(), attribute.labelZh(), attribute.labelEn(),
-                    attribute.aliases(), attribute.comment(), attribute.domain(), attribute.datatype(), attribute.column(),
-                    attribute.unit(), attribute.identifier(), codeList));
-            notes.add(attribute.column() + " 标成码值 " + codeList);
         }
         return notes;
     }
@@ -611,88 +734,222 @@ public class OntologyDraftService {
         }
         int saved = 0;
         for (Dimension dimension : findDimensions(repository.snapshot(), tables, columns, samples)) {
-            List<List<String>> rows;
-            try {
-                rows = dictionaries.rows(dimension.tableKey(), dimension.codeColumn(), dimension.labelColumn(), dimension.commentColumn());
-            } catch (RuntimeException e) {
-                warnings.add("读取维表 " + dimension.tableKey() + "." + dimension.labelColumn() + " 失败：" + e.getMessage());
+            if (!isDrafted(tables, dimension.tableKey())) {
                 continue;
             }
-            if (rows == null || rows.isEmpty()) {
-                warnings.add("维表 " + dimension.tableKey() + " 的 " + dimension.labelColumn() + " 列没有读到码值");
-                continue;
-            }
-            String codeList = bindCodeList(repository, dimension, warnings);
-            if (codeList == null) {
-                continue;
-            }
-            covered.add(codeList);
-            List<Code> codes = new ArrayList<>();
-            Set<String> seenValues = new LinkedHashSet<>();
-            for (List<String> row : rows) {
-                if (row == null || row.isEmpty() || row.get(0) == null || row.get(0).isBlank()) {
-                    continue;
-                }
-                String value = row.get(0).trim();
-                if (value.length() > 64 || !seenValues.add(value)) {
-                    continue;
-                }
-                String label = row.size() > 1 && row.get(1) != null ? clip(row.get(1).trim(), 200) : value;
-                if (label.isBlank()) {
-                    label = value;
-                }
-                String comment = row.size() > 2 && row.get(2) != null ? clip(row.get(2).trim(), 200) : null;
-                if (comment != null && comment.isBlank()) {
-                    comment = null;
-                }
-                List<String> aliases = comment != null && !comment.equals(label) && comment.length() <= 80 ? List.of(comment) : List.of();
-                codes.add(new Code(codeList + "_" + identifierSuffix(value), codeList, value, label, null, aliases, comment));
-            }
-            if (codes.isEmpty()) {
-                continue;
-            }
-            DraftResult applied = apply(repository,
-                    new Snapshot(List.of(), List.of(), List.of(), codes, List.of()),
-                    repository.snapshot(), columns, physicalTypes, null);
-            saved += applied.codes();
-            warnings.add("码值集合 " + codeList + " 从维表 " + dimension.tableKey() + " 的 " + dimension.labelColumn()
-                    + " 列写入 " + applied.codes() + " 个，不再让模型编写中文");
-            warnings.addAll(applied.warnings());
+            saved += loadDimension(repository, dimension, tables, columns, physicalTypes, dictionaries, covered, warnings);
         }
         return saved;
     }
 
-    private static String bindCodeList(OntologyRepository repository, Dimension dimension, List<String> warnings) {
-        String codeList = null;
-        for (Attribute attribute : repository.snapshot().attributes()) {
+    private static boolean isDrafted(List<TableSnapshot> tables, String tableKey) {
+        return tableKey != null && tables.stream().anyMatch(table -> table.key().equalsIgnoreCase(tableKey));
+    }
+
+    /** 从一张维表读出编码和名称，写成它编码列上的码值。 */
+    private static int loadDimension(
+            OntologyRepository repository,
+            Dimension dimension,
+            List<TableSnapshot> tables,
+            Map<String, List<String>> columns,
+            Map<String, Map<String, String>> physicalTypes,
+            DictionaryLookup dictionaries,
+            Set<String> covered,
+            List<String> warnings) {
+        List<List<String>> rows;
+        try {
+            rows = dictionaries.rows(dimension.tableKey(), dimension.codeColumn(), dimension.labelColumn(), dimension.commentColumn());
+        } catch (RuntimeException e) {
+            warnings.add("读取维表 " + dimension.tableKey() + "." + dimension.labelColumn() + " 失败：" + e.getMessage());
+            return 0;
+        }
+        if (rows == null || rows.isEmpty()) {
+            warnings.add("维表 " + dimension.tableKey() + " 的 " + dimension.labelColumn() + " 列没有读到码值");
+            return 0;
+        }
+        String codeList = bindCodeList(repository, dimension, tables, warnings);
+        if (codeList == null) {
+            return 0;
+        }
+        covered.add(codeList);
+        List<Code> codes = new ArrayList<>();
+        Set<String> seenValues = new LinkedHashSet<>();
+        for (List<String> row : rows) {
+            if (row == null || row.isEmpty() || row.get(0) == null || row.get(0).isBlank()) {
+                continue;
+            }
+            String value = row.get(0).trim();
+            if (value.length() > 64 || !seenValues.add(value)) {
+                continue;
+            }
+            String label = row.size() > 1 && row.get(1) != null ? clip(row.get(1).trim(), 200) : value;
+            if (label.isBlank()) {
+                label = value;
+            }
+            String comment = row.size() > 2 && row.get(2) != null ? clip(row.get(2).trim(), 200) : null;
+            if (comment != null && comment.isBlank()) {
+                comment = null;
+            }
+            List<String> aliases = comment != null && !comment.equals(label) && comment.length() <= 80 ? List.of(comment) : List.of();
+            codes.add(new Code(codeList + "_" + identifierSuffix(value), codeList, value, label, null, aliases, comment));
+        }
+        if (codes.isEmpty()) {
+            return 0;
+        }
+        DraftResult applied = apply(repository,
+                new Snapshot(List.of(), List.of(), List.of(), codes, List.of()),
+                repository.snapshot(), columns, physicalTypes, null);
+        warnings.add("码值集合 " + codeList + " 从维表 " + dimension.tableKey() + " 的 " + dimension.labelColumn()
+                + " 列写入 " + applied.codes() + " 个，不再让模型编写中文");
+        warnings.addAll(applied.warnings());
+        return applied.codes();
+    }
+
+    /**
+     * 关系建好之后，按关系把码值归到字典一端：关系两端的列取值相同，只留字典概念上那一份。
+     * 另一端的列删掉自己的码值，问数时命中码值锁定字典概念，再通过关系连过来。
+     * 只处理至少一端是本次起草的概念的关系；已落库的属性也会被修改。
+     *
+     * @return 被删掉自有码值的属性所属的概念
+     */
+    static Set<String> mergeCodesByRelation(
+            OntologyRepository repository,
+            List<TableSnapshot> tables,
+            Map<String, List<List<Object>>> samples,
+            Map<String, List<String>> columns,
+            Map<String, Map<String, String>> physicalTypes,
+            DictionaryLookup dictionaries,
+            List<String> warnings) {
+        Map<String, List<List<Object>>> rows = samples == null ? Map.of() : samples;
+        Set<String> affected = new LinkedHashSet<>();
+        for (Relation relation : List.copyOf(repository.snapshot().relations())) {
+            Snapshot snapshot = repository.snapshot();
+            if (relation.domain() == null || relation.range() == null
+                    || (!isDrafted(tables, conceptTable(snapshot, relation.domain()))
+                    && !isDrafted(tables, conceptTable(snapshot, relation.range())))) {
+                continue;
+            }
+            Attribute from = attributeOnColumn(snapshot, relation.domain(), relation.joinFrom());
+            Attribute to = attributeOnColumn(snapshot, relation.range(), relation.joinTo());
+            if (from == null || to == null) {
+                continue;
+            }
+            Dimension rangeSide = dimensionSide(snapshot, tables, columns, rows, relation.range(), relation.joinTo());
+            Dimension domainSide = dimensionSide(snapshot, tables, columns, rows, relation.domain(), relation.joinFrom());
+            if ((rangeSide == null) == (domainSide == null)) {
+                if (rangeSide != null && hasCodes(snapshot, from) && hasCodes(snapshot, to)) {
+                    warnings.add("关系 " + relation.name() + " 两端都像字典表，" + from.name() + " 和 " + to.name()
+                            + " 各自的码值没有归并，请人工确认留哪一份");
+                }
+                continue;
+            }
+            Dimension dictionary = rangeSide != null ? rangeSide : domainSide;
+            String ownerName = (rangeSide != null ? to : from).name();
+            String factName = (rangeSide != null ? from : to).name();
+            if (!hasCodes(snapshot, attributeNamed(snapshot, ownerName)) && dictionaries != null
+                    && isDrafted(tables, dictionary.tableKey())) {
+                loadDimension(repository, dictionary, tables, columns, physicalTypes, dictionaries, new LinkedHashSet<>(), warnings);
+                snapshot = repository.snapshot();
+            }
+            Attribute owner = attributeNamed(snapshot, ownerName);
+            Attribute fact = attributeNamed(snapshot, factName);
+            if (owner == null || fact == null || !hasCodes(snapshot, owner)
+                    || fact.codeList() == null || fact.codeList().isBlank() || fact.codeList().equals(owner.codeList())) {
+                continue;
+            }
+            Set<String> known = new LinkedHashSet<>();
+            for (Code code : list(snapshot.codes())) {
+                if (owner.codeList().equals(code.codeList()) && code.value() != null) {
+                    known.add(code.value().trim());
+                }
+            }
+            List<String> own = list(snapshot.codes()).stream()
+                    .filter(code -> fact.codeList().equals(code.codeList()) && code.value() != null)
+                    .map(code -> code.value().trim())
+                    .toList();
+            List<String> missing = own.stream().filter(value -> !known.contains(value)).toList();
+            if (save(warnings, "属性 " + fact.name(), () -> repository.saveAttribute(withCodeList(fact, null))) == 0) {
+                continue;
+            }
+            affected.add(fact.domain());
+            warnings.add(fact.domain() + "." + fact.column() + " 通过关系 " + relation.name() + " 连到字典概念 " + owner.domain()
+                    + "，码值只留在 " + owner.name() + " 上，已删除它自己的 " + own.size() + " 个码值"
+                    + (missing.isEmpty() ? "" : "；其中字典里没有的取值：" + String.join("、", missing)));
+        }
+        return affected;
+    }
+
+    private static Dimension dimensionSide(
+            Snapshot snapshot,
+            List<TableSnapshot> tables,
+            Map<String, List<String>> columns,
+            Map<String, List<List<Object>>> samples,
+            String concept,
+            String joinColumn) {
+        Map<String, Dimension> found = new LinkedHashMap<>();
+        addDimensionSide(snapshot, tables, columns, samples, concept, joinColumn, found);
+        return found.isEmpty() ? null : found.values().iterator().next();
+    }
+
+    private static Attribute attributeNamed(Snapshot snapshot, String name) {
+        return list(snapshot.attributes()).stream().filter(attribute -> attribute.name().equals(name)).findFirst().orElse(null);
+    }
+
+    private static boolean hasCodes(Snapshot snapshot, Attribute attribute) {
+        return attribute != null && attribute.codeList() != null && !attribute.codeList().isBlank()
+                && list(snapshot.codes()).stream().anyMatch(code -> attribute.codeList().equals(code.codeList()));
+    }
+
+    /**
+     * 维表码值只挂在维表概念自己的编码列上。事实表里同名的编码列不再另建码值，
+     * 问数时命中码值就锁定维表概念，再通过关系连到事实表。
+     */
+    private static String bindCodeList(
+            OntologyRepository repository,
+            Dimension dimension,
+            List<TableSnapshot> tables,
+            List<String> warnings) {
+        Snapshot snapshot = repository.snapshot();
+        Attribute own = null;
+        for (Attribute attribute : snapshot.attributes()) {
             if (dimension.concept().equals(attribute.domain())
                     && attribute.column() != null
-                    && attribute.column().equalsIgnoreCase(dimension.codeColumn())
-                    && attribute.codeList() != null
-                    && !attribute.codeList().isBlank()) {
-                codeList = attribute.codeList();
+                    && attribute.column().equalsIgnoreCase(dimension.codeColumn())) {
+                own = attribute;
                 break;
             }
         }
-        if (codeList == null) {
-            codeList = dimension.concept() + capitalize(dimension.codeColumn().replaceAll("[^A-Za-z0-9]", ""));
-        }
-        if (!OntologyVocabulary.NAME.matcher(codeList).matches()) {
-            warnings.add("跳过维表 " + dimension.tableKey() + "：码值集合名称不合法 " + codeList);
+        if (own == null) {
+            warnings.add("跳过维表 " + dimension.tableKey() + "：概念 " + dimension.concept() + " 没有映射 "
+                    + dimension.codeColumn() + " 列的属性，码值无法归到概念上");
             return null;
         }
+        String table = conceptTable(snapshot, dimension.concept());
+        String codeList = OntologyRepository.codeListName(table == null || table.isBlank() ? dimension.tableKey() : table,
+                own.column());
+        if (!codeList.equals(own.codeList())) {
+            Attribute target = own;
+            if (save(warnings, "属性 " + own.name(), () -> repository.saveAttribute(withCodeList(target, codeList))) == 0) {
+                return null;
+            }
+        }
+        Set<String> drafted = new LinkedHashSet<>();
+        tables.forEach(item -> drafted.add(item.key().toLowerCase(Locale.ROOT)));
         for (Attribute attribute : List.copyOf(repository.snapshot().attributes())) {
-            if (attribute.column() == null || !attribute.column().equalsIgnoreCase(dimension.codeColumn())) {
+            if (dimension.concept().equals(attribute.domain())
+                    || attribute.column() == null
+                    || !attribute.column().equalsIgnoreCase(dimension.codeColumn())
+                    || attribute.codeList() == null
+                    || attribute.codeList().isBlank()) {
                 continue;
             }
-            if (codeList.equals(attribute.codeList())) {
+            String otherTable = conceptTable(snapshot, attribute.domain());
+            if (otherTable == null || !drafted.contains(otherTable.toLowerCase(Locale.ROOT))) {
                 continue;
             }
-            String list = codeList;
-            save(warnings, "属性 " + attribute.name(), () -> repository.saveAttribute(withCodeList(attribute, list)));
-            if (!dimension.concept().equals(attribute.domain())) {
-                warnings.add(attribute.domain() + "." + attribute.column() + " 改用维表 " + dimension.tableKey()
-                        + " 的 " + dimension.labelColumn() + " 列，码值集合 " + codeList);
+            if (save(warnings, "属性 " + attribute.name(), () -> repository.saveAttribute(withCodeList(attribute, null))) > 0) {
+                warnings.add(attribute.domain() + "." + attribute.column() + " 的含义来自维表 " + dimension.tableKey()
+                        + "（概念 " + dimension.concept() + "），不再单独建码值，问数时通过关系连到维表");
             }
         }
         return codeList;
@@ -723,7 +980,13 @@ public class OntologyDraftService {
         if (names.isEmpty() || names.size() > NARROW_TABLE || names.stream().noneMatch(name -> name.equalsIgnoreCase(joinColumn))) {
             return;
         }
-        TableSnapshot table = tableOrNames(tables, tableKey, names);
+        Map<String, String> types = new LinkedHashMap<>();
+        for (Attribute attribute : list(snapshot.attributes())) {
+            if (concept.equals(attribute.domain()) && attribute.column() != null && attribute.datatype() != null) {
+                types.put(attribute.column().toLowerCase(Locale.ROOT), attribute.datatype());
+            }
+        }
+        TableSnapshot table = tableOrNames(tables, tableKey, names, types);
         List<ColumnSnapshot> business = businessColumns(table.getColumns());
         String code = business.stream().map(ColumnSnapshot::getName).filter(name -> name.equalsIgnoreCase(joinColumn)).findFirst().orElse(joinColumn);
         TextPair text = textColumns(table, business, code, samples);
@@ -835,7 +1098,9 @@ public class OntologyDraftService {
         return false;
     }
 
-    private static TableSnapshot tableOrNames(List<TableSnapshot> tables, String tableKey, List<String> names) {
+    /** 本次没勾选的表没有列类型，用已有属性的数据类型代替，才能认出它的文本列。 */
+    private static TableSnapshot tableOrNames(List<TableSnapshot> tables, String tableKey, List<String> names,
+                                              Map<String, String> types) {
         for (TableSnapshot table : tables) {
             if (table.key().equalsIgnoreCase(tableKey)) {
                 return table;
@@ -848,7 +1113,9 @@ public class OntologyDraftService {
             synthetic.setSchema(parts[1]);
             synthetic.setTable(parts[2]);
         }
-        synthetic.setColumns(names.stream().map(name -> new ColumnSnapshot(name, "")).toList());
+        synthetic.setColumns(names.stream()
+                .map(name -> new ColumnSnapshot(name, types.getOrDefault(name.toLowerCase(Locale.ROOT), "")))
+                .toList());
         return synthetic;
     }
 
@@ -913,7 +1180,25 @@ public class OntologyDraftService {
         return any ? text.toString() : null;
     }
 
+    static String describeRelations(Snapshot snapshot) {
+        if (list(snapshot.relations()).isEmpty()) {
+            return "";
+        }
+        StringBuilder text = new StringBuilder("\n已有关系：\n");
+        for (Relation relation : snapshot.relations()) {
+            text.append("- ").append(relation.name()).append("：").append(relation.domain()).append('.')
+                    .append(relation.joinFrom()).append(" = ").append(relation.range()).append('.')
+                    .append(relation.joinTo()).append('\n');
+        }
+        return text.toString();
+    }
+
     static String describeJoinHints(Snapshot snapshot, Map<String, List<String>> columns) {
+        return describeJoinHints(snapshot, columns, null);
+    }
+
+    /** @param draftedTables 后加表时只提示至少一端是本次新表的连接；为 null 时提示全部。 */
+    static String describeJoinHints(Snapshot snapshot, Map<String, List<String>> columns, Set<String> draftedTables) {
         List<Concept> concepts = list(snapshot.concepts()).stream()
                 .filter(concept -> concept.table() != null && !concept.table().isBlank())
                 .toList();
@@ -923,6 +1208,10 @@ public class OntologyDraftService {
             for (int j = i + 1; j < concepts.size(); j++) {
                 Concept left = concepts.get(i);
                 Concept right = concepts.get(j);
+                if (draftedTables != null && !draftedTables.contains(left.table().toLowerCase(Locale.ROOT))
+                        && !draftedTables.contains(right.table().toLowerCase(Locale.ROOT))) {
+                    continue;
+                }
                 List<String> leftColumns = columns.getOrDefault(left.table().toLowerCase(Locale.ROOT), List.of());
                 List<String> rightColumns = columns.getOrDefault(right.table().toLowerCase(Locale.ROOT), List.of());
                 for (String leftColumn : leftColumns) {
@@ -1147,13 +1436,6 @@ public class OntologyDraftService {
         }
         int dot = table.lastIndexOf('.');
         return (dot < 0 ? table : table.substring(dot + 1)).toLowerCase(Locale.ROOT);
-    }
-
-    private static String capitalize(String text) {
-        if (text == null || text.isEmpty()) {
-            return "";
-        }
-        return Character.toUpperCase(text.charAt(0)) + text.substring(1);
     }
 
     static List<List<ColumnSnapshot>> columnBatches(List<ColumnSnapshot> columns, int size) {
@@ -1415,13 +1697,19 @@ public class OntologyDraftService {
         Map<String, List<Code>> codes = list(existing.codes()).stream()
                 .filter(code -> code.codeList() != null)
                 .collect(Collectors.groupingBy(Code::codeList, LinkedHashMap::new, Collectors.toList()));
+        Map<String, String> owners = new LinkedHashMap<>();
+        for (Attribute attribute : list(existing.attributes())) {
+            if (attribute.codeList() != null) {
+                owners.putIfAbsent(attribute.codeList(), attribute.name());
+            }
+        }
         int shown = 0;
         for (Map.Entry<String, List<Code>> entry : codes.entrySet()) {
-            if (shown++ == 8) {
+            if (shown++ == 12) {
                 break;
             }
-            text.append("码值 ").append(entry.getKey()).append("：");
-            text.append(entry.getValue().stream().limit(20)
+            text.append("属性 ").append(owners.getOrDefault(entry.getKey(), entry.getKey())).append(" 的码值（取值=中文名）：");
+            text.append(entry.getValue().stream().limit(40)
                     .map(code -> code.value() + "=" + Objects.toString(code.labelZh(), code.value()))
                     .collect(Collectors.joining("、")));
             text.append('\n');
@@ -1429,15 +1717,91 @@ public class OntologyDraftService {
         return text.toString();
     }
 
-    private static String describeAttribute(Attribute attribute) {
-        StringBuilder text = new StringBuilder(attribute.name()).append('→').append(attribute.column());
-        if (attribute.datatype() != null && !attribute.datatype().isBlank()) {
-            text.append('（').append(attribute.datatype()).append('）');
-        }
-        if (attribute.codeList() != null && !attribute.codeList().isBlank()) {
-            text.append(" 码值=").append(attribute.codeList());
+    /** 事实表的编码列本身不带码值时，码值挂在关系另一端的维表属性上，取值相同，派生条件可以直接用。 */
+    static String describeJoinedCodes(Snapshot snapshot, String concept) {
+        StringBuilder text = new StringBuilder();
+        for (Relation relation : list(snapshot.relations())) {
+            boolean forward = concept.equals(relation.domain());
+            if (!forward && !concept.equals(relation.range())) {
+                continue;
+            }
+            String ownColumn = forward ? relation.joinFrom() : relation.joinTo();
+            String otherConcept = forward ? relation.range() : relation.domain();
+            String otherColumn = forward ? relation.joinTo() : relation.joinFrom();
+            Attribute own = attributeOnColumn(snapshot, concept, ownColumn);
+            Attribute other = attributeOnColumn(snapshot, otherConcept, otherColumn);
+            if (own == null || other == null || other.codeList() == null || other.codeList().isBlank()
+                    || (own.codeList() != null && !own.codeList().isBlank())) {
+                continue;
+            }
+            String codes = list(snapshot.codes()).stream()
+                    .filter(code -> other.codeList().equals(code.codeList()))
+                    .limit(40)
+                    .map(code -> code.value() + "=" + Objects.toString(code.labelZh(), code.value()))
+                    .collect(Collectors.joining("、"));
+            if (!codes.isEmpty()) {
+                text.append("属性 ").append(own.name()).append(" 通过关系 ").append(relation.name()).append(" 与 ")
+                        .append(other.name()).append(" 取值相同，条件可以直接用这些码值：").append(codes).append('\n');
+            }
         }
         return text.toString();
+    }
+
+    static String describeDefined(Snapshot snapshot, String concept) {
+        List<DefinedConcept> own = list(snapshot.definedConcepts()).stream()
+                .filter(defined -> concept.equals(defined.base()))
+                .toList();
+        if (own.isEmpty()) {
+            return "";
+        }
+        StringBuilder text = new StringBuilder("\n" + concept + " 已有的派生概念，不要重复：\n");
+        for (DefinedConcept defined : own) {
+            text.append("- ").append(defined.name()).append("（").append(Objects.toString(defined.labelZh(), "")).append("）：")
+                    .append(list(defined.conditions()).stream()
+                            .map(condition -> condition.attribute() + " " + condition.operator() + " " + condition.value())
+                            .collect(Collectors.joining(" 且 ")))
+                    .append('\n');
+        }
+        return text.toString();
+    }
+
+    private static String joinedCodeList(Snapshot snapshot, Attribute attribute) {
+        if (attribute.domain() == null || attribute.column() == null) {
+            return null;
+        }
+        for (Relation relation : list(snapshot.relations())) {
+            Attribute other = null;
+            if (attribute.domain().equals(relation.domain()) && attribute.column().equalsIgnoreCase(relation.joinFrom())) {
+                other = attributeOnColumn(snapshot, relation.range(), relation.joinTo());
+            } else if (attribute.domain().equals(relation.range()) && attribute.column().equalsIgnoreCase(relation.joinTo())) {
+                other = attributeOnColumn(snapshot, relation.domain(), relation.joinFrom());
+            }
+            if (other != null && other.codeList() != null && !other.codeList().isBlank()) {
+                return other.codeList();
+            }
+        }
+        return null;
+    }
+
+    private static Attribute attributeOnColumn(Snapshot snapshot, String concept, String column) {
+        if (column == null) {
+            return null;
+        }
+        return list(snapshot.attributes()).stream()
+                .filter(attribute -> concept.equals(attribute.domain()) && column.equalsIgnoreCase(attribute.column()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static String describeAttribute(Attribute attribute) {
+        StringBuilder text = new StringBuilder(attribute.name()).append("（列 ").append(attribute.column());
+        if (attribute.datatype() != null && !attribute.datatype().isBlank()) {
+            text.append("，").append(attribute.datatype());
+        }
+        if (attribute.codeList() != null && !attribute.codeList().isBlank()) {
+            text.append("，有码值");
+        }
+        return text.append('）').toString();
     }
 
     static String describeTable(TableSnapshot table, List<List<Object>> samples) {
@@ -1520,7 +1884,12 @@ public class OntologyDraftService {
         List<String> warnings = new ArrayList<>();
         Map<String, String> conceptTables = new LinkedHashMap<>();
         existing.concepts().forEach(concept -> conceptTables.put(concept.name(), concept.table()));
+        // 实体名全局唯一：起名查重要看全部主题域，引用解析只看 existing（本主题域）
+        Snapshot everything = repository.all();
+        Map<String, String> takenConcepts = new LinkedHashMap<>();
+        everything.concepts().forEach(concept -> takenConcepts.put(concept.name(), concept.table()));
 
+        Map<String, String> renames = new LinkedHashMap<>();
         List<Concept> concepts = new ArrayList<>();
         for (Concept concept : list(draft.concepts())) {
             String table = concept.table();
@@ -1528,20 +1897,64 @@ public class OntologyDraftService {
                 warnings.add("跳过类 " + concept.name() + "：表 " + table + " 不在本次勾选范围内");
                 continue;
             }
+            String name = concept.name();
+            List<String> aliases = new ArrayList<>(list(concept.aliases()));
+            if (table != null && !table.isBlank()) {
+                String owner = conceptOfTable(conceptTables, table);
+                String generated = OntologyRepository.conceptName(table, takenConcepts);
+                String elsewhere = owner == null ? conceptOfTable(takenConcepts, table) : null;
+                if (elsewhere != null) {
+                    warnings.add("跳过类 " + concept.name() + "：表 " + table + " 已经是别的主题域里的概念 " + elsewhere
+                            + "，一张表只能属于一个主题域");
+                    continue;
+                }
+                if (owner != null) {
+                    if (concept.name() != null) {
+                        renames.put(concept.name(), owner);
+                    }
+                    if (!owner.equals(generated)) {
+                        warnings.add("跳过类 " + concept.name() + "：表 " + table + " 已有概念 " + owner
+                                + "（旧命名），一张表只能有一个概念；要改成 " + generated + " 请先删除 " + owner + " 再起草");
+                        continue;
+                    }
+                    if (concepts.stream().anyMatch(item -> item.name().equals(owner))) {
+                        warnings.add("跳过类 " + concept.name() + "：表 " + table + " 已经写成概念 " + owner);
+                        continue;
+                    }
+                }
+                name = generated;
+                if (concept.name() != null && !concept.name().isBlank() && !concept.name().equals(name)) {
+                    renames.put(concept.name(), name);
+                    if (aliases.stream().noneMatch(concept.name()::equalsIgnoreCase)) {
+                        aliases.add(concept.name());
+                    }
+                }
+            }
             String timeColumn = matchColumn(tableColumns, table, concept.timeColumn());
             boolean large = concept.largeTable();
             if (large && timeColumn == null) {
-                warnings.add("类 " + concept.name() + " 是大表但没有可用的时间列，已取消大表标记，请人工补充时间列");
+                warnings.add("类 " + name + " 是大表但没有可用的时间列，已取消大表标记，请人工补充时间列");
                 large = false;
             }
-            concepts.add(new Concept(concept.name(), concept.labelZh(), concept.labelEn(), concept.aliases(),
+            concepts.add(new Concept(name, concept.labelZh(), concept.labelEn(), aliases,
                     concept.comment(), concept.parent(), table, timeColumn, large));
-            conceptTables.put(concept.name(), table);
+            conceptTables.put(name, table);
+            takenConcepts.put(name, table);
         }
+        ConceptResolver resolve = reference -> resolveConcept(reference, conceptTables, renames, existing);
+        concepts = concepts.stream()
+                .map(concept -> new Concept(concept.name(), concept.labelZh(), concept.labelEn(), concept.aliases(),
+                        concept.comment(), resolve.apply(concept.parent()), concept.table(), concept.timeColumn(),
+                        concept.largeTable()))
+                .toList();
         int savedConcepts = saveInDependencyOrder(repository, concepts, warnings);
 
         int savedAttributes = 0;
-        for (Attribute attribute : list(draft.attributes())) {
+        Map<String, String> requestedLists = new LinkedHashMap<>();
+        Map<String, String> attributeRenames = new LinkedHashMap<>();
+        Set<String> columnsInBatch = new LinkedHashSet<>();
+        for (Attribute drafted : list(draft.attributes())) {
+            Attribute attribute = withDomain(drafted, resolve.apply(drafted.domain()));
             String table = conceptTables.get(attribute.domain());
             String column = matchColumn(tableColumns, table, attribute.column());
             if (attribute.domain() == null || !conceptTables.containsKey(attribute.domain())) {
@@ -1552,37 +1965,111 @@ public class OntologyDraftService {
                 warnings.add("跳过属性 " + attribute.name() + "：列 " + attribute.column() + " 不在表 " + table + " 中");
                 continue;
             }
+            String name = attribute.name();
+            List<String> aliases = new ArrayList<>(list(attribute.aliases()));
+            if (column != null) {
+                String generated = OntologyRepository.attributeName(attribute.domain(), column);
+                String domain = attribute.domain();
+                Optional<Attribute> legacy = list(existing.attributes()).stream()
+                        .filter(other -> domain.equals(other.domain()) && column.equalsIgnoreCase(other.column())
+                                && !other.name().equals(generated))
+                        .findFirst();
+                if (legacy.isPresent()) {
+                    attributeRenames.put(attribute.name(), legacy.get().name());
+                    warnings.add("跳过属性 " + attribute.name() + "：" + domain + " 的列 " + column + " 已有属性 "
+                            + legacy.get().name() + "（旧命名）；要改成 " + generated + " 请先删除它再起草");
+                    continue;
+                }
+                if (!columnsInBatch.add(generated)) {
+                    warnings.add("跳过属性 " + attribute.name() + "：" + domain + " 的列 " + column + " 本次已写成属性 " + generated);
+                    continue;
+                }
+                if (name != null && !name.isBlank() && !name.equals(generated)) {
+                    attributeRenames.put(name, generated);
+                    if (aliases.stream().noneMatch(name::equalsIgnoreCase)) {
+                        aliases.add(name);
+                    }
+                }
+                name = generated;
+            }
             String datatype = normalizeDatatype(attribute.datatype(), physicalType(physicalTypes, table, column));
-            Attribute fixed = new Attribute(attribute.name(), attribute.labelZh(), attribute.labelEn(), attribute.aliases(),
+            Attribute fixed = new Attribute(name, attribute.labelZh(), attribute.labelEn(), aliases,
                     attribute.comment(), attribute.domain(), datatype, column, attribute.unit(),
                     attribute.identifier(), attribute.codeList());
-            savedAttributes += save(warnings, "属性 " + attribute.name(), () -> repository.saveAttribute(fixed));
+            int saved = save(warnings, "属性 " + name, () -> repository.saveAttribute(fixed));
+            savedAttributes += saved;
+            if (saved > 0 && attribute.codeList() != null && !attribute.codeList().isBlank()) {
+                String canonical = repository.codeListFor(fixed);
+                requestedLists.put(attribute.codeList().trim().toLowerCase(Locale.ROOT), canonical);
+                if (!canonical.equals(attribute.codeList().trim())) {
+                    warnings.add("属性 " + attribute.name() + " 的码值集合按表和列命名为 " + canonical);
+                }
+            }
         }
 
         int savedCodes = 0;
-        Set<String> usedNames = occupiedNames(existing);
-        for (Code code : list(draft.codes())) {
-            if (code.codeList() != null) {
-                usedNames.add(code.codeList());
+        if (!list(draft.codes()).isEmpty()) {
+            Snapshot current = repository.snapshot();
+            Snapshot global = repository.all();
+            Map<String, String> lists = codeListAliases(current, requestedLists);
+            Set<String> taken = occupiedNames(new Snapshot(global.concepts(), global.attributes(), global.relations(),
+                    List.of(), global.definedConcepts()));
+            Map<String, String> codeOwners = new LinkedHashMap<>();
+            Map<String, String> existingByValue = new LinkedHashMap<>();
+            for (Code code : list(global.codes())) {
+                codeOwners.put(code.name(), code.codeList());
             }
-        }
-        for (Code code : list(draft.codes())) {
-            Set<String> allowed = allowedCodes == null || code.codeList() == null ? null : allowedCodes.get(code.codeList());
-            if (allowed != null && (code.value() == null || !allowed.contains(code.value().trim()))) {
-                warnings.add("跳过码值 " + code.name() + "：取值 " + code.value() + " 不在读到的数据里");
-                continue;
+            for (Code code : list(current.codes())) {
+                if (code.value() != null) {
+                    existingByValue.putIfAbsent(code.codeList() + "\u0000" + code.value().trim(), code.name());
+                }
             }
-            String name = codeIndividualName(code.name(), code.codeList(), code.value(), usedNames);
-            if (code.name() != null && !code.name().equals(name)) {
-                warnings.add("码值名称 " + code.name() + " 与已有实体冲突，改为 " + name);
+            Set<String> batch = new LinkedHashSet<>();
+            for (Code code : list(draft.codes())) {
+                String codeList = code.codeList() == null ? null : lists.get(code.codeList().trim().toLowerCase(Locale.ROOT));
+                if (codeList == null) {
+                    warnings.add("跳过码值 " + code.name() + "：码值集合 " + code.codeList() + " 没有对应的属性");
+                    continue;
+                }
+                Set<String> allowed = allowedCodes == null ? null : allowedCodes.get(codeList);
+                if (allowed != null && (code.value() == null || !allowed.contains(code.value().trim()))) {
+                    warnings.add("跳过码值 " + code.name() + "：取值 " + code.value() + " 不在读到的数据里");
+                    continue;
+                }
+                String value = code.value() == null ? null : code.value().trim();
+                String name = existingByValue.get(codeList + "\u0000" + value);
+                if (name == null || batch.contains(name)) {
+                    Set<String> used = new LinkedHashSet<>(taken);
+                    used.addAll(batch);
+                    codeOwners.forEach((other, owner) -> {
+                        if (!codeList.equals(owner)) {
+                            used.add(other);
+                        }
+                    });
+                    String preferred = codeList + "_" + identifierSuffix(value);
+                    name = codeIndividualName(preferred, codeList, value, used);
+                    if (!name.equals(preferred)) {
+                        warnings.add("码值名称 " + preferred + " 与已有实体冲突，改为 " + name);
+                    }
+                }
+                batch.add(name);
+                Code fixed = new Code(name, codeList, code.value(), code.labelZh(), code.labelEn(), code.aliases(), code.comment());
+                savedCodes += save(warnings, "码值 " + name, () -> repository.saveCode(fixed));
             }
-            usedNames.add(name);
-            Code fixed = new Code(name, code.codeList(), code.value(), code.labelZh(), code.labelEn(), code.aliases(), code.comment());
-            savedCodes += save(warnings, "码值 " + name, () -> repository.saveCode(fixed));
         }
 
         int savedRelations = 0;
-        for (Relation relation : list(draft.relations())) {
+        Map<String, Relation> knownRelations = new LinkedHashMap<>();
+        list(everything.relations()).forEach(relation -> knownRelations.put(relation.name(), relation));
+        for (Relation drafted : list(draft.relations())) {
+            Relation relation = new Relation(drafted.name(), drafted.labelZh(), drafted.labelEn(), drafted.aliases(),
+                    drafted.comment(), resolve.apply(drafted.domain()), resolve.apply(drafted.range()),
+                    drafted.joinFrom(), drafted.joinTo(), drafted.inverse(), drafted.transitive(), drafted.functional());
+            String outside = outsideSubject(conceptTables, takenConcepts, relation.domain(), relation.range());
+            if (outside != null) {
+                warnings.add("跳过关系 " + relation.name() + "：概念 " + outside + " 在别的主题域，只有同主题域的概念能建立关系");
+                continue;
+            }
             String from = matchColumn(tableColumns, conceptTables.get(relation.domain()), relation.joinFrom());
             String to = matchColumn(tableColumns, conceptTables.get(relation.range()), relation.joinTo());
             if (from == null || to == null) {
@@ -1593,17 +2080,177 @@ public class OntologyDraftService {
             if (qualified(relation.joinFrom()) || qualified(relation.joinTo())) {
                 warnings.add("关系 " + relation.name() + " 的连接列已按列名 " + from + " / " + to + " 写入");
             }
-            Relation fixed = new Relation(relation.name(), relation.labelZh(), relation.labelEn(), relation.aliases(),
+            Relation same = knownRelations.values().stream()
+                    .filter(other -> sameJoin(other, relation.domain(), relation.range(), from, to))
+                    .findFirst().orElse(null);
+            if (same != null && !same.name().equals(relation.name())) {
+                warnings.add("跳过关系 " + relation.name() + "：" + relation.domain() + "." + from + " = " + relation.range()
+                        + "." + to + " 已有关系 " + same.name());
+                continue;
+            }
+            String name = relation.name();
+            Relation clash = name == null ? null : knownRelations.get(name);
+            if (clash != null && !(Objects.equals(clash.domain(), relation.domain())
+                    && Objects.equals(clash.range(), relation.range()))) {
+                String renamed = lowerFirst(relation.domain()) + "_" + name;
+                if (knownRelations.containsKey(renamed)) {
+                    renamed = renamed + "_" + relation.range();
+                }
+                warnings.add("关系名 " + name + " 已用于 " + clash.domain() + " → " + clash.range() + "，本条改名为 " + renamed);
+                name = renamed;
+            }
+            Relation fixed = new Relation(name, relation.labelZh(), relation.labelEn(), relation.aliases(),
                     relation.comment(), relation.domain(), relation.range(), from, to, relation.inverse(),
                     relation.transitive(), relation.functional());
-            savedRelations += save(warnings, "关系 " + relation.name(), () -> repository.saveRelation(fixed));
+            int saved = save(warnings, "关系 " + name, () -> repository.saveRelation(fixed));
+            savedRelations += saved;
+            if (saved > 0) {
+                knownRelations.put(name, fixed);
+            }
         }
 
         int savedDefined = 0;
-        for (DefinedConcept defined : list(draft.definedConcepts())) {
+        Snapshot afterAttributes = list(draft.definedConcepts()).isEmpty() ? existing : repository.snapshot();
+        for (DefinedConcept drafted : list(draft.definedConcepts())) {
+            String base = resolve.apply(drafted.base());
+            if (outsideSubject(conceptTables, takenConcepts, base) != null) {
+                warnings.add("跳过派生概念 " + drafted.name() + "：基类 " + base + " 在别的主题域");
+                continue;
+            }
+            List<Condition> conditions = list(drafted.conditions()).stream()
+                    .map(condition -> fixCondition(drafted.name(), base, condition, afterAttributes, attributeRenames, warnings))
+                    .toList();
+            DefinedConcept twin = list(afterAttributes.definedConcepts()).stream()
+                    .filter(other -> !other.name().equals(drafted.name()) && Objects.equals(other.base(), base)
+                            && !conditions.isEmpty() && new LinkedHashSet<>(list(other.conditions())).equals(new LinkedHashSet<>(conditions)))
+                    .findFirst().orElse(null);
+            if (twin != null) {
+                warnings.add("跳过派生概念 " + drafted.name() + "：条件和已有派生概念 " + twin.name() + " 相同");
+                continue;
+            }
+            String definedName = drafted.name();
+            DefinedConcept clash = list(everything.definedConcepts()).stream()
+                    .filter(other -> other.name().equals(drafted.name()) && !Objects.equals(other.base(), base))
+                    .findFirst().orElse(null);
+            if (clash != null && base != null) {
+                definedName = base + "_" + drafted.name();
+                warnings.add("派生概念名 " + drafted.name() + " 已用于 " + clash.base() + "，本条改名为 " + definedName);
+            }
+            DefinedConcept defined = new DefinedConcept(definedName, drafted.labelZh(), drafted.labelEn(),
+                    drafted.aliases(), drafted.comment(), base, conditions, drafted.definitionText());
             savedDefined += save(warnings, "派生概念 " + defined.name(), () -> repository.saveDefinedConcept(defined));
         }
         return new DraftResult(savedConcepts, savedAttributes, savedRelations, savedCodes, savedDefined, warnings);
+    }
+
+    /** 引用的概念不在本主题域、却在别的主题域里时返回它的名字。 */
+    private static String outsideSubject(Map<String, String> inSubject, Map<String, String> everywhere, String... concepts) {
+        for (String concept : concepts) {
+            if (concept != null && !inSubject.containsKey(concept) && everywhere.containsKey(concept)) {
+                return concept;
+            }
+        }
+        return null;
+    }
+
+    /** 两端概念和连接列都相同就是同一条连接，方向反过来也算。 */
+    private static boolean sameJoin(Relation other, String domain, String range, String from, String to) {
+        if (other.joinFrom() == null || other.joinTo() == null) {
+            return false;
+        }
+        boolean forward = Objects.equals(other.domain(), domain) && Objects.equals(other.range(), range)
+                && other.joinFrom().equalsIgnoreCase(from) && other.joinTo().equalsIgnoreCase(to);
+        boolean backward = Objects.equals(other.domain(), range) && Objects.equals(other.range(), domain)
+                && other.joinFrom().equalsIgnoreCase(to) && other.joinTo().equalsIgnoreCase(from);
+        return forward || backward;
+    }
+
+    private static String lowerFirst(String text) {
+        return text == null || text.isEmpty() ? "" : Character.toLowerCase(text.charAt(0)) + text.substring(1);
+    }
+
+    /**
+     * 模型常把条件写成列名（LogonType）或码值中文名（登录失败）。
+     * 按基础概念的属性把列名换成属性名，把中文名换成码值取值。
+     */
+    static Condition fixCondition(String definedName, String base, Condition condition, Snapshot snapshot,
+                                  Map<String, String> renames, List<String> warnings) {
+        String written = condition.attribute();
+        if (written == null || written.isBlank()) {
+            return condition;
+        }
+        String reference = renames.getOrDefault(written, written);
+        List<Attribute> attributes = list(snapshot.attributes());
+        List<Attribute> own = attributes.stream().filter(a -> Objects.equals(a.domain(), base)).toList();
+        Attribute target = attributes.stream().filter(a -> a.name().equals(reference)).findFirst()
+                .or(() -> own.stream().filter(a -> a.name().equalsIgnoreCase(reference)).findFirst())
+                .or(() -> own.stream().filter(a -> reference.equalsIgnoreCase(a.column())).findFirst())
+                .or(() -> own.stream().filter(a -> list(a.aliases()).stream().anyMatch(reference::equalsIgnoreCase)).findFirst())
+                .or(() -> attributes.stream().filter(a -> a.name().equalsIgnoreCase(reference)).findFirst())
+                .orElse(null);
+        if (target == null) {
+            return condition;
+        }
+        if (!target.name().equals(written)) {
+            warnings.add("派生概念 " + definedName + " 的条件 " + written + " 改为属性 " + target.name());
+        }
+        String value = condition.value();
+        String codeList = target.codeList() != null && !target.codeList().isBlank()
+                ? target.codeList() : joinedCodeList(snapshot, target);
+        if (value != null && codeList != null) {
+            String trimmed = value.trim();
+            List<Code> codes = list(snapshot.codes()).stream()
+                    .filter(code -> codeList.equals(code.codeList()))
+                    .toList();
+            boolean isValue = codes.stream().anyMatch(code -> trimmed.equals(code.value()));
+            Optional<Code> byLabel = codes.stream()
+                    .filter(code -> trimmed.equals(code.labelZh()) || list(code.aliases()).contains(trimmed))
+                    .findFirst();
+            if (!isValue && byLabel.isPresent()) {
+                warnings.add("派生概念 " + definedName + " 的条件值 " + value + " 改为码值 " + byLabel.get().value());
+                value = byLabel.get().value();
+            }
+        }
+        return new Condition(target.name(), condition.operator(), value);
+    }
+
+    @FunctionalInterface
+    private interface ConceptResolver {
+        String apply(String reference);
+    }
+
+    private static String conceptOfTable(Map<String, String> conceptTables, String table) {
+        return conceptTables.entrySet().stream()
+                .filter(entry -> entry.getValue() != null && entry.getValue().equalsIgnoreCase(table.trim()))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** 概念名由表名生成，模型仍可能用它自己起的名字引用概念，按本批改名和概念别名找回。 */
+    private static String resolveConcept(
+            String reference,
+            Map<String, String> conceptTables,
+            Map<String, String> renames,
+            Snapshot existing) {
+        if (reference == null || reference.isBlank() || conceptTables.containsKey(reference)) {
+            return reference;
+        }
+        String renamed = renames.get(reference);
+        if (renamed != null) {
+            return renamed;
+        }
+        return list(existing.concepts()).stream()
+                .filter(concept -> list(concept.aliases()).stream().anyMatch(reference::equalsIgnoreCase))
+                .map(Concept::name)
+                .findFirst()
+                .orElse(reference);
+    }
+
+    private static Attribute withDomain(Attribute attribute, String domain) {
+        return new Attribute(attribute.name(), attribute.labelZh(), attribute.labelEn(), attribute.aliases(),
+                attribute.comment(), domain, attribute.datatype(), attribute.column(),
+                attribute.unit(), attribute.identifier(), attribute.codeList());
     }
 
     private static int saveInDependencyOrder(OntologyRepository repository, List<Concept> concepts, List<String> warnings) {
@@ -1666,6 +2313,23 @@ public class OntologyDraftService {
 
     private static boolean qualified(String column) {
         return column != null && (column.indexOf('.') >= 0 || column.indexOf('．') >= 0);
+    }
+
+    /** 模型写的码值集合名、属性名或本批属性里填的旧名字，都换成属性上真正挂着的集合名。 */
+    private static Map<String, String> codeListAliases(Snapshot current, Map<String, String> requestedLists) {
+        Map<String, String> aliases = new LinkedHashMap<>();
+        for (Attribute attribute : list(current.attributes())) {
+            if (attribute.codeList() != null && !attribute.codeList().isBlank()) {
+                aliases.put(attribute.name().toLowerCase(Locale.ROOT), attribute.codeList());
+            }
+        }
+        for (Attribute attribute : list(current.attributes())) {
+            if (attribute.codeList() != null && !attribute.codeList().isBlank()) {
+                aliases.put(attribute.codeList().toLowerCase(Locale.ROOT), attribute.codeList());
+            }
+        }
+        aliases.putAll(requestedLists);
+        return aliases;
     }
 
     private static Set<String> occupiedNames(Snapshot existing) {
@@ -1753,7 +2417,8 @@ public class OntologyDraftService {
     public record DraftPhase(String phase, String message, String status, int saved, List<String> notes) {
     }
 
-    public record DraftRequest(List<String> tables, String instructions) {
+    /** @param subject 主题域，必填；本次勾选的表都归到它下面 */
+    public record DraftRequest(List<String> tables, String instructions, String subject) {
     }
 
     public record DraftResult(

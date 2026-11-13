@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -112,7 +113,7 @@ public class OntologyTools {
         }
         Code code = index.codes.get(name);
         if (code != null) {
-            return new CodeView(code.name(), code.codeList(), code.value(), code.labelZh(), code.aliases());
+            return codeView(index, code);
         }
         return Map.of("error", "本体中没有实体 " + name + "，请先用 searchEntities 检索");
     }
@@ -161,6 +162,7 @@ public class OntologyTools {
                 matches.add(new Match(entity, kind, entity, "agent", 0.8, "agent:" + entity));
             }
         }
+        matches = lockCodeConcepts(index, matches, warnings);
 
         Set<String> seeds = new LinkedHashSet<>();
         Set<String> attributes = new LinkedHashSet<>();
@@ -189,12 +191,13 @@ public class OntologyTools {
                 case "code" -> {
                     Code code = index.codes.get(match.entity());
                     codes.add(code.name());
-                    index.attributes.values().stream()
-                            .filter(attribute -> Objects.equals(attribute.codeList(), code.codeList()))
-                            .forEach(attribute -> {
-                                attributes.add(attribute.name());
-                                addSeed(matchSeeds, attribute.domain());
-                            });
+                    Attribute owner = index.codeOwner(code.codeList());
+                    if (owner == null) {
+                        warnings.add("码值 " + code.name() + " 的集合 " + code.codeList() + " 没有挂在任何属性上，无法确定概念");
+                    } else {
+                        attributes.add(owner.name());
+                        addSeed(matchSeeds, owner.domain());
+                    }
                 }
                 default -> {
                 }
@@ -255,11 +258,56 @@ public class OntologyTools {
                         .map(name -> relationView(index, index.relations.get(name))).toList(),
                 defined.stream().map(name -> definedView(index, index.defined.get(name))).toList(),
                 codes.stream().map(index.codes::get)
-                        .map(code -> new CodeView(code.name(), code.codeList(), code.value(), code.labelZh(), code.aliases()))
+                        .map(code -> codeView(index, code))
                         .toList(),
                 paths,
                 warnings,
                 unresolved);
+    }
+
+    /**
+     * 同一个词命中多个概念的码值时，若问题里另外提到了其中某个概念（或它的属性），只保留该概念的码值。
+     */
+    private static List<Match> lockCodeConcepts(Index index, List<Match> matches, List<String> warnings) {
+        Set<String> mentioned = new LinkedHashSet<>();
+        for (Match match : matches) {
+            switch (match.kind()) {
+                case "concept" -> mentioned.add(match.entity());
+                case "attribute" -> addSeed(mentioned, index.attributes.get(match.entity()).domain());
+                case "defined" -> addSeed(mentioned, index.defined.get(match.entity()).base());
+                default -> {
+                }
+            }
+        }
+        if (mentioned.isEmpty()) {
+            return matches;
+        }
+        Map<String, List<Match>> bySpan = new LinkedHashMap<>();
+        matches.stream().filter(match -> "code".equals(match.kind()))
+                .forEach(match -> bySpan.computeIfAbsent(match.span(), ignored -> new ArrayList<>()).add(match));
+        Set<Match> dropped = new HashSet<>();
+        for (List<Match> group : bySpan.values()) {
+            if (group.size() < 2) {
+                continue;
+            }
+            List<Match> kept = group.stream().filter(match -> {
+                Attribute owner = index.codeOwner(index.codes.get(match.entity()).codeList());
+                return owner != null && mentioned.contains(owner.domain());
+            }).toList();
+            if (kept.isEmpty() || kept.size() == group.size()) {
+                continue;
+            }
+            group.stream().filter(match -> !kept.contains(match)).forEach(dropped::add);
+            Set<String> removed = group.stream().filter(dropped::contains).map(Match::entity).collect(Collectors.toSet());
+            warnings.removeIf(warning -> warning.startsWith("歧义") && removed.stream().anyMatch(warning::contains)
+                    && kept.size() == 1);
+            warnings.add("「" + group.get(0).text() + "」按问题中的概念锁定为码值 "
+                    + kept.stream().map(Match::entity).toList());
+        }
+        if (dropped.isEmpty()) {
+            return matches;
+        }
+        return new ArrayList<>(matches.stream().filter(match -> !dropped.contains(match)).toList());
     }
 
     private static boolean alternatives(Set<String> left, Set<String> right) {
@@ -448,10 +496,18 @@ public class OntologyTools {
                 .toList();
     }
 
+    private static CodeView codeView(Index index, Code code) {
+        Attribute owner = index.codeOwner(code.codeList());
+        return new CodeView(code.name(), code.codeList(), code.value(), code.labelZh(), code.aliases(),
+                owner == null ? null : owner.domain(),
+                owner == null ? null : owner.name(),
+                owner == null ? null : owner.column());
+    }
+
     private static AttributeView attributeView(Index index, Attribute attribute) {
         List<CodeView> codes = attribute.codeList() == null ? List.of() : index.codes.values().stream()
                 .filter(code -> attribute.codeList().equals(code.codeList()))
-                .map(code -> new CodeView(code.name(), code.codeList(), code.value(), code.labelZh(), code.aliases()))
+                .map(code -> codeView(index, code))
                 .toList();
         return new AttributeView(attribute.name(), attribute.labelZh(), attribute.aliases(), attribute.comment(),
                 attribute.domain(), attribute.column(), attribute.datatype(), attribute.unit(), attribute.identifier(),
@@ -500,6 +556,17 @@ public class OntologyTools {
             relations = byName(snapshot.relations(), Relation::name);
             defined = byName(snapshot.definedConcepts(), DefinedConcept::name);
             codes = byName(snapshot.codes(), Code::name);
+        }
+
+        /** 码值集合只属于一个概念的一个属性（由本体仓库保证）。 */
+        Attribute codeOwner(String codeList) {
+            if (codeList == null) {
+                return null;
+            }
+            return attributes.values().stream()
+                    .filter(attribute -> codeList.equals(attribute.codeList()))
+                    .findFirst()
+                    .orElse(null);
         }
 
         String kindOf(String name) {
@@ -567,7 +634,16 @@ public class OntologyTools {
     public record EntityHit(String name, String kind, String labelZh, String matchedText, String matchedBy, double score) {
     }
 
-    public record CodeView(String name, String codeList, String value, String labelZh, List<String> aliases) {
+    /** concept/attribute/column 是这个码值唯一所属的概念及其码值列，生成 SQL 时只能用在这一列上。 */
+    public record CodeView(
+            String name,
+            String codeList,
+            String value,
+            String labelZh,
+            List<String> aliases,
+            String concept,
+            String attribute,
+            String column) {
     }
 
     public record AttributeView(

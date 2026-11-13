@@ -63,6 +63,9 @@ public final class TrinoCatalogFactory {
         String url = record.getUrl() != null && !record.getUrl().isBlank()
                 ? record.getUrl()
                 : jdbcUrl(connector, record.getHost(), port, database);
+        if ("mysql".equals(connector)) {
+            url = withoutDatabase(url);
+        }
         StringBuilder text = new StringBuilder();
         text.append("connector.name=").append(connector).append('\n');
         text.append("connection-url=").append(url).append('\n');
@@ -80,8 +83,22 @@ public final class TrinoCatalogFactory {
         return switch (connector) {
             case "postgresql" -> "jdbc:postgresql://" + safeHost + ":" + port + "/" + (database.isBlank() ? "postgres" : database);
             case "clickhouse" -> "jdbc:clickhouse://" + safeHost + ":" + port + (database.isBlank() ? "" : "/" + database);
-            default -> "jdbc:mysql://" + safeHost + ":" + port + (database.isBlank() ? "" : "/" + database);
+            default -> "jdbc:mysql://" + safeHost + ":" + port;
         };
+    }
+
+    /** Trino 的 MySQL 连接器不允许 URL 里带库名，库在 Trino 里是 schema；保留 ? 后面的参数。 */
+    static String withoutDatabase(String url) {
+        int hostStart = url.indexOf("//");
+        if (hostStart < 0) {
+            return url;
+        }
+        int query = url.indexOf('?', hostStart + 2);
+        int path = url.indexOf('/', hostStart + 2);
+        if (path < 0 || (query >= 0 && path > query)) {
+            return url;
+        }
+        return url.substring(0, path + 1) + (query < 0 ? "" : url.substring(query));
     }
 
     private static String renderElasticsearch(CatalogRecord record) {

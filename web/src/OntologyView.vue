@@ -1,6 +1,6 @@
 <script setup>
-import { computed, inject, onActivated, reactive, ref, watch } from 'vue'
-import { deleteEntity, draftOntology, getOntology, getOntologyTurtle, listCatalogs, listMetadata, llmStatus, saveEntity } from './api'
+import { computed, inject, nextTick, onActivated, reactive, ref, watch } from 'vue'
+import { deleteEntity, draftOntology, getOntology, getOntologyTurtle, listCatalogs, listMetadata, llmStatus, renameSubject, saveEntity } from './api'
 import OntologyGraph from './OntologyGraph.vue'
 
 const tables = ref([])
@@ -23,6 +23,7 @@ const COMMON = [
 ]
 const FIELDS = {
   concept: [
+    { key: 'subject', label: '主题域（只有同主题域的概念能关联）', type: 'subject' },
     { key: 'parent', label: '父概念', type: 'select', options: 'concepts' },
     { key: 'table', label: '映射表 catalog.schema.table', type: 'table' },
     { key: 'timeColumn', label: '时间列', type: 'column', of: 'table' },
@@ -33,7 +34,7 @@ const FIELDS = {
     { key: 'datatype', label: '数据类型', type: 'select', options: 'datatypes' },
     { key: 'column', label: '映射列', type: 'column', of: 'domain' },
     { key: 'unit', label: '单位', type: 'text' },
-    { key: 'codeList', label: '码表（如 AlertLevel）', type: 'text' },
+    { key: 'codeList', label: '码表（填任意名字即标为码值列，系统按表名_列名命名）', type: 'text' },
     { key: 'identifier', label: '标识列（主键）', type: 'check' }
   ],
   relation: [
@@ -46,7 +47,7 @@ const FIELDS = {
     { key: 'transitive', label: '传递性', type: 'check' }
   ],
   code: [
-    { key: 'codeList', label: '码表', type: 'text' },
+    { key: 'codeList', label: '码表（属性上已有的码表）', type: 'select', options: 'codeLists' },
     { key: 'value', label: '库中存储的值', type: 'text' }
   ],
   defined: [
@@ -58,7 +59,55 @@ const FIELDS = {
 
 const openLlmSettings = inject('openLlmSettings', () => {})
 const llmRevision = inject('llmRevision', ref(0))
-const snapshot = ref({ concepts: [], attributes: [], relations: [], codes: [], definedConcepts: [] })
+/** 全部主题域的本体。页面上的树、画布和下拉选项都只用当前主题域的 snapshot。 */
+const everything = ref({ concepts: [], attributes: [], relations: [], codes: [], definedConcepts: [] })
+/** 当前主题域；空串是"未分主题域" */
+const subject = ref('')
+const UNASSIGNED = '未分主题域'
+const subjectOf = (concept) => (concept.subject || '').trim()
+
+/** 只留一个主题域的概念，以及跟随它们的属性、关系、码值和派生概念。没有归属的实体算在未分主题域里。 */
+function scopeTo(data, name) {
+  const all = new Set(data.concepts.map((c) => c.name))
+  const mine = new Set(data.concepts.filter((c) => subjectOf(c) === name).map((c) => c.name))
+  const stray = (owner) => name === '' && !all.has(owner)
+  const attributes = data.attributes.filter((a) => mine.has(a.domain) || stray(a.domain))
+  const ownedLists = new Set(data.attributes.filter((a) => all.has(a.domain) && a.codeList).map((a) => a.codeList))
+  const lists = new Set(attributes.filter((a) => a.codeList).map((a) => a.codeList))
+  return {
+    concepts: data.concepts.filter((c) => mine.has(c.name)),
+    attributes,
+    relations: data.relations.filter((r) => (mine.has(r.domain) && mine.has(r.range))
+      || (name === '' && !all.has(r.domain) && !all.has(r.range))),
+    codes: data.codes.filter((c) => lists.has(c.codeList) || (name === '' && !ownedLists.has(c.codeList))),
+    definedConcepts: data.definedConcepts.filter((d) => mine.has(d.base) || stray(d.base))
+  }
+}
+
+const subjects = computed(() => {
+  const counts = new Map()
+  for (const concept of everything.value.concepts) {
+    counts.set(subjectOf(concept), (counts.get(subjectOf(concept)) || 0) + 1)
+  }
+  const named = [...counts.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b, 'zh'))
+  const list = named.map((name) => ({ name, label: name, count: counts.get(name) }))
+  const loose = scopeTo(everything.value, '')
+  if (counts.has('') || loose.attributes.length || loose.relations.length || loose.codes.length || loose.definedConcepts.length) {
+    list.push({ name: '', label: UNASSIGNED, count: counts.get('') || 0 })
+  }
+  return list
+})
+const subjectNames = computed(() => subjects.value.map((item) => item.name).filter(Boolean))
+const snapshot = computed(() => scopeTo(everything.value, subject.value))
+
+watch(subjects, (list) => {
+  if (list.length && !list.some((item) => item.name === subject.value)) {
+    subject.value = list[0].name
+  }
+}, { immediate: true })
+watch(subject, () => {
+  selected.value = null
+})
 const query = ref('')
 const selected = ref(null)
 const form = reactive({})
@@ -73,6 +122,8 @@ const pendingDelete = ref(null)
 const draftTables = ref([])
 const draftQuery = ref('')
 const draftNote = ref('')
+const draftSubject = ref('')
+const renaming = ref(null)
 const drafting = ref(false)
 const draftResult = ref(null)
 const draftError = ref('')
@@ -105,6 +156,20 @@ const draftCandidates = computed(() => {
   const list = q ? draftable.value.filter((t) => qualified(t).toLowerCase().includes(q)) : draftable.value
   return list.slice(0, 200)
 })
+/** 表已经属于哪个主题域的哪个概念：一张表只能属于一个主题域 */
+const tableOwner = computed(() => {
+  const map = {}
+  for (const concept of everything.value.concepts) {
+    if (concept.table) {
+      map[concept.table.toLowerCase()] = { subject: subjectOf(concept), concept: concept.name }
+    }
+  }
+  return map
+})
+function takenElsewhere(name) {
+  const owner = tableOwner.value[name.toLowerCase()]
+  return owner && owner.subject !== draftSubject.value.trim() ? owner : null
+}
 const columnsByTable = computed(() => {
   const map = {}
   for (const t of tables.value) {
@@ -115,16 +180,197 @@ const columnsByTable = computed(() => {
 const conceptNames = computed(() => snapshot.value.concepts.map((c) => c.name))
 const attributeNames = computed(() => snapshot.value.attributes.map((a) => a.name))
 
-const groups = computed(() => {
+const openNodes = ref(new Set())
+
+function groupBy(items, key) {
+  const map = new Map()
+  for (const item of items || []) {
+    const k = key(item)
+    if (!map.has(k)) {
+      map.set(k, [])
+    }
+    map.get(k).push(item)
+  }
+  return map
+}
+
+function toggleNode(key) {
+  const next = new Set(openNodes.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  openNodes.value = next
+}
+
+/** 概念下挂属性、关系、派生概念和子概念，属性下挂码值；挂不上的放进"未归属"。 */
+const tree = computed(() => {
+  const s = snapshot.value
   const q = query.value.trim().toLowerCase()
-  return KINDS.map((kind) => ({
-    ...kind,
-    items: snapshot.value[kind.list].filter((item) => !q
-      || item.name.toLowerCase().includes(q)
-      || (item.labelZh || '').includes(q)
-      || (item.aliases || []).some((a) => a.includes(q)))
-  }))
+  const hit = (item) => !q
+    || item.name.toLowerCase().includes(q)
+    || (item.labelZh || '').toLowerCase().includes(q)
+    || (item.aliases || []).some((a) => a.toLowerCase().includes(q))
+    || (item.value != null && String(item.value).toLowerCase() === q)
+  const conceptSet = new Set(s.concepts.map((c) => c.name))
+  const attrsOf = groupBy(s.attributes, (a) => a.domain)
+  const codesOf = groupBy(s.codes, (c) => c.codeList)
+  const outOf = groupBy(s.relations, (r) => r.domain)
+  const inOf = groupBy(s.relations, (r) => r.range)
+  const definedOf = groupBy(s.definedConcepts, (d) => d.base)
+  const childrenOf = groupBy(s.concepts.filter((c) => c.parent && conceptSet.has(c.parent)), (c) => c.parent)
+  const codesFor = (attribute) => (attribute.codeList ? codesOf.get(attribute.codeList) || [] : [])
+  const isOpen = (key) => !!q || openNodes.value.has(key)
+
+  const memo = new Map()
+  const conceptHit = (concept) => {
+    if (!memo.has(concept.name)) {
+      memo.set(concept.name, false)
+      memo.set(concept.name, hit(concept)
+        || (attrsOf.get(concept.name) || []).some((a) => hit(a) || codesFor(a).some(hit))
+        || (outOf.get(concept.name) || []).some(hit)
+        || (definedOf.get(concept.name) || []).some(hit)
+        || (childrenOf.get(concept.name) || []).some(conceptHit))
+    }
+    return memo.get(concept.name)
+  }
+
+  const rows = []
+  const visit = (concept, depth) => {
+    if (q && !conceptHit(concept)) {
+      return
+    }
+    const key = `c:${concept.name}`
+    const attrs = attrsOf.get(concept.name) || []
+    const relations = [
+      ...(outOf.get(concept.name) || []).map((r) => ({ r, out: true })),
+      ...(inOf.get(concept.name) || []).filter((r) => r.domain !== concept.name).map((r) => ({ r, out: false }))
+    ]
+    const defined = definedOf.get(concept.name) || []
+    const children = childrenOf.get(concept.name) || []
+    rows.push({ type: 'item', kind: 'concept', key, depth, item: concept, toggle: true, open: isOpen(key) })
+    if (!isOpen(key)) {
+      return
+    }
+    const all = !q || hit(concept)
+    const shownAttrs = all ? attrs : attrs.filter((a) => hit(a) || codesFor(a).some(hit))
+    if (!q || shownAttrs.length) {
+      rows.push({ type: 'section', key: `${key}:attrs`, depth: depth + 1, label: '属性', count: attrs.length,
+        add: { kind: 'attribute', preset: { domain: concept.name } } })
+    }
+    for (const attribute of shownAttrs) {
+      const codes = codesFor(attribute)
+      const akey = `a:${attribute.name}`
+      const aOpen = codes.length > 0 && (openNodes.value.has(akey) || (!!q && codes.some(hit) && !hit(attribute)))
+      rows.push({ type: 'item', kind: 'attribute', key: akey, depth: depth + 2, item: attribute,
+        toggle: codes.length > 0, open: aOpen, count: codes.length,
+        add: attribute.codeList ? { kind: 'code', preset: { codeList: attribute.codeList } } : null })
+      if (aOpen) {
+        const shownCodes = all || hit(attribute) ? codes : codes.filter(hit)
+        for (const code of shownCodes) {
+          rows.push({ type: 'item', kind: 'code', key: `k:${code.name}`, depth: depth + 3, item: code })
+        }
+      }
+    }
+    const shownRelations = all ? relations : relations.filter(({ r }) => hit(r))
+    if (!q || shownRelations.length) {
+      rows.push({ type: 'section', key: `${key}:rels`, depth: depth + 1, label: '关系', count: relations.length,
+        add: { kind: 'relation', preset: { domain: concept.name } } })
+    }
+    for (const { r, out } of shownRelations) {
+      rows.push({ type: 'item', kind: 'relation', key: `r:${concept.name}:${r.name}`, depth: depth + 2, item: r, out })
+    }
+    const shownDefined = all ? defined : defined.filter(hit)
+    if (shownDefined.length) {
+      rows.push({ type: 'section', key: `${key}:defs`, depth: depth + 1, label: '派生概念', count: defined.length,
+        add: { kind: 'defined', preset: { base: concept.name } } })
+      for (const item of shownDefined) {
+        rows.push({ type: 'item', kind: 'defined', key: `d:${item.name}`, depth: depth + 2, item })
+      }
+    }
+    if (children.length) {
+      rows.push({ type: 'section', key: `${key}:kids`, depth: depth + 1, label: '子概念', count: children.length,
+        add: { kind: 'concept', preset: { parent: concept.name } } })
+      for (const child of children) {
+        visit(child, depth + 2)
+      }
+    }
+  }
+  s.concepts.filter((c) => !c.parent || !conceptSet.has(c.parent)).forEach((c) => visit(c, 0))
+
+  const ownedLists = new Set(s.attributes.filter((a) => conceptSet.has(a.domain) && a.codeList).map((a) => a.codeList))
+  const orphans = [
+    ...s.attributes.filter((a) => !conceptSet.has(a.domain)).map((item) => ({ kind: 'attribute', item })),
+    ...s.relations.filter((r) => !conceptSet.has(r.domain) && !conceptSet.has(r.range)).map((item) => ({ kind: 'relation', item, out: true })),
+    ...s.codes.filter((c) => !ownedLists.has(c.codeList)).map((item) => ({ kind: 'code', item })),
+    ...s.definedConcepts.filter((d) => !conceptSet.has(d.base)).map((item) => ({ kind: 'defined', item }))
+  ].filter(({ item }) => hit(item))
+  if (orphans.length) {
+    rows.push({ type: 'section', key: 'orphans', depth: 0, label: '未归属（所属概念已不存在）', count: orphans.length, warn: true })
+    for (const { kind, item, out } of orphans) {
+      rows.push({ type: 'item', kind, key: `o:${kind}:${item.name}`, depth: 1, item, out })
+    }
+  }
+  return rows
 })
+
+const KIND_TAG = { concept: '概念', attribute: '属性', code: '码值', relation: '关系', defined: '派生' }
+
+function rowSub(row) {
+  const item = row.item
+  switch (row.kind) {
+    case 'concept': return item.table || '未映射表'
+    case 'attribute': return [item.column || '未映射列', item.datatype, item.identifier ? '主键' : ''].filter(Boolean).join('  ')
+    case 'code': return `取值 ${item.value}`
+    case 'relation': {
+      const other = row.out ? item.range : item.domain
+      const label = snapshot.value.concepts.find((c) => c.name === other)?.labelZh || other || '?'
+      const join = item.joinFrom && item.joinTo ? `  ${item.joinFrom} = ${item.joinTo}` : ''
+      return `${row.out ? '→' : '←'} ${label}${join}`
+    }
+    default: return (item.conditions || []).map((c) => `${c.attribute} ${c.operator} ${c.value}`).join(' 且 ') || item.definitionText || ''
+  }
+}
+
+function openRow(row) {
+  open(KINDS.find((kind) => kind.key === row.kind), row.item)
+}
+
+function kindOf(name) {
+  return KINDS.find((kind) => snapshot.value[kind.list].some((item) => item.name === name))
+}
+
+/** 选中实体时把它在树里的上级都展开。 */
+function revealInTree(kindKey, item) {
+  const s = snapshot.value
+  const next = new Set(openNodes.value)
+  const addConcept = (name) => {
+    let current = s.concepts.find((c) => c.name === name)
+    const seen = new Set()
+    while (current && !seen.has(current.name)) {
+      seen.add(current.name)
+      next.add(`c:${current.name}`)
+      current = s.concepts.find((c) => c.name === current.parent)
+    }
+  }
+  if (kindKey === 'concept') {
+    addConcept(item.parent)
+  } else if (kindKey === 'attribute') {
+    addConcept(item.domain)
+  } else if (kindKey === 'relation') {
+    addConcept(item.domain)
+  } else if (kindKey === 'defined') {
+    addConcept(item.base)
+  } else if (kindKey === 'code') {
+    const owner = s.attributes.find((a) => a.codeList && a.codeList === item.codeList)
+    if (owner) {
+      addConcept(owner.domain)
+      next.add(`a:${owner.name}`)
+    }
+  }
+  openNodes.value = next
+}
 const fields = computed(() => (selected.value ? [...COMMON, ...FIELDS[selected.value.kind]] : []))
 
 watch(llmRevision, refreshLlm)
@@ -152,7 +398,7 @@ async function loadSources() {
 
 async function load() {
   try {
-    snapshot.value = await getOntology()
+    everything.value = await getOntology()
     error.value = ''
   } catch (e) {
     error.value = e.message
@@ -162,7 +408,7 @@ async function load() {
 function blank(kind) {
   const base = { name: '', labelZh: '', labelEn: '', aliases: [], comment: '' }
   const extra = {
-    concept: { parent: '', table: '', timeColumn: '', largeTable: false },
+    concept: { subject: '', parent: '', table: '', timeColumn: '', largeTable: false },
     attribute: { domain: '', datatype: 'string', column: '', unit: '', identifier: false, codeList: '' },
     relation: { domain: '', range: '', joinFrom: '', joinTo: '', inverse: '', transitive: false, functional: false },
     code: { codeList: '', value: '' },
@@ -187,15 +433,23 @@ function open(kind, item) {
   fill({ ...blank(kind.key), ...item })
 }
 
-function create(kind) {
+function create(kind, preset = {}) {
   selected.value = { kind: kind.key, label: kind.label }
   isNew.value = true
-  fill(blank(kind.key))
+  fill({ ...blank(kind.key), ...(kind.key === 'concept' ? { subject: subject.value } : {}), ...preset })
+}
+
+function createKind(key, preset) {
+  create(KINDS.find((kind) => kind.key === key), preset)
 }
 
 function options(field) {
   if (field.options === 'datatypes') {
     return DATATYPES
+  }
+  if (field.options === 'codeLists') {
+    const lists = (snapshot.value?.attributes || []).map((attribute) => attribute.codeList).filter(Boolean)
+    return [...new Set(lists)].sort()
   }
   return conceptNames.value.filter((name) => name !== form.name)
 }
@@ -226,7 +480,14 @@ async function save() {
     if (selected.value.kind === 'defined') {
       body.conditions = (form.conditions || []).filter((c) => c.attribute && c.value !== '')
     }
-    snapshot.value = await saveEntity(selected.value.kind, form.name, body)
+    const kind = selected.value
+    const name = form.name
+    everything.value = await saveEntity(kind.kind, name, body)
+    if (kind.kind === 'concept' && (body.subject || '') !== subject.value) {
+      subject.value = body.subject || ''
+      await nextTick()
+      onPick({ kind: 'concept', name })
+    }
     isNew.value = false
     message.value = '已保存'
   } catch (e) {
@@ -237,11 +498,12 @@ async function save() {
 }
 
 function removeNamed(name) {
-  const kind = groups.value.find((group) => group.items.some((item) => item.name === name))
-  pendingDelete.value = {
-    name,
-    note: kind?.key === 'concept' ? '它的属性、派生概念和码值会一起删除。' : ''
+  const kind = kindOf(name)
+  const notes = {
+    concept: '它的属性、码值、关系和派生概念会一起删除。',
+    attribute: '它独有的码值会一起删除。'
   }
+  pendingDelete.value = { name, note: notes[kind?.key] || '' }
 }
 
 async function confirmDelete() {
@@ -251,7 +513,7 @@ async function confirmDelete() {
   }
   pendingDelete.value = null
   try {
-    snapshot.value = await deleteEntity(name)
+    everything.value = await deleteEntity(name)
     fresh.value = fresh.value.filter((item) => item !== name)
     if (form.name === name) {
       selected.value = null
@@ -268,6 +530,9 @@ function remove() {
 
 function openDraft() {
   showDraft.value = true
+  if (!draftSubject.value.trim()) {
+    draftSubject.value = subject.value
+  }
   draftResult.value = null
   draftError.value = ''
   draftLog.value = []
@@ -316,10 +581,11 @@ async function runDraft() {
   draftClockTimer = window.setInterval(() => {
     draftClock.value = Date.now()
   }, 1000)
-  const before = entityNames(snapshot.value)
+  const before = entityNames(everything.value)
+  const target = draftSubject.value.trim()
   let failed = ''
   try {
-    await draftOntology({ tables: draftTables.value, instructions: draftNote.value || null }, (event, data) => {
+    await draftOntology({ tables: draftTables.value, instructions: draftNote.value || null, subject: target }, (event, data) => {
       if (event === 'phase') {
         draftStep.value = data.phase
         draftDetail.value = data.message
@@ -340,8 +606,13 @@ async function runDraft() {
       throw new Error(failed)
     }
     await load()
-    fresh.value = [...entityNames(snapshot.value)].filter((name) => !before.has(name))
+    subject.value = target
+    fresh.value = [...entityNames(everything.value)].filter((name) => !before.has(name))
   } catch (e) {
+    await load()
+    if (subjects.value.some((item) => item.name === target)) {
+      subject.value = target
+    }
     draftError.value = e.message
     if (draftStep.value !== 'done') {
       draftStep.value = ''
@@ -360,8 +631,38 @@ function onPick(target) {
   }
 }
 
+watch(selected, () => {
+  if (selected.value && !isNew.value) {
+    const kind = KINDS.find((item) => item.key === selected.value.kind)
+    const entity = kind && snapshot.value[kind.list].find((item) => item.name === form.name)
+    if (entity) {
+      revealInTree(kind.key, entity)
+    }
+  }
+})
+
 function finishDraft() {
   showDraft.value = false
+}
+
+function openRename() {
+  renaming.value = { from: subject.value, to: subject.value, error: '' }
+}
+
+async function confirmRename() {
+  const { from, to } = renaming.value
+  const target = to.trim()
+  if (!target || target === from) {
+    renaming.value = null
+    return
+  }
+  try {
+    everything.value = await renameSubject(from, target)
+    subject.value = target
+    renaming.value = null
+  } catch (e) {
+    renaming.value.error = e.message
+  }
 }
 
 async function showTurtle() {
@@ -380,16 +681,6 @@ function downloadTurtle() {
   link.click()
   URL.revokeObjectURL(url)
 }
-
-function subtitle(kind, item) {
-  switch (kind) {
-    case 'concept': return item.table || '未映射表'
-    case 'attribute': return `${item.domain || '?'}.${item.column || '—'}`
-    case 'relation': return `${item.domain} → ${item.range}`
-    case 'code': return `${item.codeList} = ${item.value}`
-    default: return item.base
-  }
-}
 </script>
 
 <template>
@@ -398,7 +689,8 @@ function subtitle(kind, item) {
       <h1>本体建模</h1>
       <div class="head-side">
         <span class="head-note">
-          概念 {{ snapshot.concepts.length }} · 属性 {{ snapshot.attributes.length }} · 关系 {{ snapshot.relations.length }}
+          <template v-if="subjects.length">{{ subject || UNASSIGNED }}：</template>
+          概念 {{ snapshot.concepts.length }}，属性 {{ snapshot.attributes.length }}，码值 {{ snapshot.codes.length }}，关系 {{ snapshot.relations.length }}
         </span>
         <button type="button" @click="showTurtle">导出 Turtle</button>
         <button v-if="llm && !llm.configured" type="button" @click="openLlmSettings">配置大模型</button>
@@ -406,28 +698,78 @@ function subtitle(kind, item) {
       </div>
     </header>
 
+    <nav v-if="subjects.length" class="subjects" aria-label="主题域">
+      <span class="subjects-title">主题域</span>
+      <button
+        v-for="item in subjects"
+        :key="item.name"
+        type="button"
+        class="subject-tab"
+        :class="{ on: item.name === subject }"
+        :aria-pressed="item.name === subject"
+        @click="subject = item.name"
+      >{{ item.label }} <em>{{ item.count }}</em></button>
+      <button v-if="subject" class="link" type="button" @click="openRename">重命名</button>
+      <span class="subjects-note">只有同一主题域里的概念能建立关系、共用码值和派生概念</span>
+    </nav>
+
     <div class="onto-body" :class="{ editing: !!selected }">
     <aside class="list">
       <div class="list-top">
-        <input v-model="query" type="search" placeholder="搜索名称 / 中文名 / 别名" />
+        <input v-model="query" type="search" placeholder="搜索名称、中文名、别名或码值" />
+        <div class="list-actions">
+          <button type="button" @click="createKind('concept')">＋ 概念</button>
+          <button type="button" @click="createKind('defined')">＋ 派生概念</button>
+        </div>
       </div>
       <p v-if="error && !selected" class="err pad">{{ error }}</p>
-      <div v-for="group in groups" :key="group.key" class="group">
-        <div class="group-head">
-          <span>{{ group.label }} <em>{{ group.items.length }}</em></span>
-          <button class="icon sm" type="button" :title="`新建${group.label}`" @click="create(group)">＋</button>
-        </div>
-        <div v-for="item in group.items" :key="item.name" class="item-row">
-          <button
-            class="item"
-            :class="{ active: selected && !isNew && form.name === item.name }"
-            type="button"
-            @click="open(group, item)"
-          >
-            <span>{{ item.labelZh || item.name }} <em>{{ item.name }}</em></span>
-            <small>{{ subtitle(group.key, item) }}</small>
-          </button>
-          <button class="icon sm danger" type="button" title="删除" @click="removeNamed(item.name)">✕</button>
+      <p v-if="!tree.length" class="hint pad">{{ query ? '没有匹配的实体' : subjects.length ? '这个主题域还是空的，先起草或新建概念' : '本体还是空的，先起草或新建概念' }}</p>
+      <div class="tree">
+        <div
+          v-for="row in tree"
+          :key="row.key"
+          class="tree-row"
+          :class="[row.type, row.kind, { active: row.type === 'item' && selected && !isNew && form.name === row.item.name, warn: row.warn }]"
+          :style="{ paddingLeft: `${6 + row.depth * 14}px` }"
+        >
+          <template v-if="row.type === 'section'">
+            <span class="caret-gap" />
+            <span class="section-label">{{ row.label }} <em>{{ row.count }}</em></span>
+            <button
+              v-if="row.add"
+              class="icon sm"
+              type="button"
+              :title="`新建${KIND_TAG[row.add.kind]}`"
+              @click="createKind(row.add.kind, row.add.preset)"
+            >＋</button>
+          </template>
+          <template v-else>
+            <button
+              v-if="row.toggle"
+              class="caret"
+              type="button"
+              :aria-expanded="row.open"
+              :title="row.open ? '收起' : '展开'"
+              @click="toggleNode(row.key)"
+            >{{ row.open ? '▾' : '▸' }}</button>
+            <span v-else class="caret-gap" />
+            <button class="node-btn" type="button" @click="openRow(row)">
+              <span class="node-line">
+                <i class="tag" :class="row.kind">{{ KIND_TAG[row.kind] }}</i>
+                <span class="node-label">{{ row.kind === 'code' ? (row.item.labelZh || row.item.value) : (row.item.labelZh || row.item.name) }}</span>
+                <em v-if="row.count" class="count">{{ row.count }}</em>
+              </span>
+              <small>{{ rowSub(row) }}</small>
+            </button>
+            <button
+              v-if="row.add"
+              class="icon sm ghost"
+              type="button"
+              :title="`新建${KIND_TAG[row.add.kind]}`"
+              @click="createKind(row.add.kind, row.add.preset)"
+            >＋</button>
+            <button class="icon sm danger ghost" type="button" title="删除" @click="removeNamed(row.item.name)">✕</button>
+          </template>
         </div>
       </div>
     </aside>
@@ -438,8 +780,8 @@ function subtitle(kind, item) {
         <h2>从数据表起草本体</h2>
         <ol>
           <li>
-            <b>勾选表</b>
-            <span>用已经采集的 MySQL、ClickHouse、ES 表。Kafka 暂不映射。</span>
+            <b>定主题域，勾选表</b>
+            <span>一次起草的表归到同一个主题域。用已经采集的 MySQL、ClickHouse、ES 表，Kafka 暂不映射。</span>
           </li>
           <li>
             <b>读结构和样例</b>
@@ -479,6 +821,10 @@ function subtitle(kind, item) {
               <option v-if="field.options !== 'datatypes'" value="">（无）</option>
               <option v-for="opt in options(field)" :key="opt" :value="opt">{{ opt }}</option>
             </select>
+          </label>
+          <label v-else-if="field.type === 'subject'">
+            {{ field.label }}
+            <input v-model="form[field.key]" list="onto-subjects" placeholder="例如 安全日志；留空为未分主题域" />
           </label>
           <label v-else-if="field.type === 'table'">
             {{ field.label }}
@@ -522,6 +868,9 @@ function subtitle(kind, item) {
           <button class="primary" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button>
         </div>
     </form>
+    <datalist id="onto-subjects">
+      <option v-for="name in subjectNames" :key="name" :value="name" />
+    </datalist>
     <datalist id="onto-tables">
       <option v-for="t in draftable" :key="qualified(t)" :value="qualified(t)" />
     </datalist>
@@ -538,6 +887,22 @@ function subtitle(kind, item) {
       </div>
     </div>
 
+    <div v-if="renaming" class="mask" @click.self="renaming = null">
+      <form class="dialog confirm" @submit.prevent="confirmRename">
+        <h3>重命名主题域</h3>
+        <label>
+          新名字
+          <input v-model="renaming.to" required />
+        </label>
+        <p class="hint">填成另一个已有主题域的名字，两个主题域会合并。</p>
+        <p v-if="renaming.error" class="err">{{ renaming.error }}</p>
+        <div class="actions">
+          <button type="button" @click="renaming = null">取消</button>
+          <button class="primary" type="submit">保存</button>
+        </div>
+      </form>
+    </div>
+
     <div v-if="showDraft" class="mask" @click.self="!drafting && (showDraft = false)">
       <div class="dialog draft">
         <h3>大模型起草</h3>
@@ -545,11 +910,22 @@ function subtitle(kind, item) {
           <li v-for="step in DRAFT_STEPS" :key="step.key" :class="{ on: draftReached(step.key) }">{{ step.label }}</li>
         </ol>
         <template v-if="!drafting && !draftLog.length">
+          <label>
+            主题域（必填）
+            <input v-model="draftSubject" list="onto-subjects" placeholder="选一个已有的主题域，或输入新名字，例如 安全日志" />
+          </label>
+          <p class="hint">本次勾选的表都归到这个主题域，起草时只会和这个主题域里已有的概念建立关系。</p>
           <input v-model="draftQuery" type="search" placeholder="过滤表名" />
           <div class="picker">
-            <label v-for="t in draftCandidates" :key="qualified(t)" class="check">
-              <input type="checkbox" :checked="draftTables.includes(qualified(t))" @change="toggleDraftTable(qualified(t))" />
+            <label v-for="t in draftCandidates" :key="qualified(t)" class="check" :class="{ off: takenElsewhere(qualified(t)) }">
+              <input
+                type="checkbox"
+                :checked="draftTables.includes(qualified(t))"
+                :disabled="!!takenElsewhere(qualified(t)) && !draftTables.includes(qualified(t))"
+                @change="toggleDraftTable(qualified(t))"
+              />
               {{ qualified(t) }} <em>{{ (t.columns || []).length }} 列</em>
+              <em v-if="takenElsewhere(qualified(t))" class="taken">已在{{ takenElsewhere(qualified(t)).subject ? `主题域 ${takenElsewhere(qualified(t)).subject}` : UNASSIGNED }}</em>
             </label>
             <p v-if="!draftCandidates.length" class="hint">没有可选的表，请先在左侧数据源中采集元数据。</p>
           </div>
@@ -560,7 +936,7 @@ function subtitle(kind, item) {
           </label>
           <p class="hint">开始后会逐步列出每一段：读了哪些表、写入了几个概念和属性、哪一段被跳过。</p>
         </template>
-        <p v-else class="hint">已选 {{ draftTables.length }} 张：{{ draftTables.join('，') }}</p>
+        <p v-else class="hint">主题域 {{ draftSubject.trim() }}，已选 {{ draftTables.length }} 张：{{ draftTables.join('，') }}</p>
         <ol v-if="draftLog.length" class="draft-log">
           <li v-for="(line, index) in draftLog" :key="index" :class="line.status">
             <span>{{ line.text }}</span>
@@ -577,7 +953,7 @@ function subtitle(kind, item) {
         <div class="actions">
           <button v-if="!drafting && draftLog.length" type="button" @click="openDraft">重新选择表</button>
           <button type="button" :disabled="drafting" @click="finishDraft">{{ draftStep === 'done' ? '在图中查看' : '关闭' }}</button>
-          <button class="primary" type="button" :disabled="drafting || !draftTables.length" @click="runDraft">
+          <button class="primary" type="button" :disabled="drafting || !draftTables.length || !draftSubject.trim()" @click="runDraft">
             {{ drafting ? `${draftDetail || '起草中…'} · ${draftElapsed}s` : '开始起草' }}
           </button>
         </div>
@@ -607,13 +983,61 @@ function subtitle(kind, item) {
 
 .onto-body {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 300px 1fr;
   flex: 1;
   min-height: 0;
 }
 
 .onto-body.editing {
-  grid-template-columns: 240px 1fr 360px;
+  grid-template-columns: 280px 1fr 360px;
+}
+
+.subjects {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.subjects-title {
+  margin-right: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.subject-tab {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.subject-tab.on {
+  border-color: var(--accent);
+  background: var(--panel-2);
+  font-weight: 650;
+}
+
+.subject-tab em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.subjects-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.picker .check.off {
+  color: var(--muted);
+}
+
+.picker .taken {
+  color: var(--warn);
 }
 
 .canvas {
@@ -667,7 +1091,7 @@ function subtitle(kind, item) {
 
 .draft-note {
   position: absolute;
-  top: 12px;
+  top: 52px;
   left: 12px;
   right: 12px;
   width: fit-content;
@@ -730,43 +1154,96 @@ function subtitle(kind, item) {
   padding: 0 12px;
 }
 
-.group-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px 4px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.group-head em,
-.item em,
-.picker em {
+.picker em,
+.section-label em,
+.count {
   font-style: normal;
   font-weight: 400;
   color: var(--muted);
   font-size: 11px;
 }
 
-.item-row {
+.list-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.list-actions button {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.tree {
+  display: flex;
+  flex-direction: column;
+}
+
+.tree-row {
   display: flex;
   align-items: center;
+  min-height: 26px;
+  padding-right: 6px;
 }
 
-.item-row > .icon {
+.tree-row:hover {
+  background: var(--panel-2);
+}
+
+.tree-row.active {
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.tree-row.section {
+  min-height: 24px;
+  margin-top: 2px;
+}
+
+.tree-row.section:hover {
+  background: transparent;
+}
+
+.section-label {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tree-row.warn .section-label {
+  color: var(--warn);
+}
+
+.caret,
+.caret-gap {
   flex: none;
-  margin-right: 6px;
+  width: 18px;
+  height: 18px;
 }
 
-.item {
+.caret {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.caret:hover {
+  color: var(--text);
+}
+
+.node-btn {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: 1px;
   flex: 1;
   min-width: 0;
-  padding: 6px 4px 6px 20px;
+  padding: 4px 4px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -774,19 +1251,65 @@ function subtitle(kind, item) {
   font-size: 13px;
 }
 
-.item:hover {
-  background: var(--panel-2);
+.node-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
 }
 
-.item.active {
-  background: var(--panel-2);
-  box-shadow: inset 2px 0 0 var(--accent);
+.node-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.item small {
+.tree-row.concept .node-label {
+  font-weight: 650;
+}
+
+.node-btn small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
   font-size: 11px;
-  word-break: break-all;
+}
+
+.tag {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 15px;
+}
+
+.tag.concept {
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+}
+
+.tag.relation {
+  border-color: var(--accent-2);
+}
+
+.tag.defined {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.tree-row .ghost {
+  flex: none;
+  visibility: hidden;
+}
+
+.tree-row:hover .ghost,
+.tree-row.active .ghost {
+  visibility: visible;
 }
 
 .entity {
@@ -824,12 +1347,22 @@ function subtitle(kind, item) {
 .draft {
   width: min(680px, 100%);
   max-height: 88vh;
+  overflow: auto;
+}
+
+.draft > * {
+  flex-shrink: 0;
+}
+
+.draft .hint {
+  margin: 0;
 }
 
 .picker {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-height: 120px;
   max-height: 34vh;
   overflow: auto;
   padding: 8px;

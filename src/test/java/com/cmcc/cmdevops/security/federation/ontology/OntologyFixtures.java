@@ -11,6 +11,9 @@ import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Relation;
 
 public final class OntologyFixtures {
 
+    /** 告警表 level 列的码值集合，名字由表和列决定。 */
+    public static final String ALERT_LEVEL = OntologyRepository.codeListName("ck81.pangu.alert", "level");
+
     private OntologyFixtures() {
     }
 
@@ -31,8 +34,8 @@ public final class OntologyFixtures {
         repository.saveAttribute(new Attribute("occurTime", "发生时间", "occur time", List.of(), null,
                 "Alert", "dateTime", "occurTime", null, false, null));
 
-        repository.saveCode(new Code("AlertLevel_3", "AlertLevel", "3", "高危", "high", List.of("严重"), null));
-        repository.saveCode(new Code("AlertLevel_2", "AlertLevel", "2", "中危", "medium", List.of(), null));
+        repository.saveCode(new Code("AlertLevel_3", ALERT_LEVEL, "3", "高危", "high", List.of("严重"), null));
+        repository.saveCode(new Code("AlertLevel_2", ALERT_LEVEL, "2", "中危", "medium", List.of(), null));
 
         repository.saveRelation(new Relation("affectsAsset", "影响资产", "affects asset", List.of("受影响资产"), null,
                 "Alert", "Asset", "assetId", "id", "hasAlert", false, true));
