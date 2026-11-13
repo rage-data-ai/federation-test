@@ -19,9 +19,9 @@ public final class OntologyFixtures {
 
     public static void alertAsset(OntologyRepository repository) {
         repository.saveConcept(new Concept("Asset", "资产", "Asset", List.of("主机", "设备"), "被纳管的 IT 资产",
-                null, "mysql70.tsoc.asset", null, false));
+                null, "mysql70.tsoc.asset", null, false, null, true));
         repository.saveConcept(new Concept("Alert", "告警", "Alert", List.of("安全告警", "告警事件"), "归并后的安全告警",
-                null, "ck81.pangu.alert", "occurTime", true));
+                null, "ck81.pangu.alert", "occurTime", true, null, true));
 
         repository.saveAttribute(new Attribute("assetName", "资产名称", "asset name", List.of(), null,
                 "Asset", "string", "name", null, false, null));
@@ -30,7 +30,7 @@ public final class OntologyFixtures {
         repository.saveAttribute(new Attribute("alertId", "告警编号", "alert id", List.of(), null,
                 "Alert", "string", "id", null, true, null));
         repository.saveAttribute(new Attribute("alertLevel", "告警级别", "alert level", List.of("危险级别", "严重程度"), null,
-                "Alert", "integer", "level", null, false, "AlertLevel"));
+                "Alert", "integer", "level", null, false, ALERT_LEVEL));
         repository.saveAttribute(new Attribute("occurTime", "发生时间", "occur time", List.of(), null,
                 "Alert", "dateTime", "occurTime", null, false, null));
 
@@ -42,8 +42,10 @@ public final class OntologyFixtures {
 
         repository.saveDefinedConcept(new DefinedConcept("HighRiskAlert", "高危告警", "high risk alert",
                 List.of("高风险告警"), "级别不低于 3 的告警", "Alert",
-                List.of(new Condition("alertLevel", ">=", "3")), null));
+                List.of(new Condition("alertLevel", ">=", "3")), null, null, true));
         repository.saveDefinedConcept(new DefinedConcept("CompromisedHost", "失陷主机", "compromised host",
-                List.of(), null, "Asset", List.of(), "近 24 小时高危告警数不少于 3 条的资产"));
+                List.of(), null, "Asset", List.of(), "近 24 小时高危告警数不少于 3 条的资产", null, false));
+        repository.saveDefinedConcept(new DefinedConcept("AlertCount", "告警数量", "alert count",
+                List.of("告警数", "条数"), "告警计数度量", "Alert", List.of(), null, "COUNT(*)", true));
     }
 }

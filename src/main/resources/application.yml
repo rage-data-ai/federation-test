@@ -12,13 +12,22 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus,metrics
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_PROBABILITY:1.0}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:}
 
 federation:
   trino:
-    url: jdbc:trino://localhost:8081
-    user: federation
-    password: ""
+    url: ${TRINO_JDBC_URL:jdbc:trino://localhost:8081}
+    user: ${TRINO_USER:federation}
+    password: ${TRINO_PASSWORD:}
     query-timeout-seconds: 120
     catalog-dir: docker/trino/catalog
     kafka-config-dir: docker/trino/kafka
@@ -27,11 +36,30 @@ federation:
     ttl-seconds: 30
     max-size: 256
   max-rows: 10000
-  ontology-store: data/tdb2
+  ontology-store: ${ONTOLOGY_STORE:data/tdb2}
   repository:
-    url: jdbc:mysql://192.168.19.70:3308/federal?sslMode=DISABLED&allowPublicKeyRetrieval=true&characterEncoding=utf8
-    username: ${FEDERAL_DB_USER:tsoc}
+    url: ${FEDERAL_DB_URL:}
+    username: ${FEDERAL_DB_USER:}
     password: ${FEDERAL_DB_PASSWORD:}
+  security:
+    enabled: ${FEDERATION_SECURITY_ENABLED:false}
+    tokens:
+      demo: ${FEDERATION_DEMO_TOKEN:demo-token}
+      reader: ${FEDERATION_READER_TOKEN:reader-token}
+    roles:
+      demo: QUERY,ADMIN
+      reader: QUERY
+    # 非空时按用户限制 catalog；示例：reader 仅 mysql_shop。默认空=不启用 ACL。
+    catalogs: {}
+    # 行级：reader: mysql_shop.public.orders:tenant_id = 'acme'
+    row-filters: {}
+    jwt:
+      issuer-uri: ${FEDERATION_JWT_ISSUER_URI:}
+      roles-claim: ${FEDERATION_JWT_ROLES_CLAIM:roles}
+  cors:
+    allowed-origins: ${FEDERATION_CORS_ORIGINS:http://localhost:5173,http://localhost:18080}
+  quota:
+    max-requests-per-minute: ${FEDERATION_QUOTA_PER_MINUTE:120}
   llm:
     protocol: ${LLM_PROTOCOL:openai}
     base-url: ${LLM_BASE_URL:}
@@ -42,7 +70,31 @@ federation:
     max-path-depth: 4
     sample-rows: 3
     result-preview-rows: 50
+    # 可选：OpenAI 兼容 embeddings（NIM）。空则本地哈希嵌入。
+    embed-endpoint: ${FEDERATION_ASK_EMBED_ENDPOINT:}
+    embed-api-key: ${FEDERATION_ASK_EMBED_API_KEY:}
+    embed-model: ${FEDERATION_ASK_EMBED_MODEL:}
+    embed-cache-dir: ${FEDERATION_ASK_EMBED_CACHE_DIR:}
+    # file | jdbc | both（默认 both：联邦库优先 + 落盘双写）
+    embed-store: ${FEDERATION_ASK_EMBED_STORE:both}
+    # 可选 pgvector；空则禁用并回退本地/联邦库术语索引
+    pgvector-url: ${FEDERATION_ASK_PGVECTOR_URL:}
+    pgvector-username: ${FEDERATION_ASK_PGVECTOR_USERNAME:}
+    pgvector-password: ${FEDERATION_ASK_PGVECTOR_PASSWORD:}
+    pgvector-dimensions: ${FEDERATION_ASK_PGVECTOR_DIMENSIONS:256}
+    # none | ivfflat | hnsw（默认）；建索引失败则精确扫描
+    pgvector-index: ${FEDERATION_ASK_PGVECTOR_INDEX:hnsw}
+    pgvector-ivfflat-lists: ${FEDERATION_ASK_PGVECTOR_IVFFLAT_LISTS:100}
+    pgvector-hnsw-m: ${FEDERATION_ASK_PGVECTOR_HNSW_M:16}
+    pgvector-hnsw-ef-construction: ${FEDERATION_ASK_PGVECTOR_HNSW_EF_CONSTRUCTION:64}
   kafka-mappings: {}
   vector:
     default-k: 10
-    milvus-uri: ""
+    milvus-uri: ${MILVUS_URI:}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+

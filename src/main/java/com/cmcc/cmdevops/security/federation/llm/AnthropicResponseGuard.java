@@ -1,6 +1,7 @@
 package com.cmcc.cmdevops.security.federation.llm;
 
 import java.time.Duration;
+import java.util.Objects;
 import java.util.ServiceLoader;
 
 import javax.net.ssl.SSLHandshakeException;
@@ -102,7 +103,7 @@ final class AnthropicResponseGuard {
 
     private static final class GuardedClientBuilder implements HttpClientBuilder {
 
-        private final HttpClientBuilder delegate = ServiceLoader.load(HttpClientBuilderFactory.class)
+        private HttpClientBuilder delegate = ServiceLoader.load(HttpClientBuilderFactory.class)
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("没有可用的 HTTP 客户端"))
                 .create();
@@ -114,7 +115,7 @@ final class AnthropicResponseGuard {
 
         @Override
         public HttpClientBuilder connectTimeout(Duration timeout) {
-            delegate.connectTimeout(timeout);
+            delegate = Objects.requireNonNull(delegate.connectTimeout(timeout), "connectTimeout");
             return this;
         }
 
@@ -125,7 +126,7 @@ final class AnthropicResponseGuard {
 
         @Override
         public HttpClientBuilder readTimeout(Duration timeout) {
-            delegate.readTimeout(timeout);
+            delegate = Objects.requireNonNull(delegate.readTimeout(timeout), "readTimeout");
             return this;
         }
 

@@ -24,15 +24,27 @@ public final class OntologyModel {
             String table,
             String timeColumn,
             boolean largeTable,
-            String subject) {
+            String subject,
+            boolean certified) {
 
         public Concept(String name, String labelZh, String labelEn, List<String> aliases, String comment,
                        String parent, String table, String timeColumn, boolean largeTable) {
-            this(name, labelZh, labelEn, aliases, comment, parent, table, timeColumn, largeTable, null);
+            this(name, labelZh, labelEn, aliases, comment, parent, table, timeColumn, largeTable, null, false);
+        }
+
+        public Concept(String name, String labelZh, String labelEn, List<String> aliases, String comment,
+                       String parent, String table, String timeColumn, boolean largeTable, String subject) {
+            this(name, labelZh, labelEn, aliases, comment, parent, table, timeColumn, largeTable, subject, false);
         }
 
         public Concept withSubject(String subject) {
-            return new Concept(name, labelZh, labelEn, aliases, comment, parent, table, timeColumn, largeTable, subject);
+            return new Concept(name, labelZh, labelEn, aliases, comment, parent, table, timeColumn, largeTable, subject,
+                    certified);
+        }
+
+        public Concept withCertified(boolean certified) {
+            return new Concept(name, labelZh, labelEn, aliases, comment, parent, table, timeColumn, largeTable, subject,
+                    certified);
         }
     }
 
@@ -87,7 +99,41 @@ public final class OntologyModel {
             String comment,
             String base,
             List<Condition> conditions,
-            String definitionText) {
+            String definitionText,
+            /** 可复用 SQL 表达式（对齐 Auto Ontology SQL attributes），如 COUNT(*) / SUM(amount)；非过滤条件 */
+            String sqlExpression,
+            boolean certified) {
+
+        /** 兼容旧调用：无度量表达式 */
+        public DefinedConcept(
+                String name,
+                String labelZh,
+                String labelEn,
+                List<String> aliases,
+                String comment,
+                String base,
+                List<Condition> conditions,
+                String definitionText) {
+            this(name, labelZh, labelEn, aliases, comment, base, conditions, definitionText, null, false);
+        }
+
+        public DefinedConcept(
+                String name,
+                String labelZh,
+                String labelEn,
+                List<String> aliases,
+                String comment,
+                String base,
+                List<Condition> conditions,
+                String definitionText,
+                String sqlExpression) {
+            this(name, labelZh, labelEn, aliases, comment, base, conditions, definitionText, sqlExpression, false);
+        }
+
+        public DefinedConcept withCertified(boolean certified) {
+            return new DefinedConcept(name, labelZh, labelEn, aliases, comment, base, conditions, definitionText,
+                    sqlExpression, certified);
+        }
     }
 
     public record Snapshot(

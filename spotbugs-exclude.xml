@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+  <!-- 生成代码 / 测试夹具噪声；主业务仍走 High 阈值门禁 -->
+  <Match>
+    <Class name="~.*\..*Test"/>
+  </Match>
+  <Match>
+    <Class name="~.*\..*IT"/>
+  </Match>
+</FindBugsFilter>

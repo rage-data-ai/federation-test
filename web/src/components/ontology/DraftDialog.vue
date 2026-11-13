@@ -1,0 +1,256 @@
+<script setup lang="ts">
+import { computed, ref, toRef } from 'vue'
+import { useFocusTrap } from '../../composables/useFocusTrap'
+import { DRAFT_STEPS, qualified, type OntologyTableRef } from '../../composables/useOntologyDraft'
+import type { DraftLogEntry, DraftResult, DraftStep } from '../../types'
+
+const props = defineProps<{
+  show: boolean
+  drafting?: boolean
+  draftSteps?: ReadonlyArray<DraftStep>
+  draftReached: (key: string) => boolean
+  draftSubject?: string
+  draftQuery?: string
+  draftNote?: string
+  draftTables?: string[]
+  draftCandidates?: OntologyTableRef[]
+  draftLog?: DraftLogEntry[]
+  draftError?: string
+  draftResult?: DraftResult | null
+  draftStep?: string
+  draftDetail?: string
+  draftElapsed?: number
+  takenElsewhere: (name: string) => { subject: string; concept: string } | null
+  unassignedLabel: string
+}>()
+
+const emit = defineEmits<{
+  close: []
+  'update:draftSubject': [value: string]
+  'update:draftQuery': [value: string]
+  'update:draftNote': [value: string]
+  'toggle-table': [name: string]
+  reselect: []
+  finish: []
+  run: []
+}>()
+
+function inputValue(event: Event): string {
+  return (event.target as HTMLInputElement | HTMLTextAreaElement).value
+}
+
+const steps = DRAFT_STEPS
+const dialog = ref<HTMLElement | null>(null)
+const open = toRef(props, 'show')
+useFocusTrap(open, dialog, () => {
+  if (!props.drafting) {
+    emit('close')
+  }
+})
+
+const titleId = 'draft-dialog-title'
+const busyLabel = computed(() =>
+  props.drafting ? `${props.draftDetail || '起草中…'} · ${props.draftElapsed ?? 0}s` : '开始起草'
+)
+</script>
+
+<template>
+  <div v-if="show" class="mask" @click.self="!drafting && emit('close')">
+    <div
+      ref="dialog"
+      class="dialog draft"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="titleId"
+      :aria-busy="drafting ? 'true' : undefined"
+    >
+      <h3 :id="titleId">大模型起草</h3>
+      <ol class="steps" aria-label="起草步骤">
+        <li
+          v-for="step in (draftSteps || steps)"
+          :key="step.key"
+          :class="{ on: draftReached(step.key) }"
+          :aria-current="draftReached(step.key) ? 'step' : undefined"
+        >
+          {{ step.label }}
+        </li>
+      </ol>
+      <template v-if="!drafting && !(draftLog || []).length">
+        <label>
+          主题域（必填）
+          <input
+            :value="draftSubject"
+            list="onto-subjects"
+            placeholder="选一个已有的主题域，或输入新名字，例如 安全日志"
+            @input="emit('update:draftSubject', inputValue($event))"
+          />
+        </label>
+        <p class="hint">本次勾选的表都归到这个主题域，起草时只会和这个主题域里已有的概念建立关系。</p>
+        <input
+          :value="draftQuery"
+          type="search"
+          placeholder="过滤表名"
+          aria-label="过滤表名"
+          @input="emit('update:draftQuery', inputValue($event))"
+        />
+        <div class="picker" role="group" aria-label="可选数据表">
+          <label v-for="t in (draftCandidates || [])" :key="qualified(t)" class="check" :class="{ off: takenElsewhere(qualified(t)) }">
+            <input
+              type="checkbox"
+              :checked="(draftTables || []).includes(qualified(t))"
+              :disabled="!!takenElsewhere(qualified(t)) && !(draftTables || []).includes(qualified(t))"
+              @change="emit('toggle-table', qualified(t))"
+            />
+            {{ qualified(t) }} <em>{{ (t.columns || []).length }} 列</em>
+            <em v-if="takenElsewhere(qualified(t))" class="taken">已在{{ takenElsewhere(qualified(t))?.subject ? `主题域 ${takenElsewhere(qualified(t))?.subject}` : unassignedLabel }}</em>
+          </label>
+          <p v-if="!(draftCandidates || []).length" class="hint">没有可选的表，请先在左侧数据源中采集元数据。</p>
+        </div>
+        <p class="hint">已选 {{ (draftTables || []).length }} 张：{{ (draftTables || []).join('，') }}</p>
+        <label>
+          补充说明（可选，如业务背景、哪些列是码值）
+          <textarea
+            :value="draftNote"
+            rows="3"
+            @input="emit('update:draftNote', inputValue($event))"
+          />
+        </label>
+        <p class="hint">开始后会逐步列出每一段：读了哪些表、写入了几个概念和属性、哪一段被跳过。</p>
+      </template>
+      <p v-else class="hint">主题域 {{ (draftSubject || '').trim() }}，已选 {{ (draftTables || []).length }} 张：{{ (draftTables || []).join('，') }}</p>
+      <ol v-if="(draftLog || []).length" class="draft-log" aria-live="polite">
+        <li v-for="(line, index) in draftLog" :key="index" :class="line.status">
+          <span>{{ line.text }}</span>
+          <ul v-if="line.notes.length">
+            <li v-for="note in line.notes" :key="note">{{ note }}</li>
+          </ul>
+        </li>
+      </ol>
+      <p v-if="draftError" class="err" role="alert">{{ draftError }}</p>
+      <div v-if="draftResult" class="ok" role="status">
+        已写入：概念 {{ draftResult.concepts }}、属性 {{ draftResult.attributes }}、关系 {{ draftResult.relations }}、
+        码值 {{ draftResult.codes }}、派生概念 {{ draftResult.definedConcepts }}
+      </div>
+      <div class="actions">
+        <button v-if="!drafting && (draftLog || []).length" type="button" @click="emit('reselect')">重新选择表</button>
+        <button type="button" :disabled="drafting" @click="emit('finish')">{{ draftStep === 'done' ? '在图中查看' : '关闭' }}</button>
+        <button
+          class="primary"
+          type="button"
+          :disabled="drafting || !(draftTables || []).length || !(draftSubject || '').trim()"
+          :aria-busy="drafting ? 'true' : undefined"
+          @click="emit('run')"
+        >
+          {{ busyLabel }}
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.picker .check.off {
+  color: var(--muted);
+}
+
+.picker .taken {
+  color: var(--warn);
+}
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.steps li {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.steps li.on {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+
+.picker em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.draft {
+  width: min(680px, 100%);
+  max-height: 88vh;
+  overflow: auto;
+}
+
+.draft > * {
+  flex-shrink: 0;
+}
+
+.draft .hint {
+  margin: 0;
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 120px;
+  max-height: 34vh;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.picker .check {
+  color: var(--text);
+  font-size: 13px;
+  gap: 8px;
+}
+
+.draft-log {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 42vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  list-style: none;
+  font-size: 13px;
+}
+
+.draft-log li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.draft-log li:last-child {
+  border-bottom: 0;
+}
+
+.draft-log li.start {
+  color: var(--text);
+}
+
+.draft-log li.done {
+  color: var(--muted);
+}
+
+.draft-log ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--warn);
+  font-size: 12px;
+}
+</style>

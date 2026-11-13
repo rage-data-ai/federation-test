@@ -18,6 +18,9 @@ import com.cmcc.cmdevops.security.federation.ask.AskService;
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient.Settings;
+import com.cmcc.cmdevops.security.federation.security.GatewayRole;
+import com.cmcc.cmdevops.security.federation.security.GatewayUser;
+import com.cmcc.cmdevops.security.federation.security.RequireRole;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -44,11 +47,13 @@ public class AskController {
         return llmClient.view();
     }
 
+    @RequireRole(GatewayRole.ADMIN)
     @PutMapping("/llm/config")
     public Map<String, Object> updateLlm(@RequestBody Settings settings) {
         return llmClient.update(settings);
     }
 
+    @RequireRole(GatewayRole.ADMIN)
     @PostMapping("/llm/test")
     public Map<String, Object> testLlm(@RequestBody Settings settings) {
         try {
@@ -58,10 +63,26 @@ public class AskController {
         }
     }
 
+    /**
+     * 廉价可回答性预检（不调用 LLM、不执行 SQL）。
+     * 对齐 NVIDIA Auto Ontology {@code check_answerable}：先确认本体覆盖再发起完整问数。
+     */
+    @RequireRole(GatewayRole.QUERY)
+    @PostMapping("/ask/answerable")
+    public Object answerable(@RequestBody AskRequest request) {
+        if (request == null || request.question() == null || request.question().isBlank()) {
+            throw new IllegalArgumentException("问题不能为空");
+        }
+        return askService.answerability(request.question().strip());
+    }
+
+    @RequireRole(GatewayRole.QUERY)
     @PostMapping(value = "/ask", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter ask(@RequestBody AskRequest request) {
         SseEmitter emitter = new SseEmitter(TIMEOUT_MS);
+        GatewayUser user = GatewayUser.current();
         Thread.ofVirtual().name("ask-", 0).start(() -> {
+            GatewayUser.set(user);
             try {
                 askService.ask(request, (event, data) -> send(emitter, event, data));
             } catch (RuntimeException e) {
@@ -70,6 +91,7 @@ public class AskController {
             } finally {
                 send(emitter, "done", Map.of());
                 emitter.complete();
+                GatewayUser.clear();
             }
         });
         return emitter;

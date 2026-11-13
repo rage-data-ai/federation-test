@@ -1,4 +1,11 @@
-export const SOURCE_TYPES = [
+export type SourceType = {
+  value: string
+  label: string
+  port: number
+  route: string
+}
+
+export const SOURCE_TYPES: SourceType[] = [
   { value: 'mysql', label: 'MySQL', port: 3306, route: 'TRINO' },
   { value: 'postgresql', label: 'PostgreSQL', port: 5432, route: 'TRINO' },
   { value: 'clickhouse', label: 'ClickHouse', port: 8123, route: 'TRINO' },
@@ -26,15 +33,15 @@ export function isTrinoSource() {
   return true
 }
 
-export function typeLabel(type) {
+export function typeLabel(type: string) {
   return SOURCE_TYPES.find((item) => item.value === type)?.label || type
 }
 
-export function sampleSql(catalog) {
+export function sampleSql(catalog: { type: string; name: string; database?: string; extra?: string }) {
   if (catalog.type === 'kafka') {
     const schema = catalog.database || 'default'
     const topic = (catalog.extra || '').split(',')[0].trim() || '<topic>'
-    const table = topic.includes('.') ? topic.split('.').pop() : topic
+    const table = topic.includes('.') ? topic.split('.').pop()! : topic
     const quoted = /[^A-Za-z0-9_]/.test(table) ? `"${table}"` : table
     return `SELECT _partition_id, _partition_offset, _message\nFROM ${catalog.name}.${schema}.${quoted}\nLIMIT 20`
   }

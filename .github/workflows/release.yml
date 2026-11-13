@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build artifact and SBOM
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: 'true'
+        run: mvn -B verify
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Frontend production audit and build
+        working-directory: web
+        run: |
+          npm ci
+          npm audit --omit=dev
+          npm run build
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            target/federation-test-*.jar
+            target/bom.json
+            !target/federation-test-*.jar.original
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
