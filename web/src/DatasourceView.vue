@@ -346,12 +346,12 @@ function catalogEndpoint(item: CatalogRecord | null | undefined) {
       </ul>
     </aside>
 
-    <main>
+    <main aria-labelledby="ds-title">
       <header>
         <div class="head-left">
-          <button class="icon burger" type="button" title="数据源" @click="sideOpen = !sideOpen">☰</button>
-          <h1>数据源管理</h1>
-          <span class="dot" :class="gatewayOk === false ? 'down' : gatewayOk ? 'up' : ''" :title="gatewayLabel" />
+          <button class="icon burger" type="button" title="数据源" aria-label="打开数据源列表" @click="sideOpen = !sideOpen">☰</button>
+          <h1 id="ds-title">数据源管理</h1>
+          <span class="dot" :class="gatewayOk === false ? 'down' : gatewayOk ? 'up' : ''" :title="gatewayLabel" :aria-label="gatewayLabel" />
         </div>
         <div class="head-right">
           <button type="button" :disabled="loading" @click="submit(true)">查看计划</button>
@@ -373,10 +373,13 @@ function catalogEndpoint(item: CatalogRecord | null | undefined) {
               </div>
             </div>
           </div>
+          <label class="sr-only" for="sql-editor">SQL 编辑器</label>
           <textarea
+            id="sql-editor"
             ref="sqlBox"
             v-model="sql"
             spellcheck="false"
+            aria-label="SQL 编辑器"
             placeholder="SELECT * FROM catalog.schema.table    ⌘ / Ctrl + Enter 执行"
           />
         </section>

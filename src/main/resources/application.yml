@@ -74,6 +74,7 @@ federation:
     embed-endpoint: ${FEDERATION_ASK_EMBED_ENDPOINT:}
     embed-api-key: ${FEDERATION_ASK_EMBED_API_KEY:}
     embed-model: ${FEDERATION_ASK_EMBED_MODEL:}
+    embed-cache-dir: ${FEDERATION_ASK_EMBED_CACHE_DIR:}
   kafka-mappings: {}
   vector:
     default-k: 10

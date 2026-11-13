@@ -474,6 +474,8 @@ public class FederationProperties {
         private String embedEndpoint = "";
         private String embedApiKey = "";
         private String embedModel = "";
+        /** 术语向量落盘目录；空则默认为 ontologyStore 同级 ontology-embeddings */
+        private String embedCacheDir = "";
 
         public double getMinConfidence() {
             return minConfidence;
@@ -529,6 +531,14 @@ public class FederationProperties {
 
         public void setEmbedModel(String embedModel) {
             this.embedModel = embedModel == null ? "" : embedModel;
+        }
+
+        public String getEmbedCacheDir() {
+            return embedCacheDir;
+        }
+
+        public void setEmbedCacheDir(String embedCacheDir) {
+            this.embedCacheDir = embedCacheDir == null ? "" : embedCacheDir;
         }
     }
 

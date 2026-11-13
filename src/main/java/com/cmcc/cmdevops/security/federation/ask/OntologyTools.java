@@ -1,5 +1,6 @@
 package com.cmcc.cmdevops.security.federation.ask;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -47,18 +48,32 @@ public class OntologyTools {
 
     @Autowired
     public OntologyTools(OntologyRepository repository, OntologyQueryService queryService, FederationProperties properties) {
-        this(repository, queryService, properties.getAsk().getMaxPathDepth(), termEmbedderOf(properties));
+        this(
+                repository,
+                queryService,
+                properties.getAsk().getMaxPathDepth(),
+                termEmbedderOf(properties),
+                embedCacheDirOf(properties));
     }
 
     OntologyTools(OntologyRepository repository, OntologyQueryService queryService, int maxDepth) {
-        this(repository, queryService, maxDepth, new HashingTermEmbedder());
+        this(repository, queryService, maxDepth, new HashingTermEmbedder(), null);
     }
 
     OntologyTools(OntologyRepository repository, OntologyQueryService queryService, int maxDepth, TermEmbedder embedder) {
+        this(repository, queryService, maxDepth, embedder, null);
+    }
+
+    OntologyTools(
+            OntologyRepository repository,
+            OntologyQueryService queryService,
+            int maxDepth,
+            TermEmbedder embedder,
+            Path embeddingCacheDir) {
         this.repository = repository;
         this.pathFinder = new OntologyPathFinder(maxDepth);
         this.views = new OntologyEntityViews(queryService);
-        this.contextBuilder = new BusinessContextBuilder(repository, pathFinder, views, embedder);
+        this.contextBuilder = new BusinessContextBuilder(repository, pathFinder, views, embedder, embeddingCacheDir);
     }
 
     static TermEmbedder termEmbedderOf(FederationProperties properties) {
@@ -67,6 +82,16 @@ public class OntologyTools {
             return new HashingTermEmbedder();
         }
         return new HttpTermEmbedder(endpoint, properties.getAsk().getEmbedApiKey(), properties.getAsk().getEmbedModel());
+    }
+
+    static Path embedCacheDirOf(FederationProperties properties) {
+        String configured = properties.getAsk().getEmbedCacheDir();
+        if (configured != null && !configured.isBlank()) {
+            return Path.of(configured.trim());
+        }
+        Path store = Path.of(properties.getOntologyStore() == null ? "data/tdb2" : properties.getOntologyStore());
+        Path parent = store.getParent();
+        return parent == null ? Path.of("data/ontology-embeddings") : parent.resolve("ontology-embeddings");
     }
 
     @Tool("列出本体中全部业务概念（类）的名称、中文名、别名和映射的表，用于了解有哪些对象可以分析")
