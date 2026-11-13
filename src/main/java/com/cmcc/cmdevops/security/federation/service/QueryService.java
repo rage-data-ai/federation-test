@@ -3,10 +3,14 @@ package com.cmcc.cmdevops.security.federation.service;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
 import com.cmcc.cmdevops.security.federation.cache.ResultCache;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogRegistry;
@@ -39,6 +43,7 @@ public class QueryService {
     private final VectorSearchClient vectorSearchClient;
     private final QuotaService quotaService;
     private final AuditService auditService;
+    private final MeterRegistry meters;
 
     public QueryService(
             FederatedSqlAnalyzer analyzer,
@@ -49,7 +54,8 @@ public class QueryService {
             CatalogRegistry catalogRegistry,
             VectorSearchClient vectorSearchClient,
             QuotaService quotaService,
-            AuditService auditService) {
+            AuditService auditService,
+            MeterRegistry meters) {
         this.analyzer = analyzer;
         this.rewriter = rewriter;
         this.router = router;
@@ -59,6 +65,7 @@ public class QueryService {
         this.vectorSearchClient = vectorSearchClient;
         this.quotaService = quotaService;
         this.auditService = auditService;
+        this.meters = meters;
     }
 
     public QueryResponse execute(QueryRequest request) {
@@ -69,6 +76,7 @@ public class QueryService {
         QueryResponse cached = resultCache.get(request);
         if (cached != null) {
             QueryResponse response = withCached(cached, System.currentTimeMillis() - started);
+            recordMetrics(response.engine(), true, response.elapsedMs());
             auditService.log(user, request.getSql(), null, response);
             return response;
         }
@@ -77,6 +85,7 @@ public class QueryService {
             RoutePlan plan = new RoutePlan(EngineType.GATEWAY, null, java.util.Set.of(),
                     "网关本地 SHOW CATALOGS", "SHOW CATALOGS");
             QueryResponse response = showCatalogs(plan, System.currentTimeMillis() - started);
+            recordMetrics(response.engine(), false, response.elapsedMs());
             auditService.log(user, request.getSql(), plan, response);
             return response;
         }
@@ -99,6 +108,7 @@ public class QueryService {
 
         if (request.isExplain() && !analyzed.explain()) {
             QueryResponse response = explain(plan, System.currentTimeMillis() - started);
+            recordMetrics(response.engine(), false, response.elapsedMs());
             auditService.log(user, request.getSql(), plan, response);
             return response;
         }
@@ -120,8 +130,19 @@ public class QueryService {
                 false,
                 null);
         resultCache.put(request, response);
+        recordMetrics(response.engine(), false, response.elapsedMs());
         auditService.log(user, request.getSql(), plan, response);
         return response;
+    }
+
+    private void recordMetrics(String engine, boolean cached, long elapsedMs) {
+        String engineTag = engine == null ? "unknown" : engine;
+        meters.counter("federation.query", "engine", engineTag, "cached", Boolean.toString(cached)).increment();
+        Timer.builder("federation.query.latency")
+                .tag("engine", engineTag)
+                .tag("cached", Boolean.toString(cached))
+                .register(meters)
+                .record(elapsedMs, TimeUnit.MILLISECONDS);
     }
 
     public List<CatalogView> listCatalogs() {

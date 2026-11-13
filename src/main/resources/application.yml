@@ -12,7 +12,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus,metrics
+  metrics:
+    tags:
+      application: ${spring.application.name}
 
 federation:
   trino:
@@ -36,6 +39,8 @@ federation:
     enabled: ${FEDERATION_SECURITY_ENABLED:false}
     tokens:
       demo: ${FEDERATION_DEMO_TOKEN:demo-token}
+  cors:
+    allowed-origins: ${FEDERATION_CORS_ORIGINS:http://localhost:5173,http://localhost:18080}
   quota:
     max-requests-per-minute: ${FEDERATION_QUOTA_PER_MINUTE:120}
   llm:

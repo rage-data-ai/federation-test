@@ -15,6 +15,7 @@ public class FederationProperties {
     private final Vector vector = new Vector();
     private final Llm llm = new Llm();
     private final Ask ask = new Ask();
+    private final Cors cors = new Cors();
     private Map<String, Catalog> catalogs = new LinkedHashMap<>();
     private Map<String, String> kafkaMappings = new LinkedHashMap<>();
     private int maxRows = 10_000;
@@ -47,6 +48,10 @@ public class FederationProperties {
 
     public Ask getAsk() {
         return ask;
+    }
+
+    public Cors getCors() {
+        return cors;
     }
 
     public Map<String, Catalog> getCatalogs() {
@@ -325,6 +330,18 @@ public class FederationProperties {
 
         public void setTimeoutSeconds(int timeoutSeconds) {
             this.timeoutSeconds = timeoutSeconds;
+        }
+    }
+
+    public static class Cors {
+        private String allowedOrigins = "http://localhost:5173,http://localhost:18080";
+
+        public String getAllowedOrigins() {
+            return allowedOrigins;
+        }
+
+        public void setAllowedOrigins(String allowedOrigins) {
+            this.allowedOrigins = allowedOrigins == null ? "" : allowedOrigins;
         }
     }
 

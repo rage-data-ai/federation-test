@@ -1,4 +1,21 @@
 services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: federal
+      MYSQL_USER: federation
+      MYSQL_PASSWORD: federation
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3307:3306"
+    volumes:
+      - federal-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   trino:
     image: trinodb/trino:476
     ports:
@@ -8,3 +25,34 @@ services:
       - ./docker/trino/catalog-store.properties:/etc/trino/catalog-store.properties:ro
       - ./docker/trino/catalog:/etc/trino/catalog
       - ./docker/trino/kafka:/etc/trino/kafka
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  gateway:
+    build: .
+    ports:
+      - "18080:18080"
+    environment:
+      FEDERAL_DB_URL: jdbc:mysql://mysql:3306/federal?sslMode=DISABLED&allowPublicKeyRetrieval=true&characterEncoding=utf8
+      FEDERAL_DB_USER: federation
+      FEDERAL_DB_PASSWORD: federation
+      TRINO_JDBC_URL: jdbc:trino://trino:8080
+      TRINO_USER: federation
+      FEDERATION_SECURITY_ENABLED: "false"
+      FEDERATION_CORS_ORIGINS: "http://localhost:18080,http://localhost:5173"
+    volumes:
+      - ./docker/trino/catalog:/app/docker/trino/catalog
+      - ./docker/trino/kafka:/app/docker/trino/kafka
+      - gateway-data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      trino:
+        condition: service_healthy
+
+volumes:
+  federal-mysql:
+  gateway-data:

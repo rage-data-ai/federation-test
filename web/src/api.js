@@ -166,28 +166,6 @@ async function postEvents(path, body, onEvent, signal) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  const flush = (chunk) => {
-    let name = 'message'
-    const data = []
-    for (const line of chunk.split('\n')) {
-      if (line.startsWith('event:')) {
-        name = line.slice(6).trim()
-      } else if (line.startsWith('data:')) {
-        data.push(line.slice(5).replace(/^ /, ''))
-      }
-    }
-    if (!data.length) {
-      return
-    }
-    const text = data.join('\n')
-    let parsed = text
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      // 保留原文
-    }
-    onEvent(name, parsed)
-  }
   try {
     while (true) {
       const { value, done } = await reader.read()
@@ -197,16 +175,40 @@ async function postEvents(path, body, onEvent, signal) {
       buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
       let index
       while ((index = buffer.indexOf('\n\n')) >= 0) {
-        flush(buffer.slice(0, index))
+        dispatchSseChunk(buffer.slice(0, index), onEvent)
         buffer = buffer.slice(index + 2)
       }
     }
     if (buffer.trim()) {
-      flush(buffer)
+      dispatchSseChunk(buffer, onEvent)
     }
   } catch (e) {
     if (e.name !== 'AbortError') {
       throw e
     }
   }
+}
+
+/** @param {string} chunk @param {(name: string, data: unknown) => void} onEvent */
+export function dispatchSseChunk(chunk, onEvent) {
+  let name = 'message'
+  const data = []
+  for (const line of chunk.split('\n')) {
+    if (line.startsWith('event:')) {
+      name = line.slice(6).trim()
+    } else if (line.startsWith('data:')) {
+      data.push(line.slice(5).replace(/^ /, ''))
+    }
+  }
+  if (!data.length) {
+    return
+  }
+  const text = data.join('\n')
+  let parsed = text
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    // 保留原文
+  }
+  onEvent(name, parsed)
 }

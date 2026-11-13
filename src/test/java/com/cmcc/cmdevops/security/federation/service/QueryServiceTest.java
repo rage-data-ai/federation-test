@@ -36,6 +36,8 @@ import com.cmcc.cmdevops.security.federation.sql.QueryRewriter;
 import com.cmcc.cmdevops.security.federation.vector.VectorHit;
 import com.cmcc.cmdevops.security.federation.vector.VectorSearchClient;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 class QueryServiceTest {
 
     private CatalogRegistry registry;
@@ -79,7 +81,8 @@ class QueryServiceTest {
                 registry,
                 vectors,
                 quota,
-                audit);
+                audit,
+                new SimpleMeterRegistry());
     }
 
     @AfterEach

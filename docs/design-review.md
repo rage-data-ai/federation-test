@@ -1,59 +1,64 @@
 # 软件设计评估报告
 
 评估基准：Trino / Spring Boot / Apache Calcite 等成熟开源项目的工程与架构实践。  
-评估日期：2026-11-13（Asia/Shanghai）  
-代码规模：约 69 个主源文件 / ~8.6k LOC；最大类 `OntologyDraftService` 1767 行。
+初评日期：2026-11-13（Asia/Shanghai）  
+复评轮次：第 2 轮（同日）
+
+代码规模：主源约 8.6k+ LOC；`OntologyDraftService` 已从 2432 行降至约 834 行编排器 + `ontology.draft.*` 协作类。
 
 ## 优点
 
-1. **包边界清晰**：`api / ask / ontology / catalog / sql / engine / store / security / llm / metadata / vector` 分层可读；查询主路径直观。
-2. **问数护栏设计正确**：`SqlGuard` 强制只读、表白名单、大表时间过滤与 Trino `EXPLAIN (TYPE VALIDATE)`；`InsightSession` 限制 SQL/恢复次数。
-3. **本体域模型有结构**：Jena TDB2 + 词汇表、Repository、确定性工具检索与路径发现；`docs/ontology-design.md` 记录了设计决策。
-4. **持久化抽象与密钥面有意识**：Store 接口 + JDBC 实现；`CatalogView` / LLM 视图不回传明文密钥。
-5. **核心逻辑可测**：Ask / Ontology / SqlGuard / Analyzer 等有单元测试，部分服务支持包内构造注入，无需 Spring 容器。
-6. **前端功能闭环**：数据源 / 本体 / 问数三模块 + SSE 过程展示，依赖极简（Vue 3 + Vite）。
+1. **包边界清晰**：`api / ask / ontology / catalog / sql / engine / store / security / llm / metadata / vector` 分层可读。
+2. **问数护栏设计正确**：`SqlGuard` 强制只读、表白名单、大表时间过滤与 Trino 预校验；`InsightSession` 限制预算。
+3. **本体域模型有结构**：Jena TDB2 + 词汇表、Repository、确定性工具检索；设计文档已与实现对齐。
+4. **持久化抽象与密钥面有意识**：Store 接口 + JDBC；视图不回传明文密钥。
+5. **核心逻辑可测**：路由、改写、鉴权、问数、本体起草等单测（当前约 104 个）。
+6. **前端功能闭环**：数据源 / 本体 / 问数 + SSE；依赖极简。
 
-## 缺点（按优先级）
+## 第一轮已关闭的 P0/P1
 
-### P0 — 正确性 / 安全 / 可移植
+| 原问题 | 状态 |
+|--------|------|
+| 查询管线断路（Kafka / vector / DIRECT） | ✅ `QueryService` 全链路接通；`QueryRouter` 单源直连 |
+| 鉴权 / Audit / Quota 空转 | ✅ `BearerAuthFilter` + 入口接线 |
+| 500 异常外泄 | ✅ 脱敏 + 日志 |
+| 内网地址硬编码 | ✅ `FEDERAL_DB_*` 必填；提供 `.env.example` / `application-dev.yml` |
+| 文档与实现偏离 | ✅ README / ontology-design 状态已纠偏 |
+| 无 CI / LICENSE / editorconfig | ✅ |
+| God Class `OntologyDraftService` | ✅ 拆为 `DraftJson` / `Heuristics` / `Descriptions` / `Dimensions` / `Applier` |
+| 无网关镜像 / Compose 不完整 | ✅ Dockerfile 多阶段 + Compose（mysql/trino/gateway） |
+| CORS 写死 | ✅ 可配置 `FEDERATION_CORS_ORIGINS` |
 
-| # | 问题 | 证据 |
+## 第二轮增量
+
+- Prometheus：`/actuator/prometheus`，业务指标 `federation.query` / `federation.query.latency`
+- 前端 Vitest：`api.js` 请求错误与 SSE 解析
+- Compose 一键：`mysql` + `trino` + `gateway`（含 UI）
+
+## 仍待达到顶尖开源水准的差距
+
+### P1（下一轮优先）
+
+| # | 问题 | 建议 |
 |---|------|------|
-| 1 | 查询管线断路：Kafka 映射、向量召回、DIRECT 路由未接入 `QueryService` | `QueryService` 仅 analyze→route→Trino；`QueryRouter` 恒返回 TRINO |
-| 2 | 鉴权未实现：`federation.security` 配置存在但无 Filter；Audit/Quota 无调用点 | `security` 包空转 |
-| 3 | 500 异常原样外泄 | `GlobalExceptionHandler.failed` |
-| 4 | 内网地址硬编码 | `application.yml` / `FederationProperties.Repository` 默认 `192.168.19.70` |
-| 5 | 文档与实现偏离（鉴权、直连路由、catalog 配置位置） | README vs 代码 |
+| 1 | `OntologyTools`（~722）、`OntologyRepository`（~821）仍偏大 | 按查询面 / 写入面或 RDF 适配层再拆 |
+| 2 | 鉴权仅为共享 Bearer，无 RBAC / OAuth2 | 引入 Spring Security 资源服务器或网关前置 IdP |
+| 3 | 尚无分布式 tracing | OpenTelemetry / Micrometer Tracing |
+| 4 | 前端无 ESLint/TS；巨型 SFC | ESLint + 渐进 TS；拆 Datasource/Ontology 视图 |
+| 5 | 无集成测试（MockMvc / Testcontainers） | 对鉴权与 `/query` `/explain` 加切片测试 |
 
-### P1 — 可维护性
-
-| # | 问题 |
-|---|------|
-| 1 | God Class：`OntologyDraftService`（1767）、`OntologyTools`（646）、`OntologyRepository`（526） |
-| 2 | `CatalogDataSourceRegistry` / DIRECT 引擎半成品；`CatalogRegistry` 强制 `route=TRINO` |
-| 3 | API 错误契约不统一（`QueryResponse` / 本地 Map / SSE） |
-| 4 | 结果缓存无用户维度 |
-
-### P2 — 工程化
+### P2
 
 | # | 问题 |
 |---|------|
-| 1 | 无 CI、无静态分析、无 LICENSE / CONTRIBUTING / .editorconfig |
-| 2 | 无网关 Dockerfile；Compose 仅 Trino |
-| 3 | 可观测性弱（Actuator 仅 health/info，无业务指标） |
-| 4 | 前端无测试 / 无 ESLint；巨型 SFC |
-| 5 | 无 `@SpringBootTest` / MockMvc 主链路回归 |
+| 1 | 静态分析门禁（Spotless / SpotBugs / Error Prone）与覆盖率门槛 |
+| 2 | Dependabot / Renovate |
+| 3 | 巨型 Vue SFC 拆分与 a11y |
+| 4 | RFC 7807 Problem Details 统一错误模型 |
+| 5 | 本体版本管理 / 回滚（设计已知风险） |
 
-## 对标顶尖开源的差距
+## 总评（复评）
 
-安全默认可启用、查询管线与文档一致、12-factor 配置、CI 质量门禁、可观测、社区元数据、生产交付物（镜像/健康探针）、RFC 7807 错误模型、测试金字塔。
+已从「功能密集 PoC」提升到「可对外演示、可 CI 协作的早期开源项目」水位：管线与文档一致、安全可开关、配置可移植、起草复杂度已模块化、交付物含镜像。
 
-**总评：** 领域方向与局部子系统（SqlGuard、本体、起草流水线）达到扎实 PoC 水准；距可对外开源 / 生产联邦网关，差一整层「管线连通 + 安全接线 + 工程门禁 + 运维面」。
-
-## 优化路线（本仓库持续迭代）
-
-1. 接通查询执行管线（改写 / 向量 / 直连 / 路由）
-2. 最小可用鉴权 + Audit/Quota + 异常脱敏
-3. 配置外置与 README 纠偏
-4. 拆分 God Class + CI / LICENSE / editorconfig
-5. 可观测、Docker 一键体验、前端工程化与契约测试
+距 Apache/CNCF 级「顶尖开源」仍差：身份模型、可观测、前端工程化、集成测试金字塔与静态分析门禁。按上表 P1 继续迭代即可收敛。

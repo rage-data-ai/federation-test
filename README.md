@@ -45,11 +45,13 @@ cd web && npm install && npm run dev
 
 数据源、元数据和模型配置存在配置库的 `fed_catalog`、`fed_meta_table`、`fed_meta_column`、`fed_llm`。本体图在 `data/tdb2`。
 
-可选 Trino：
+一键体验（MySQL + Trino + 网关，控制台打进网关镜像，打开 http://localhost:18080）：
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
+
+仅启动 Trino 时也可 `docker compose up -d trino`。
 
 ## 接口
 
