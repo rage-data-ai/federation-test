@@ -1,144 +1,16 @@
 <script setup>
-import { computed, inject, nextTick, onActivated, onUnmounted, ref, watch } from 'vue'
-import { askStream, llmStatus } from './api'
+import AskAnswerClarify from './components/ask/AskAnswerClarify.vue'
+import {
+  SAMPLES,
+  STAGE_LABEL,
+  SQL_STATUS,
+  lastStage,
+  useAskStream
+} from './composables/useAskStream'
+import { useAskLlmStatus } from './composables/useAskLlmStatus'
 
-const SAMPLES = [
-  '哪些账户在大量不同主机上登录失败？各失败了多少次、涉及多少台主机？',
-  '用网络登录（登录类型 3）成功登上很多台主机的账户有哪些？各覆盖多少台主机？',
-  '哪些主机在事件日志服务停止（事件 1100）之后，又出现了进程创建（事件 4688）？这样的主机有多少台？'
-]
-const STAGE_LABEL = { ontology: '本体', metadata: '元数据', insight: '分析' }
-const SOURCE_LABEL = { ontology: '本体定义', inferred: '推断', user: '用户指定' }
-const SQL_STATUS = { executed: '已执行', rejected: '校验拒绝', failed: '执行失败' }
-
-const turns = ref([])
-const draft = ref('')
-const busy = ref(false)
-const status = ref(null)
-const statusError = ref('')
-const scroller = ref(null)
-let controller = null
-
-const openLlmSettings = inject('openLlmSettings', () => {})
-const llmRevision = inject('llmRevision', ref(0))
-const ready = computed(() => status.value?.configured)
-
-watch(llmRevision, loadStatus)
-onActivated(loadStatus)
-
-async function loadStatus() {
-  try {
-    status.value = await llmStatus()
-    statusError.value = ''
-  } catch (e) {
-    statusError.value = e.message
-  }
-}
-
-onUnmounted(() => controller?.abort())
-
-function history() {
-  const items = []
-  for (const turn of turns.value) {
-    items.push({ role: 'user', content: turn.question })
-    const reply = turn.answer?.answer || turn.clarify?.question
-    if (reply) {
-      items.push({ role: 'assistant', content: reply })
-    }
-  }
-  return items
-}
-
-async function send(text) {
-  const question = (text ?? draft.value).trim()
-  if (!question || busy.value) {
-    return
-  }
-  const prior = history()
-  draft.value = ''
-  const turn = { question, stages: [], ontology: null, metadata: null, sqls: [], results: [], answer: null, clarify: null, error: '', done: false, showTrace: true }
-  turns.value.push(turn)
-  const live = turns.value[turns.value.length - 1]
-  busy.value = true
-  controller = new AbortController()
-  scrollDown()
-  try {
-    await askStream({ question, history: prior }, (name, data) => onEvent(live, name, data), controller.signal)
-  } catch (e) {
-    live.error = e.message
-  } finally {
-    live.done = true
-    busy.value = false
-    controller = null
-    if (live.answer) {
-      live.showTrace = false
-    }
-    scrollDown()
-  }
-}
-
-function onEvent(turn, name, data) {
-  switch (name) {
-    case 'stage':
-      turn.stages.push(data)
-      break
-    case 'ontology':
-      turn.ontology = { ...data.context, mode: data.mode, recovery: data.recovery }
-      break
-    case 'metadata':
-      turn.metadata = { ...data.report, recovery: data.recovery }
-      break
-    case 'sql':
-      turn.sqls.push(data)
-      break
-    case 'result':
-      turn.results.push(data)
-      break
-    case 'answer':
-      turn.answer = data
-      break
-    case 'clarify':
-      turn.clarify = data
-      break
-    case 'error':
-      turn.error = data.message
-      break
-    default:
-      break
-  }
-  scrollDown()
-}
-
-function stop() {
-  controller?.abort()
-}
-
-function onKey(event) {
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-    event.preventDefault()
-    send()
-  }
-}
-
-function scrollDown() {
-  nextTick(() => {
-    if (scroller.value) {
-      scroller.value.scrollTop = scroller.value.scrollHeight
-    }
-  })
-}
-
-function cell(value) {
-  if (value === null || value === undefined) {
-    return 'NULL'
-  }
-  return typeof value === 'object' ? JSON.stringify(value) : String(value)
-}
-
-function lastStage(turn) {
-  const stage = turn.stages[turn.stages.length - 1]
-  return stage ? stage.message : '提交中…'
-}
+const { status, statusError, ready, openLlmSettings } = useAskLlmStatus()
+const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskStream()
 </script>
 
 <template>
@@ -148,7 +20,7 @@ function lastStage(turn) {
       <div class="head-side">
         <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">未配置，去设置</button>
         <span v-else-if="status" class="head-note">{{ status.protocol }} · {{ status.model }}</span>
-        <button type="button" :disabled="busy || !turns.length" @click="turns = []">新对话</button>
+        <button type="button" :disabled="busy || !turns.length" @click="clearTurns">新对话</button>
       </div>
     </header>
     <div ref="scroller" class="thread">
@@ -221,46 +93,13 @@ function lastStage(turn) {
 
           <p v-if="turn.error" class="err banner">{{ turn.error }}</p>
 
-          <div v-if="turn.clarify" class="clarify">
-            <p>{{ turn.clarify.question }}</p>
-            <div class="options">
-              <button v-for="opt in turn.clarify.options" :key="opt" type="button" :disabled="busy || idx !== turns.length - 1" @click="send(opt)">
-                {{ opt }}
-              </button>
-            </div>
-          </div>
-
-          <div v-if="turn.answer" class="answer">
-            <p class="conclusion">{{ turn.answer.answer }}</p>
-            <div v-if="turn.answer.columns?.length" class="table-wrap">
-              <table>
-                <thead>
-                  <tr><th v-for="col in turn.answer.columns" :key="col.name">{{ col.name }}</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(row, ridx) in turn.answer.rows" :key="ridx">
-                    <td v-for="(value, cidx) in row" :key="cidx" :class="{ nulls: value === null }" :title="cell(value)">{{ cell(value) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p v-if="turn.answer.rowCount > (turn.answer.rows?.length || 0)" class="hint small">
-              共 {{ turn.answer.rowCount }} 行，仅展示前 {{ turn.answer.rows.length }} 行
-            </p>
-            <div v-if="turn.answer.caliber?.length" class="caliber">
-              <h4>口径来源</h4>
-              <ul>
-                <li v-for="(c, cidx) in turn.answer.caliber" :key="cidx">
-                  <span class="source" :class="c.source">{{ SOURCE_LABEL[c.source] || c.source }}</span>
-                  <b>{{ c.item }}</b> <span class="hint">{{ c.detail }}</span>
-                </li>
-              </ul>
-            </div>
-            <details v-if="turn.answer.sql" class="final-sql">
-              <summary>最终 SQL</summary>
-              <pre class="sql">{{ turn.answer.sql }}</pre>
-            </details>
-          </div>
+          <AskAnswerClarify
+            :clarify="turn.clarify"
+            :answer="turn.answer"
+            :busy="busy"
+            :can-reply="idx === turns.length - 1"
+            @pick="send"
+          />
         </div>
       </article>
     </div>
@@ -435,8 +274,7 @@ function lastStage(turn) {
   font-size: 12px;
 }
 
-.line code,
-.caliber code {
+.line code {
   margin-right: 6px;
   font-size: 12px;
 }
@@ -448,71 +286,6 @@ function lastStage(turn) {
 .sql {
   margin: 4px 0;
   font-size: 12px;
-}
-
-.clarify,
-.answer {
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
-}
-
-.clarify p {
-  margin: 0 0 10px;
-}
-
-.options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.conclusion {
-  margin: 0 0 10px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-}
-
-.small {
-  margin: 6px 0 0;
-  font-size: 12px;
-}
-
-.caliber h4 {
-  margin: 12px 0 6px;
-  font-size: 13px;
-}
-
-.caliber ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-}
-
-.source {
-  display: inline-block;
-  min-width: 56px;
-  margin-right: 6px;
-  padding: 0 6px;
-  border-radius: 4px;
-  font-size: 11px;
-  text-align: center;
-  border: 1px solid var(--line);
-}
-
-.source.ontology { color: var(--ok); border-color: var(--ok); }
-.source.inferred { color: var(--warn); border-color: var(--warn); }
-.source.user { color: var(--accent-2); border-color: var(--accent-2); }
-
-.final-sql {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--muted);
 }
 
 .composer {
