@@ -19,6 +19,12 @@ async function stabilizeFonts(page: import('@playwright/test').Page) {
 }
 
 test.describe('console smoke', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('theme-mode', 'light')
+    })
+  })
+
   test('skip-link, main landmark, and module navigation', async ({ page }) => {
     await page.goto('/')
     await expect(page.locator('#main-stage')).toBeVisible()

@@ -637,11 +637,17 @@ function catalogEndpoint(item: CatalogRecord | null | undefined) {
   color: var(--muted);
 }
 
-.badge.clickhouse { color: #e3a23c; }
-.badge.elasticsearch { color: #c9a21a; }
-.badge.kafka { color: #9d84e8; }
-.badge.mysql { color: #4f9fe0; }
-.badge.postgresql { color: #5a8fd6; }
+.badge.clickhouse { color: #9a6700; }
+.badge.elasticsearch { color: #7a5b00; }
+.badge.kafka { color: #6d28d9; }
+.badge.mysql { color: #1d4ed8; }
+.badge.postgresql { color: #1e40af; }
+
+[data-theme="dark"] .badge.clickhouse { color: #fbbf24; }
+[data-theme="dark"] .badge.elasticsearch { color: #facc15; }
+[data-theme="dark"] .badge.kafka { color: #d8b4fe; }
+[data-theme="dark"] .badge.mysql { color: #93c5fd; }
+[data-theme="dark"] .badge.postgresql { color: #93c5fd; }
 
 /* ---------- 弹出菜单 ---------- */
 
