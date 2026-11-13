@@ -33,6 +33,7 @@ import com.cmcc.cmdevops.security.federation.security.CatalogAclService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.QuotaService;
+import com.cmcc.cmdevops.security.federation.security.RowFilterService;
 import com.cmcc.cmdevops.security.federation.sql.FederatedSqlAnalyzer;
 import com.cmcc.cmdevops.security.federation.sql.QueryRewriter;
 import com.cmcc.cmdevops.security.federation.vector.VectorHit;
@@ -85,6 +86,7 @@ class QueryServiceTest {
                 quota,
                 audit,
                 new CatalogAclService(properties),
+                new RowFilterService(properties),
                 new SimpleMeterRegistry());
     }
 

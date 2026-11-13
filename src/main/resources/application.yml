@@ -51,6 +51,8 @@ federation:
       reader: QUERY
     # 非空时按用户限制 catalog；示例：reader 仅 mysql_shop。默认空=不启用 ACL。
     catalogs: {}
+    # 行级：reader: mysql_shop.public.orders:tenant_id = 'acme'
+    row-filters: {}
     jwt:
       issuer-uri: ${FEDERATION_JWT_ISSUER_URI:}
       roles-claim: ${FEDERATION_JWT_ROLES_CLAIM:roles}

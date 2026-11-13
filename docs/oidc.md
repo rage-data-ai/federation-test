@@ -33,6 +33,7 @@ Keycloak：创建 Public client，开启 PKCE，Valid redirect URIs 包含控制
 
 侧栏「身份」→「OIDC 登录」；回调后 `access_token` / `refresh_token` 写入 localStorage，并由 `api.ts` 自动附带。  
 可用「刷新令牌」调用 `grant_type=refresh_token`（见 `refreshAccessToken`）。
+「OIDC 注销」清除本地令牌并跳转 IdP logout（`post_logout_redirect_uri`）。
 
 ## 表级 ACL
 
@@ -44,3 +45,13 @@ Keycloak：创建 Public client，开启 PKCE，Valid redirect URIs 包含控制
 - `*` — 全部
 
 查询路径在路由前校验 `TableRef`；列表/元数据仍按 catalog 过滤。
+
+
+## 行级过滤（启发式）
+
+```yaml
+federation.security.row-filters:
+  reader: "mysql_shop.public.orders:tenant_id = 'acme'"
+```
+
+查询若触及该表，SQL 文本须包含谓词中的列标识（如 `tenant_id`）；否则 403。

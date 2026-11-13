@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, provide, reactive, ref } from 'vue'
 import { authMe, llmConfig, llmStatus, saveLlm, testLlm } from './api'
 import {
   beginOidcLogin,
+  beginOidcLogout,
   clearAccessToken,
   completeOidcCallback,
   getAccessToken,
@@ -123,6 +124,13 @@ function logoutAuth() {
   authForm.token = ''
   authUser.value = null
   showAuth.value = false
+}
+
+function logoutOidc() {
+  authUser.value = null
+  authForm.token = ''
+  showAuth.value = false
+  beginOidcLogout()
 }
 
 async function loginOidc() {
@@ -285,6 +293,7 @@ function cycleTheme() {
         <div class="actions">
           <button v-if="oidcEnabled" type="button" @click="loginOidc">OIDC 登录</button>
           <button v-if="oidcEnabled && getRefreshToken()" type="button" :disabled="authBusy" @click="refreshOidc">刷新令牌</button>
+          <button v-if="oidcEnabled" type="button" @click="logoutOidc">OIDC 注销</button>
           <button type="button" @click="logoutAuth">清除</button>
           <button type="button" @click="showAuth = false">关闭</button>
           <button class="primary" type="submit" :disabled="authBusy">{{ authBusy ? '校验中…' : '保存并校验' }}</button>

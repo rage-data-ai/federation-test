@@ -8,7 +8,8 @@
 
 1. 生产环境设置 `FEDERATION_SECURITY_ENABLED=true`，并为每个调用方配置独立 Bearer token（`federation.security.tokens`）。
 2. 通过 `federation.security.roles` 分配角色：`QUERY`（查询/问数）、`ADMIN`（数据源/元数据/本体/模型写入）。未配置 roles 的用户默认拥有全部角色。
-2b. 可选 `federation.security.catalogs`（用户 → catalog 列表或 `*`）：非空时启用资源 ACL，限制列表/查询/元数据可见范围；`ADMIN` 绕过。
+2b. 可选 `federation.security.catalogs`（用户 → catalog/表）：非空时启用资源 ACL；`ADMIN` 绕过。
+2c. 可选 `federation.security.row-filters`（用户 → catalog 列表或 `*`）：非空时启用资源 ACL，限制列表/查询/元数据可见范围；`ADMIN` 绕过。
 3. 可选配置 `FEDERATION_JWT_ISSUER_URI`，接受外部 IdP 签发的 JWT（roles claim 默认 `roles`）。控制台可通过 PKCE 登录（见 `docs/oidc.md`）或粘贴 access_token。
 4. 使用强随机 token；不要使用仓库示例值。
 5. `FEDERAL_DB_*`、`LLM_API_KEY`、数据源密码仅通过环境变量或密钥管理系统注入。
@@ -18,5 +19,5 @@
 
 ## 已知边界
 
-- 支持共享 Bearer、JWT、控制台 PKCE（含 refresh_token）、catalog/表级 ACL；尚未实现 IdP 注销联动或行级谓词注入。
+- 支持共享 Bearer、JWT、控制台 PKCE（refresh + IdP 注销跳转）、catalog/表 ACL 与行级启发式校验；尚未实现 back-channel logout 或 AST 级谓词自动注入。
 - 问数路径依赖 `SqlGuard` 与表白名单；`/api/v1/query` 在具备 `QUERY` 后仍可执行任意只读 SQL（相对已注册 catalog），需配合配额与审计。

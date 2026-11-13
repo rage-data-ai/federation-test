@@ -189,6 +189,11 @@ public class FederationProperties {
          * 未列出的用户无任何 catalog；ADMIN 角色绕过。
          */
         private Map<String, String> catalogs = new LinkedHashMap<>();
+        /**
+         * 用户名 → 行级规则，逗号分隔 {@code catalog.schema.table: predicate}。
+         * 例：{@code reader: mysql_shop.public.orders:tenant_id = 'acme'}
+         */
+        private Map<String, String> rowFilters = new LinkedHashMap<>();
         private final Jwt jwt = new Jwt();
 
         public boolean isEnabled() {
@@ -221,6 +226,14 @@ public class FederationProperties {
 
         public void setCatalogs(Map<String, String> catalogs) {
             this.catalogs = catalogs == null ? new LinkedHashMap<>() : catalogs;
+        }
+
+        public Map<String, String> getRowFilters() {
+            return rowFilters;
+        }
+
+        public void setRowFilters(Map<String, String> rowFilters) {
+            this.rowFilters = rowFilters == null ? new LinkedHashMap<>() : rowFilters;
         }
 
         public Jwt getJwt() {

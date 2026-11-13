@@ -27,6 +27,7 @@ import com.cmcc.cmdevops.security.federation.security.AuditService;
 import com.cmcc.cmdevops.security.federation.security.CatalogAclService;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.QuotaService;
+import com.cmcc.cmdevops.security.federation.security.RowFilterService;
 import com.cmcc.cmdevops.security.federation.sql.FederatedSqlAnalyzer;
 import com.cmcc.cmdevops.security.federation.sql.QueryRewriter;
 import com.cmcc.cmdevops.security.federation.vector.VectorHit;
@@ -45,6 +46,7 @@ public class QueryService {
     private final QuotaService quotaService;
     private final AuditService auditService;
     private final CatalogAclService catalogAcl;
+    private final RowFilterService rowFilters;
     private final MeterRegistry meters;
 
     public QueryService(
@@ -58,6 +60,7 @@ public class QueryService {
             QuotaService quotaService,
             AuditService auditService,
             CatalogAclService catalogAcl,
+            RowFilterService rowFilters,
             MeterRegistry meters) {
         this.analyzer = analyzer;
         this.rewriter = rewriter;
@@ -69,6 +72,7 @@ public class QueryService {
         this.quotaService = quotaService;
         this.auditService = auditService;
         this.catalogAcl = catalogAcl;
+        this.rowFilters = rowFilters;
         this.meters = meters;
     }
 
@@ -102,6 +106,7 @@ public class QueryService {
                 : analyzer.analyze(afterVector);
 
         catalogAcl.assertAllowedTables(routedQuery.tables());
+        rowFilters.assertSatisfied(afterVector, routedQuery.tables());
         RoutePlan routed = router.route(routedQuery, afterVector, request.getEngine());
         catalogAcl.assertAllowed(routed.catalogs());
         String rewritten = rewriter.applyRouteRewrite(routed.rewrittenSql(), routed);

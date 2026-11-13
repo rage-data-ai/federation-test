@@ -175,6 +175,25 @@ function storeTokenResponse(data: Record<string, unknown>): void {
   }
 }
 
+function endSessionUrl(authority: string): string {
+  if (authority.includes('/realms/')) {
+    return `${authority}/protocol/openid-connect/logout`
+  }
+  return `${authority}/oauth2/v1/logout`
+}
+
+/** 清除本地令牌并跳转 IdP 注销（若已配置 OIDC）。 */
+export function beginOidcLogout(config: OidcConfig | null = readOidcConfig()): void {
+  clearAccessToken()
+  if (!config) {
+    return
+  }
+  const url = new URL(endSessionUrl(config.authority))
+  url.searchParams.set('client_id', config.clientId)
+  url.searchParams.set('post_logout_redirect_uri', config.redirectUri)
+  window.location.assign(url.toString())
+}
+
 /** 使用 refresh_token 换取新的 access_token；失败时清除本地令牌。 */
 export async function refreshAccessToken(
   config: OidcConfig | null = readOidcConfig()
