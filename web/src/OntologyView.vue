@@ -836,7 +836,7 @@ function ensureConditions() {
     />
 
     <div v-if="versionsOpen" class="mask" @click.self="versionsOpen = false">
-      <div class="dialog preview" role="dialog" aria-labelledby="versions-title">
+      <div class="dialog preview" role="dialog" aria-modal="true" aria-labelledby="versions-title">
         <h3 id="versions-title">本体版本</h3>
         <p class="hint">起草前会自动打 checkpoint；也可手动快照或回滚。</p>
         <p v-if="versionsNote" class="head-note">{{ versionsNote }}</p>

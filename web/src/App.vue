@@ -298,8 +298,8 @@ function cycleTheme() {
     </main>
 
     <div v-if="showAuth" class="mask" @click.self="showAuth = false">
-      <form class="dialog" @submit.prevent="saveAuthToken">
-        <h3>访问身份</h3>
+      <form class="dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title" @submit.prevent="saveAuthToken">
+        <h3 id="auth-title">访问身份</h3>
         <p v-if="authUser" class="hint">
           当前用户 {{ authUser.name }} · 角色 {{ (authUser.roles || []).join(', ') || '无' }}
           · 鉴权 {{ authUser.securityEnabled ? '已开启' : '关闭' }}
@@ -324,8 +324,8 @@ function cycleTheme() {
     </div>
 
     <div v-if="showLlm" class="mask" @click.self="showLlm = false">
-      <form class="dialog" @submit.prevent="saveLlmConfig">
-        <h3>大模型</h3>
+      <form class="dialog" role="dialog" aria-modal="true" aria-labelledby="llm-title" @submit.prevent="saveLlmConfig">
+        <h3 id="llm-title">大模型</h3>
         <label>
           协议
           <select v-model="llmForm.protocol">

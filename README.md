@@ -21,7 +21,7 @@ HTTP /api/v1/query  ·  /api/v1/ask (SSE)
          MySQL/PG/CK            mysql / postgresql / clickhouse / …
 ```
 
-设计评估见 [`docs/design-review.md`](docs/design-review.md)；本体设计见 [`docs/ontology-design.md`](docs/ontology-design.md)；OIDC/JWT 见 [`docs/oidc.md`](docs/oidc.md)。
+设计评估见 [`docs/design-review.md`](docs/design-review.md)；本体设计见 [`docs/ontology-design.md`](docs/ontology-design.md)；OIDC/JWT 见 [`docs/oidc.md`](docs/oidc.md)；嵌入 ADR 见 [`docs/adr/0001-term-embedding.md`](docs/adr/0001-term-embedding.md)。`mvn verify` 会生成 CycloneDX SBOM（`target/bom.json`）。
 
 ## 快速开始
 

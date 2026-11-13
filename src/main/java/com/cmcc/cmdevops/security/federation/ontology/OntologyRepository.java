@@ -49,6 +49,7 @@ import org.apache.jena.vocabulary.RDF;
 import org.apache.jena.vocabulary.RDFS;
 import org.springframework.stereotype.Component;
 
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.OntologyEmbeddingIndex;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Attribute;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Code;
 import com.cmcc.cmdevops.security.federation.ontology.OntologyModel.Concept;
@@ -153,6 +154,8 @@ public class OntologyRepository {
                 concept.addProperty(SUBJECT, target);
             }
         });
+
+        ontologyMutated();
     }
 
     private static String normalizeSubject(String subject) {
@@ -242,6 +245,7 @@ public class OntologyRepository {
                 r.addLiteral(CERTIFIED, true);
             }
         });
+        ontologyMutated();
     }
 
     /**
@@ -326,6 +330,8 @@ public class OntologyRepository {
                 releaseValueSet(model, previousList, list);
             }
         });
+
+        ontologyMutated();
     }
 
     /** 一个码值集合只能属于一个概念，命中码值时才能唯一确定概念。 */
@@ -379,6 +385,8 @@ public class OntologyRepository {
                 inverse.addProperty(OWL2.inverseOf, r);
             }
         });
+
+        ontologyMutated();
     }
 
     public void saveCode(Code code) {
@@ -398,6 +406,8 @@ public class OntologyRepository {
             describe(model, r, code.labelZh(), code.labelEn(), code.aliases(), code.comment());
             r.addProperty(CODE_VALUE, code.value());
         });
+
+        ontologyMutated();
     }
 
     public void saveDefinedConcept(DefinedConcept defined) {
@@ -434,6 +444,8 @@ public class OntologyRepository {
                 r.addLiteral(CERTIFIED, true);
             }
         });
+
+        ontologyMutated();
     }
 
 
@@ -450,6 +462,8 @@ public class OntologyRepository {
                 r.addLiteral(CERTIFIED, true);
             }
         });
+
+        ontologyMutated();
     }
 
     /** 用快照整体替换当前本体（先清空再写入）。用于版本回滚。 */
@@ -473,6 +487,8 @@ public class OntologyRepository {
         for (DefinedConcept defined : snapshot.definedConcepts() == null ? List.<DefinedConcept>of() : snapshot.definedConcepts()) {
             saveDefinedConcept(defined);
         }
+
+        ontologyMutated();
     }
 
     public void delete(String name) {
@@ -487,5 +503,12 @@ public class OntologyRepository {
             removeDeep(model, r);
             model.removeAll(null, null, r);
         });
+
+        ontologyMutated();
+    }
+
+    /** 本体变更后丢弃进程内术语向量缓存；落盘按指纹隔离，旧文件可忽略。 */
+    private static void ontologyMutated() {
+        OntologyEmbeddingIndex.clearMemoryCache();
     }
 }
