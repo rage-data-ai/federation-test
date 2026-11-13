@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, nextTick, onActivated, onUnmounted, ref, watch } from 'vue'
-import { askStream, llmStatus } from './api'
+import { askStream, llmConfig } from './api'
 
 const SAMPLES = [
   '哪些账户在大量不同主机上登录失败？各失败了多少次、涉及多少台主机？',
@@ -21,14 +21,15 @@ let controller = null
 
 const openLlmSettings = inject('openLlmSettings', () => {})
 const llmRevision = inject('llmRevision', ref(0))
-const ready = computed(() => status.value?.configured)
+const ready = computed(() => !!(status.value?.configured && status.value?.apiKeySet))
+const needsKey = computed(() => !!(status.value?.configured && !status.value?.apiKeySet))
 
 watch(llmRevision, loadStatus)
 onActivated(loadStatus)
 
 async function loadStatus() {
   try {
-    status.value = await llmStatus()
+    status.value = await llmConfig()
     statusError.value = ''
   } catch (e) {
     statusError.value = e.message
@@ -146,7 +147,7 @@ function lastStage(turn) {
     <header class="module-head">
       <h1>智能问数</h1>
       <div class="head-side">
-        <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">未配置，去设置</button>
+        <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">{{ needsKey ? '填写 API Key' : '未配置，去设置' }}</button>
         <span v-else-if="status" class="head-note">{{ status.protocol }} · {{ status.model }}</span>
         <button type="button" :disabled="busy || !turns.length" @click="turns = []">新对话</button>
       </div>
@@ -156,6 +157,10 @@ function lastStage(turn) {
         <h2>智能问数</h2>
         <p class="hint">用业务语言提问，系统按 本体 → 元数据 → SQL 的顺序检索、校验并执行，口径缺失时会先问你。</p>
         <p v-if="statusError" class="err">{{ statusError }}</p>
+        <p v-else-if="needsKey" class="err">
+          已选择 {{ status.model }}，还差 API Key。
+          <button class="link" type="button" @click="openLlmSettings">去填写</button>
+        </p>
         <p v-else-if="status && !ready" class="err">
           还没有配置大模型。
           <button class="link" type="button" @click="openLlmSettings">去配置</button>

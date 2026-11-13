@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, nextTick, onActivated, reactive, ref, watch } from 'vue'
-import { deleteEntity, draftOntology, getOntology, getOntologyTurtle, listCatalogs, listMetadata, llmStatus, renameSubject, saveEntity } from './api'
+import { deleteEntity, draftOntology, getOntology, getOntologyTurtle, listCatalogs, listMetadata, llmConfig, renameSubject, saveEntity } from './api'
 import OntologyGraph from './OntologyGraph.vue'
 
 const tables = ref([])
@@ -380,7 +380,7 @@ onActivated(async () => {
 
 async function refreshLlm() {
   try {
-    llm.value = await llmStatus()
+    llm.value = await llmConfig()
   } catch {
     llm.value = null
   }
@@ -693,7 +693,7 @@ function downloadTurtle() {
           概念 {{ snapshot.concepts.length }}，属性 {{ snapshot.attributes.length }}，码值 {{ snapshot.codes.length }}，关系 {{ snapshot.relations.length }}
         </span>
         <button type="button" @click="showTurtle">导出 Turtle</button>
-        <button v-if="llm && !llm.configured" type="button" @click="openLlmSettings">配置大模型</button>
+        <button v-if="llm && (!llm.configured || !llm.apiKeySet)" type="button" @click="openLlmSettings">配置大模型</button>
         <button v-else class="primary" type="button" @click="openDraft">大模型起草</button>
       </div>
     </header>
@@ -792,7 +792,7 @@ function downloadTurtle() {
             <span>概念、属性、关系、码值直接进本体，图上用琥珀色描边标出。</span>
           </li>
         </ol>
-        <button v-if="llm && !llm.configured" type="button" @click="openLlmSettings">先配置大模型</button>
+        <button v-if="llm && (!llm.configured || !llm.apiKeySet)" type="button" @click="openLlmSettings">先配置大模型</button>
         <button v-else class="primary" type="button" @click="openDraft">选择表并起草</button>
       </div>
       <div v-if="fresh.length" class="draft-note">

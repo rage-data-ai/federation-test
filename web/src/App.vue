@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onMounted, onUnmounted, provide, reactive, ref } from 'vue'
-import { llmConfig, llmStatus, saveLlm, testLlm } from './api'
+import { llmConfig, saveLlm, testLlm } from './api'
 import AskView from './AskView.vue'
 import DatasourceView from './DatasourceView.vue'
 import OntologyView from './OntologyView.vue'
+import { AGENT_MODELS, DEFAULT_MODEL, findModel } from './models'
 
 const MODULES = [
   { key: 'datasource', label: '数据源管理', short: '数据源', icon: '⛁', component: DatasourceView },
@@ -47,12 +48,29 @@ onUnmounted(() => {
   window.clearInterval(themeTimer)
 })
 
+const modelOptions = computed(() => {
+  if (findModel(llmForm.model) || !llmForm.model) {
+    return AGENT_MODELS
+  }
+  return [...AGENT_MODELS, { id: llmForm.model, label: llmForm.model }]
+})
+
 async function refreshLlm() {
   try {
-    llm.value = await llmStatus()
+    llm.value = await llmConfig()
   } catch {
     llm.value = null
   }
+}
+
+function applyModel(id) {
+  const preset = findModel(id)
+  if (!preset) {
+    return
+  }
+  llmForm.model = preset.id
+  llmForm.protocol = preset.protocol
+  llmForm.baseUrl = preset.baseUrl
 }
 
 async function openLlm() {
@@ -61,11 +79,14 @@ async function openLlm() {
   showLlm.value = true
   try {
     const config = await llmConfig()
-    llmForm.protocol = config.protocol || 'openai'
+    llmForm.protocol = config.protocol || DEFAULT_MODEL.protocol
     llmForm.baseUrl = config.baseUrl || ''
     llmForm.model = config.model || ''
     llmForm.apiKey = ''
     llm.value = config
+    if (!llmForm.model || !llmForm.baseUrl) {
+      applyModel(llmForm.model || DEFAULT_MODEL.id)
+    }
   } catch (e) {
     llmError.value = e.message
   }
@@ -154,7 +175,7 @@ function cycleTheme() {
         <span class="name">{{ item.short }}</span>
       </button>
       <div class="rail-foot">
-        <button class="module" :class="{ pending: llm && !llm.configured }" type="button" title="大模型配置" @click="openLlm">
+        <button class="module" :class="{ pending: llm && (!llm.configured || !llm.apiKeySet) }" type="button" title="大模型配置" @click="openLlm">
           <span class="glyph" aria-hidden="true">✳</span>
           <span class="name">模型</span>
         </button>
@@ -174,6 +195,12 @@ function cycleTheme() {
       <form class="dialog" @submit.prevent="saveLlmConfig">
         <h3>大模型</h3>
         <label>
+          模型
+          <select v-model="llmForm.model" required @change="applyModel(llmForm.model)">
+            <option v-for="item in modelOptions" :key="item.id" :value="item.id">{{ item.label }}</option>
+          </select>
+        </label>
+        <label>
           协议
           <select v-model="llmForm.protocol">
             <option value="openai">OpenAI 兼容</option>
@@ -182,17 +209,13 @@ function cycleTheme() {
         </label>
         <label>
           接口地址
-          <input v-model="llmForm.baseUrl" required placeholder="例如 https://api.openai.com/v1" />
-        </label>
-        <label>
-          模型名
-          <input v-model="llmForm.model" required placeholder="例如 gpt-4o-mini" />
+          <input v-model="llmForm.baseUrl" required placeholder="https://api.x.ai/v1" />
         </label>
         <label>
           API Key
-          <input v-model="llmForm.apiKey" type="password" :placeholder="llm?.apiKeySet ? '已保存，留空则不修改' : '本地模型可留空'" />
+          <input v-model="llmForm.apiKey" type="password" :placeholder="llm?.apiKeySet ? '已保存，留空则不修改' : '在 xAI 控制台创建后填写'" />
         </label>
-        <p class="hint">保存在 MySQL federal.fed_llm，立即生效，不用重启。密钥不会回传到页面。</p>
+        <p class="hint">可选 Grok 4.7、4.6、4.5，走 xAI 的 OpenAI 兼容接口。保存在 MySQL federal.fed_llm，立即生效。密钥不会回传到页面。</p>
         <p v-if="llmMessage" class="ok">{{ llmMessage }}</p>
         <p v-if="llmError" class="err">{{ llmError }}</p>
         <div class="actions">
