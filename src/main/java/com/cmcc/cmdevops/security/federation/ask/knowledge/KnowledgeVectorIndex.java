@@ -8,6 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -36,6 +37,7 @@ public class KnowledgeVectorIndex {
     private final Map<Long, float[]> memory = new ConcurrentHashMap<>();
     private volatile boolean collectionReady;
 
+    @Autowired
     public KnowledgeVectorIndex(FederationProperties properties, ObjectMapper objectMapper) {
         this.embedder = OntologyToolsEmbedder.embedder(properties);
         this.dim = dimOf(embedder.embed("dimension-probe"));
