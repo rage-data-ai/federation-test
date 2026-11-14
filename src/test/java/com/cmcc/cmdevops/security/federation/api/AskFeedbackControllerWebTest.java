@@ -28,10 +28,18 @@ import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackService;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackStore;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskRun;
 import com.cmcc.cmdevops.security.federation.ask.feedback.MemoryAskFeedbackStore;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeVectorIndex;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.MemoryAskKnowledgeStore;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.HashingTermEmbedder;
+import com.cmcc.cmdevops.security.federation.ask.prompt.AskPromptService;
+import com.cmcc.cmdevops.security.federation.ask.prompt.MemoryAskPromptStore;
 import com.cmcc.cmdevops.security.federation.config.WebMvcSecurityConfiguration;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.RoleAuthorizationInterceptor;
+
+import tools.jackson.databind.json.JsonMapper;
 
 @WebMvcTest(controllers = AskFeedbackController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -39,7 +47,6 @@ import com.cmcc.cmdevops.security.federation.security.RoleAuthorizationIntercept
         RoleAuthorizationInterceptor.class,
         WebMvcSecurityConfiguration.class,
         GlobalExceptionHandler.class,
-        AskFeedbackService.class,
         AskFeedbackControllerWebTest.Stores.class
 })
 class AskFeedbackControllerWebTest {
@@ -50,6 +57,16 @@ class AskFeedbackControllerWebTest {
         @Bean
         AskFeedbackStore askFeedbackStore() {
             return new MemoryAskFeedbackStore();
+        }
+
+        @Bean
+        AskFeedbackService askFeedbackService(AskFeedbackStore store) {
+            AskKnowledgeService knowledge = new AskKnowledgeService(
+                    new MemoryAskKnowledgeStore(),
+                    new KnowledgeVectorIndex(new HashingTermEmbedder(), null, JsonMapper.builder().build()),
+                    System::currentTimeMillis);
+            AskPromptService prompts = new AskPromptService(new MemoryAskPromptStore(), System::currentTimeMillis);
+            return new AskFeedbackService(store, knowledge, prompts, System::currentTimeMillis);
         }
     }
 

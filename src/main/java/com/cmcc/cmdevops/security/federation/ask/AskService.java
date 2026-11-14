@@ -23,6 +23,11 @@ import com.cmcc.cmdevops.security.federation.ask.OntologyTools.ConceptSummary;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackStore;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskRunRecorder;
 import com.cmcc.cmdevops.security.federation.ask.feedback.MemoryAskFeedbackStore;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledge;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService.Match;
+import com.cmcc.cmdevops.security.federation.ask.prompt.AskPromptService;
+import com.cmcc.cmdevops.security.federation.ask.prompt.PreferenceTools;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 import com.cmcc.cmdevops.security.federation.llm.JsonReply;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
@@ -39,15 +44,26 @@ import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 智能问数编排：Ontology → Metadata → DataInsight。
+ * 智能问数编排：知识库（可选短路）→ Ontology → Metadata → DataInsight。
  * <p>
- * 事件：run、stage、ontology、metadata、sql、result、clarify、answer、error，最后由调用方发 done。
+ * 事件：run、stage、knowledge、ontology、metadata、sql、result、clarify、answer、error，最后由调用方发 done。
  * 每次问数结束后落一条 {@link com.cmcc.cmdevops.security.federation.ask.feedback.AskRun}，供评价和建议引用。
  */
 @Service
 public class AskService {
 
     private static final Logger log = LoggerFactory.getLogger(AskService.class);
+
+    static final String KNOWLEDGE_PROMPT = """
+            你是问数助手。下面给出用户问题，以及知识库按问题召回的若干条「问题–答案对」（含 SQL 与证据摘要）。
+            判断是否能仅凭这些知识直接回答当前问题：
+            - 能：复用或微调知识中的结论；若知识含 SQL 且时间范围等仍适用，可沿用；不要编造知识里没有的数字。
+            - 不能：例如时间范围、过滤条件、口径与知识明显不符，或需要重新查库。
+            最后只输出一个 JSON 对象，不要其它文字：
+            {"status":"answered","answer":"中文结论","sql":"可空，沿用的 SQL","knowledgeId":1}
+            或
+            {"status":"continue","reason":"为什么不能直接答"}
+            """;
 
     static final String EXPLORER_PROMPT = """
             你是安全运营本体的检索助手，只负责把用户问题对应到本体实体，不写 SQL。
@@ -104,6 +120,9 @@ public class AskService {
     private final ObjectMapper objectMapper;
     private final FederationProperties.Ask config;
     private final AskFeedbackStore feedbackStore;
+    private final AskKnowledgeService knowledge;
+    private final AskPromptService prompts;
+    private final PreferenceTools preferenceTools;
 
     @Autowired
     public AskService(
@@ -114,9 +133,12 @@ public class AskService {
             LlmClient llm,
             ObjectMapper objectMapper,
             FederationProperties properties,
-            AskFeedbackStore feedbackStore) {
+            AskFeedbackStore feedbackStore,
+            AskKnowledgeService knowledge,
+            AskPromptService prompts,
+            PreferenceTools preferenceTools) {
         this(ontologyTools, verifier, sql -> execute(queryService, sql), guard::validate, llm, objectMapper,
-                properties.getAsk(), feedbackStore);
+                properties.getAsk(), feedbackStore, knowledge, prompts, preferenceTools);
     }
 
     AskService(
@@ -127,7 +149,8 @@ public class AskService {
             LlmClient llm,
             ObjectMapper objectMapper,
             FederationProperties.Ask config) {
-        this(ontologyTools, verifier, runner, validator, llm, objectMapper, config, new MemoryAskFeedbackStore());
+        this(ontologyTools, verifier, runner, validator, llm, objectMapper, config, new MemoryAskFeedbackStore(), null,
+                null, null);
     }
 
     AskService(
@@ -139,6 +162,34 @@ public class AskService {
             ObjectMapper objectMapper,
             FederationProperties.Ask config,
             AskFeedbackStore feedbackStore) {
+        this(ontologyTools, verifier, runner, validator, llm, objectMapper, config, feedbackStore, null, null, null);
+    }
+
+    AskService(
+            OntologyTools ontologyTools,
+            MetadataVerifier verifier,
+            Function<String, QueryResponse> runner,
+            Consumer<String> validator,
+            LlmClient llm,
+            ObjectMapper objectMapper,
+            FederationProperties.Ask config,
+            AskFeedbackStore feedbackStore,
+            AskKnowledgeService knowledge) {
+        this(ontologyTools, verifier, runner, validator, llm, objectMapper, config, feedbackStore, knowledge, null, null);
+    }
+
+    AskService(
+            OntologyTools ontologyTools,
+            MetadataVerifier verifier,
+            Function<String, QueryResponse> runner,
+            Consumer<String> validator,
+            LlmClient llm,
+            ObjectMapper objectMapper,
+            FederationProperties.Ask config,
+            AskFeedbackStore feedbackStore,
+            AskKnowledgeService knowledge,
+            AskPromptService prompts,
+            PreferenceTools preferenceTools) {
         this.ontologyTools = ontologyTools;
         this.verifier = verifier;
         this.runner = runner;
@@ -147,6 +198,13 @@ public class AskService {
         this.objectMapper = objectMapper;
         this.config = config;
         this.feedbackStore = feedbackStore;
+        this.knowledge = knowledge;
+        this.prompts = prompts;
+        this.preferenceTools = preferenceTools;
+    }
+
+    private String systemPrompt(String base) {
+        return prompts == null ? base : prompts.compose(base);
     }
 
     interface Explorer {
@@ -181,6 +239,9 @@ public class AskService {
 
     record AnalystReply(String status, String answer, String sql, List<CaliberItem> caliber, String question,
                         List<String> options) {
+    }
+
+    record KnowledgeReply(String status, String answer, String sql, Long knowledgeId, String reason) {
     }
 
     /** 公开的廉价可回答性预检，供 API / 控制台在发问前调用。 */
@@ -230,6 +291,10 @@ public class AskService {
         String question = request.question().strip();
         String dialogue = dialogue(request);
 
+        if (tryAnswerFromKnowledge(request, listener)) {
+            return;
+        }
+
         listener.emit("stage", stage("ontology", "Ontology 智能体：检索业务语义"));
         BusinessContext context = ontologyTools.businessContext(userText(request), Set.of());
         AnswerabilityChecker.Answerability answerability =
@@ -278,8 +343,8 @@ public class AskService {
                 runner, validator, listener, objectMapper, config.getResultPreviewRows());
         Analyst analyst = AiServices.builder(Analyst.class)
                 .chatModel(llm.model())
-                .tools(session)
-                .systemMessageProvider(memoryId -> INSIGHT_PROMPT)
+                .tools(preferenceTools == null ? List.of(session) : List.of(session, preferenceTools))
+                .systemMessageProvider(memoryId -> systemPrompt(INSIGHT_PROMPT))
                 .maxSequentialToolsInvocations(InsightSession.MAX_SQL_ATTEMPTS + 8)
                 .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.sendExceptionMessageToLlm())
                 .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
@@ -352,11 +417,78 @@ public class AskService {
         return queryService.execute(request);
     }
 
+    /**
+     * 先按问题检索共享知识；命中后由模型判断能否直接答。能则发 answer 并返回 true；否则发 knowledge 事件后继续本体路径。
+     */
+    private boolean tryAnswerFromKnowledge(AskRequest request, AskListener listener) {
+        if (knowledge == null) {
+            return false;
+        }
+        List<Match> matches;
+        try {
+            matches = knowledge.search(request.question().strip(), AskKnowledgeService.DEFAULT_TOP_K);
+        } catch (RuntimeException e) {
+            log.warn("知识检索失败，继续本体路径: {}", e.toString());
+            return false;
+        }
+        if (matches.isEmpty()) {
+            return false;
+        }
+        listener.emit("stage", stage("knowledge", "知识库：按问题召回并判定是否可直接作答"));
+        List<Map<String, Object>> payload = matches.stream().map(match -> {
+            AskKnowledge item = match.knowledge();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", item.id());
+            row.put("score", match.score());
+            row.put("question", item.question());
+            row.put("answer", item.answerPair().answer());
+            row.put("sql", item.answerPair().sql());
+            row.put("caliber", item.answerPair().caliber());
+            row.put("evidence", item.evidence());
+            return row;
+        }).toList();
+        listener.emit("knowledge", Map.of("matches", payload));
+
+        String raw = llm.model().chat(KNOWLEDGE_PROMPT + "\n\n用户问题：\n" + request.question().strip()
+                + "\n\n召回知识（JSON）：\n" + writeJson(payload));
+        KnowledgeReply reply;
+        try {
+            reply = read(raw, KnowledgeReply.class);
+        } catch (IllegalStateException e) {
+            log.warn("知识判定返回无法解析，继续本体路径: {}", JsonReply.abbreviate(raw, 500));
+            return false;
+        }
+        if (reply == null || !"answered".equals(reply.status()) || reply.answer() == null || reply.answer().isBlank()) {
+            return false;
+        }
+        AskKnowledge used = matches.stream()
+                .map(Match::knowledge)
+                .filter(item -> reply.knowledgeId() != null && reply.knowledgeId() == item.id())
+                .findFirst()
+                .orElse(matches.get(0).knowledge());
+        Map<String, Object> answer = new LinkedHashMap<>();
+        answer.put("answer", reply.answer());
+        answer.put("sql", reply.sql() != null && !reply.sql().isBlank() ? reply.sql() : used.answerPair().sql());
+        answer.put("caliber", used.answerPair().caliber() == null ? List.of() : used.answerPair().caliber());
+        answer.put("steps", List.of("命中知识 #" + used.id() + "：" + used.question()));
+        answer.put("knowledgeId", used.id());
+        listener.emit("answer", answer);
+        return true;
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JacksonException e) {
+            return String.valueOf(value);
+        }
+    }
+
     private ExplorerReply explore(String dialogue, BusinessContext context) {
         Explorer explorer = AiServices.builder(Explorer.class)
                 .chatModel(llm.model())
                 .tools(ontologyTools)
-                .systemMessageProvider(memoryId -> EXPLORER_PROMPT)
+                .systemMessageProvider(memoryId -> systemPrompt(EXPLORER_PROMPT))
                 .maxSequentialToolsInvocations(12)
                 .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.sendExceptionMessageToLlm())
                 .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())

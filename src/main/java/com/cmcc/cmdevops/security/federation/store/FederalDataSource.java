@@ -135,6 +135,54 @@ public class FederalDataSource {
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
         ensureAskFeedbackSchema();
+        ensureAskKnowledgeSchema();
+        ensureAskPromptSchema();
+    }
+
+    /** 问数知识正本：问题、问题–答案对、证据；向量在 Milvus，不进这张表。 */
+    private void ensureAskKnowledgeSchema() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_ask_knowledge (
+                  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  question TEXT NOT NULL,
+                  answer MEDIUMTEXT NOT NULL,
+                  sql_text MEDIUMTEXT NULL,
+                  caliber MEDIUMTEXT NOT NULL,
+                  evidence MEDIUMTEXT NOT NULL,
+                  source_run_id VARCHAR(36) NULL,
+                  status VARCHAR(16) NOT NULL,
+                  created_by VARCHAR(255) NOT NULL,
+                  reviewed_by VARCHAR(255) NULL,
+                  review_note TEXT NULL,
+                  created_at BIGINT NOT NULL,
+                  updated_at BIGINT NOT NULL,
+                  KEY idx_fed_ask_knowledge_status (status, updated_at),
+                  KEY idx_fed_ask_knowledge_run (source_run_id),
+                  CONSTRAINT fk_fed_ask_knowledge_run FOREIGN KEY (source_run_id)
+                    REFERENCES fed_ask_run (id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+    }
+
+    /** 问数补充提示词：全局 / 个人，版本追加，生效态单独标记。 */
+    private void ensureAskPromptSchema() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_ask_prompt (
+                  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  scope VARCHAR(16) NOT NULL,
+                  owner VARCHAR(255) NULL,
+                  content MEDIUMTEXT NOT NULL,
+                  status VARCHAR(16) NOT NULL,
+                  source VARCHAR(16) NOT NULL,
+                  version INT NOT NULL,
+                  created_by VARCHAR(255) NOT NULL,
+                  activated_by VARCHAR(255) NULL,
+                  created_at BIGINT NOT NULL,
+                  updated_at BIGINT NOT NULL,
+                  KEY idx_fed_ask_prompt_scope (scope, status, version),
+                  KEY idx_fed_ask_prompt_owner (owner, status, version)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
     }
 
     /** 问数记录、评价、建议。时间一律存 epoch 毫秒，不受连接时区影响。 */

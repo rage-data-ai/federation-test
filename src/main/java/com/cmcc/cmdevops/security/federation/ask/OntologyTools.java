@@ -111,7 +111,7 @@ public class OntologyTools {
                 new BusinessContextBuilder(repository, pathFinder, views, embedder, embeddingStore, pgvector);
     }
 
-    static TermEmbedder termEmbedderOf(FederationProperties properties) {
+    public static TermEmbedder termEmbedderOf(FederationProperties properties) {
         String endpoint = properties.getAsk().getEmbedEndpoint();
         if (endpoint == null || endpoint.isBlank()) {
             return new HashingTermEmbedder();

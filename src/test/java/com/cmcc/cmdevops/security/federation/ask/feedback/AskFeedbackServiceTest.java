@@ -17,14 +17,30 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackService.SuggestionPatch;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledge;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeVectorIndex;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.MemoryAskKnowledgeStore;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.HashingTermEmbedder;
+import com.cmcc.cmdevops.security.federation.ask.prompt.AskPrompt;
+import com.cmcc.cmdevops.security.federation.ask.prompt.AskPromptService;
+import com.cmcc.cmdevops.security.federation.ask.prompt.MemoryAskPromptStore;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
+
+import tools.jackson.databind.json.JsonMapper;
 
 class AskFeedbackServiceTest {
 
     private final MemoryAskFeedbackStore store = new MemoryAskFeedbackStore();
     private final AtomicLong clock = new AtomicLong(1_000);
-    private final AskFeedbackService service = new AskFeedbackService(store, clock::incrementAndGet);
+    private final AskKnowledgeService knowledge = new AskKnowledgeService(
+            new MemoryAskKnowledgeStore(),
+            new KnowledgeVectorIndex(new HashingTermEmbedder(), null, JsonMapper.builder().build()),
+            clock::incrementAndGet);
+    private final AskPromptService prompts = new AskPromptService(new MemoryAskPromptStore(), clock::incrementAndGet);
+    private final AskFeedbackService service =
+            new AskFeedbackService(store, knowledge, prompts, clock::incrementAndGet);
 
     @BeforeEach
     void seedRuns() {
@@ -191,6 +207,44 @@ class AskFeedbackServiceTest {
         AskSuggestion same = service.update(created.id(), new SuggestionPatch(" 加个导出 ", null, null, null));
 
         assertEquals(created.updatedAt(), same.updatedAt());
+    }
+
+    @Test
+    void adoptingWithKnowledgeDispositionCreatesPendingKnowledge() {
+        as("alice");
+        long id = service.suggest("高危应按 level >= 4", "run-alice").id();
+
+        asAdmin("root");
+        service.update(id, new SuggestionPatch(null, AskSuggestion.ADOPTED, "knowledge", "已入库"));
+
+        List<AskKnowledge> pending = knowledge.list(AskKnowledge.PENDING);
+        assertEquals(1, pending.size());
+        assertEquals("问题 run-alice", pending.get(0).question());
+        assertEquals("高危应按 level >= 4", pending.get(0).answerPair().answer());
+    }
+
+    @Test
+    void adoptingWithPromptDispositionCreatesGlobalDraft() {
+        as("alice");
+        long id = service.suggest("回答里先写口径再写数字", null).id();
+
+        asAdmin("root");
+        service.update(id, new SuggestionPatch(null, AskSuggestion.ADOPTED, "prompt", "已生成草稿"));
+
+        List<AskPrompt> drafts = prompts.list(AskPrompt.GLOBAL).stream()
+                .filter(item -> AskPrompt.DRAFT.equals(item.status()))
+                .toList();
+        assertEquals(1, drafts.size());
+        assertTrue(drafts.get(0).content().contains("回答里先写口径再写数字"));
+    }
+
+    @Test
+    void upRatingDraftsPendingKnowledge() {
+        as("alice");
+        service.rate("run-alice", "up");
+        List<AskKnowledge> pending = knowledge.list(AskKnowledge.PENDING);
+        assertEquals(1, pending.size());
+        assertEquals("run-alice", pending.get(0).sourceRunId());
     }
 
     @Test
