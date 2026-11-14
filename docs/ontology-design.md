@@ -195,4 +195,5 @@
 
 - `GET /api/v1/llm/status`：是否已配置、协议、模型名。
 - `POST /api/v1/ontology/draft`：`{tables: ["ck81.pangu.alert"], instructions}` → 写入数量与警告。
-- `POST /api/v1/ask`（SSE）：`{question, history: [{role, content}]}`。事件依次为 `stage`、`ontology`、`metadata`、`sql`（每次尝试，状态 executed / rejected / failed）、`result`、最后是 `answer`（结论、SQL、结果、口径来源）或 `clarify`（问题与选项），出错为 `error`，结束发 `done`。
+- `POST /api/v1/ask`（SSE）：`{question, history: [{role, content}], conversationId}`。`conversationId` 可省，追问时带上首个 `run` 事件给的值，同一段对话的问数就记在一起。事件依次为 `run`（`runId`、`conversationId`）、`stage`、`ontology`、`metadata`、`sql`（每次尝试，状态 executed / rejected / failed）、`result`、最后是 `answer`（结论、SQL、结果、口径来源）或 `clarify`（问题与选项），出错为 `error`，结束发 `done`。
+- `GET /api/v1/ask/runs/{id}`、`PUT /api/v1/ask/runs/{id}/rating`、`/api/v1/ask/suggestions`：问数记录、评价和建议。每次问数结束都会落一条 `fed_ask_run`（问题、对话历史、回答、最终 SQL、证据），评价和建议只引用这条记录的 id。记录和建议只有本人和管理员能看；处置建议（采纳 / 不采纳、答复、去向）需要 `ADMIN`。
