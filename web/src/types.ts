@@ -276,6 +276,83 @@ export type AskSuggestionPatch = {
   reply?: string
 }
 
+export type AskKnowledgeStatus = 'pending' | 'approved' | 'rejected'
+
+export type AskAnswerPair = {
+  answer: string
+  sql: string | null
+  caliber: Array<Record<string, unknown>>
+}
+
+/** 问数共享知识正本；检索只对 question，答案对与证据从这里取。 */
+export type AskKnowledge = {
+  id: number
+  question: string
+  answerPair: AskAnswerPair
+  evidence: Record<string, unknown>
+  sourceRunId: string | null
+  status: AskKnowledgeStatus
+  createdBy: string
+  reviewedBy: string | null
+  reviewNote: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** null 的字段不改；审核传 status / reviewNote。 */
+export type AskKnowledgePatch = {
+  question?: string
+  answer?: string
+  sql?: string | null
+  caliber?: Array<Record<string, unknown>>
+  evidence?: Record<string, unknown>
+  status?: AskKnowledgeStatus
+  reviewNote?: string | null
+}
+
+/** 知识检索命中（search 接口与 SSE knowledge 事件共用字段）。 */
+export type AskKnowledgeMatch = {
+  id?: number
+  score?: number
+  question?: string
+  answer?: string
+  sql?: string | null
+  caliber?: Array<Record<string, unknown>>
+  evidence?: Record<string, unknown>
+  knowledge?: AskKnowledge
+  [key: string]: unknown
+}
+
+export type AskKnowledgeHits = {
+  matches: AskKnowledgeMatch[]
+}
+
+export type AskPromptScope = 'global' | 'personal'
+
+export type AskPromptStatus = 'draft' | 'active' | 'archived'
+
+export type AskPromptSource = 'human' | 'model'
+
+/** 问数补充提示词：全局 / 个人，compose 时接在基础规则之后。 */
+export type AskPrompt = {
+  id: number
+  scope: AskPromptScope
+  owner: string | null
+  content: string
+  status: AskPromptStatus
+  source: AskPromptSource
+  version: number
+  createdBy: string
+  activatedBy: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export type AskPromptPatch = {
+  content?: string
+  status?: AskPromptStatus
+}
+
 export function emptyOntology(): OntologyBundle {
   return { concepts: [], attributes: [], relations: [], codes: [], definedConcepts: [] }
 }
