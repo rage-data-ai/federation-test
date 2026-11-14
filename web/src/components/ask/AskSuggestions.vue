@@ -292,8 +292,7 @@ textarea {
 }
 
 .reply,
-.run-link,
-.history {
+.run-link {
   font-size: 13px;
 }
 
@@ -303,6 +302,7 @@ textarea {
   gap: 4px;
   padding-left: 12px;
   border-left: 2px solid var(--line);
+  font-size: 13px;
 }
 
 .run p {

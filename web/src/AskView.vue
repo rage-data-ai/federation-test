@@ -41,7 +41,7 @@ const view = ref<(typeof VIEWS)[number]['key']>('chat')
           </button>
         </nav>
       </div>
-      <div v-if="view === 'chat'" class="head-side">
+      <div class="head-side" :class="{ offstage: view !== 'chat' }">
         <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">{{ needsKey ? '填写 API Key' : '未配置，去设置' }}</button>
         <span v-else-if="status" class="head-note">{{ status.protocol }} · {{ status.model }}</span>
         <button type="button" :disabled="busy || !turns.length" @click="clearTurns">新对话</button>
@@ -217,6 +217,11 @@ const view = ref<(typeof VIEWS)[number]['key']>('chat')
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+/* 切到建议时只是藏起来、仍然占位，标题栏高度不跟着跳。 */
+.offstage {
+  visibility: hidden;
 }
 
 .views {
