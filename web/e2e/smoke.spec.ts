@@ -97,6 +97,22 @@ test.describe('console smoke', () => {
     }
   })
 
+  test('llm dialog accepts any model name, not only presets', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: '大模型配置' }).click()
+    const dialog = page.getByRole('dialog', { name: '大模型' })
+    await expect(dialog).toBeVisible()
+    const model = dialog.getByLabel('模型')
+    await expect(model).toHaveAttribute('list', 'llm-model-presets')
+    await model.fill('my-local-qwen')
+    await expect(model).toHaveValue('my-local-qwen')
+    await dialog.getByRole('button', { name: 'GPT-4o' }).click()
+    await expect(model).toHaveValue('gpt-4o')
+    await expect(dialog.getByLabel('接口地址')).toHaveValue('https://api.openai.com/v1')
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+  })
+
   test('ask critical path exposes landmarks and composer semantics', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: '智能问数' }).click()

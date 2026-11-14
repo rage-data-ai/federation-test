@@ -16,7 +16,7 @@ import {
 import AskView from './AskView.vue'
 import DatasourceView from './DatasourceView.vue'
 import OntologyView from './OntologyView.vue'
-import { AGENT_MODELS, DEFAULT_MODEL, findModel } from './models'
+import { AGENT_MODELS, findModel } from './models'
 import type { AuthMe, LlmConfig, LlmStatus } from './types'
 import { errMessage } from './types'
 
@@ -99,13 +99,6 @@ onUnmounted(() => {
   window.clearInterval(themeTimer)
 })
 
-const modelOptions = computed(() => {
-  if (findModel(llmForm.model) || !llmForm.model) {
-    return AGENT_MODELS
-  }
-  return [...AGENT_MODELS, { id: llmForm.model, label: llmForm.model, protocol: llmForm.protocol, baseUrl: llmForm.baseUrl }]
-})
-
 async function refreshLlm() {
   try {
     llm.value = await llmConfig()
@@ -114,6 +107,7 @@ async function refreshLlm() {
   }
 }
 
+/** 快捷填入预设；手改模型名不会被改回去。 */
 function applyModel(id: string) {
   const preset = findModel(id)
   if (!preset) {
@@ -210,14 +204,11 @@ async function openLlm() {
   showLlm.value = true
   try {
     const config = await llmConfig()
-    llmForm.protocol = config.protocol || DEFAULT_MODEL.protocol
+    llmForm.protocol = config.protocol || 'openai'
     llmForm.baseUrl = config.baseUrl || ''
     llmForm.model = config.model || ''
     llmForm.apiKey = ''
     llm.value = config
-    if (!llmForm.model || !llmForm.baseUrl) {
-      applyModel(llmForm.model || DEFAULT_MODEL.id)
-    }
   } catch (e) {
     llmError.value = errMessage(e)
   }
@@ -373,10 +364,29 @@ function cycleTheme() {
         <h3 id="llm-title">大模型</h3>
         <label>
           模型
-          <select v-model="llmForm.model" required @change="applyModel(llmForm.model)">
-            <option v-for="item in modelOptions" :key="item.id" :value="item.id">{{ item.label }}</option>
-          </select>
+          <input
+            v-model="llmForm.model"
+            list="llm-model-presets"
+            required
+            autocomplete="off"
+            placeholder="例如 gpt-4.1、claude-sonnet-4-5、grok-4.7、本地模型名"
+          />
+          <datalist id="llm-model-presets">
+            <option v-for="item in AGENT_MODELS" :key="item.id" :value="item.id">{{ item.label }}</option>
+          </datalist>
         </label>
+        <div class="preset-row" role="group" aria-label="快捷填入">
+          <span class="hint">快捷填入</span>
+          <button
+            v-for="item in AGENT_MODELS"
+            :key="item.id"
+            class="tiny"
+            type="button"
+            @click="applyModel(item.id)"
+          >
+            {{ item.label }}
+          </button>
+        </div>
         <label>
           协议
           <select v-model="llmForm.protocol">
@@ -386,13 +396,13 @@ function cycleTheme() {
         </label>
         <label>
           接口地址
-          <input v-model="llmForm.baseUrl" required placeholder="https://api.x.ai/v1" />
+          <input v-model="llmForm.baseUrl" required placeholder="https://api.openai.com/v1 或 http://127.0.0.1:11434/v1" />
         </label>
         <label>
           API Key
-          <input v-model="llmForm.apiKey" type="password" :placeholder="llm?.apiKeySet ? '已保存，留空则不修改' : '在 xAI 控制台创建后填写'" />
+          <input v-model="llmForm.apiKey" type="password" :placeholder="llm?.apiKeySet ? '已保存，留空则不修改' : '供应商发放的密钥；本地服务可留空后保存再测'" />
         </label>
-        <p class="hint">可选 Grok 4.7、4.6、4.5，走 xAI 的 OpenAI 兼容接口。保存在 MySQL federal.fed_llm，立即生效。密钥不会回传到页面。</p>
+        <p class="hint">模型名、协议、地址均可手写；快捷填入只帮你带出常见组合。保存在 MySQL federal.fed_llm，立即生效。密钥不会回传到页面。</p>
         <p v-if="llmMessage" class="ok">{{ llmMessage }}</p>
         <p v-if="llmError" class="err">{{ llmError }}</p>
         <div class="actions">
@@ -486,5 +496,16 @@ function cycleTheme() {
 .stage > * {
   flex: 1;
   min-height: 0;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.preset-row .hint {
+  margin-right: 2px;
 }
 </style>
