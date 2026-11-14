@@ -2,6 +2,9 @@ package com.cmcc.cmdevops.security.federation.ask;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayDeque;
@@ -10,6 +13,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.AfterEach;
@@ -18,6 +22,10 @@ import org.junit.jupiter.api.Test;
 
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
 import com.cmcc.cmdevops.security.federation.ask.AskService.Clarify;
+import com.cmcc.cmdevops.security.federation.ask.AskService.Turn;
+import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackStore;
+import com.cmcc.cmdevops.security.federation.ask.feedback.AskRun;
+import com.cmcc.cmdevops.security.federation.ask.feedback.MemoryAskFeedbackStore;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.metadata.ColumnSnapshot;
@@ -50,6 +58,7 @@ class AskServiceTest {
     private final List<String> events = new ArrayList<>();
     private final List<Object> payloads = new ArrayList<>();
     private final List<String> executed = new ArrayList<>();
+    private AskFeedbackStore feedback = new MemoryAskFeedbackStore();
 
     @BeforeEach
     void setUp() {
@@ -82,7 +91,7 @@ class AskServiceTest {
 
         service(model, rows(List.of("web-01", 5L))).ask(new AskRequest("最近一天高危告警最多的资产名称", List.of()), this::record);
 
-        assertEquals(List.of("stage", "answerability", "ontology", "stage", "metadata", "stage", "sql", "sql", "result", "answer"), events);
+        assertEquals(List.of("run", "stage", "answerability", "ontology", "stage", "metadata", "stage", "sql", "sql", "result", "answer"), events);
         assertEquals(List.of(GOOD_SQL), executed);
         Map<?, ?> rejected = (Map<?, ?>) payloads.get(events.indexOf("sql"));
         assertEquals("rejected", rejected.get("status"));
@@ -93,6 +102,71 @@ class AskServiceTest {
         assertEquals(List.of(List.of("web-01", 5L)), answer.get("rows"));
         assertEquals(2, ((List<?>) answer.get("caliber")).size());
         assertTrue(((List<?>) answer.get("steps")).size() >= 2);
+
+        AskRun run = recordedRun();
+        assertEquals(AskRun.ANSWERED, run.status());
+        assertEquals("anonymous", run.userName());
+        assertEquals("最近一天高危告警最多的资产名称", run.question());
+        assertEquals("web-01 最多，5 条", run.answer());
+        assertEquals(GOOD_SQL, run.sql());
+        assertNull(run.error());
+        assertEquals(run.id(), run.conversationId());
+        assertEquals(List.of(List.of("web-01", 5L)), run.evidence().get("rows"));
+        assertEquals(Set.of("ck81.pangu.alert", "mysql70.tsoc.asset"),
+                Set.copyOf((List<?>) run.evidence().get("tables")));
+        assertEquals(Set.of("assetName", "HighRiskAlert"), Set.copyOf((List<?>) run.evidence().get("entities")));
+        assertEquals(2, ((List<?>) run.evidence().get("caliber")).size());
+        assertEquals(2, ((List<?>) run.evidence().get("sqls")).size());
+    }
+
+    @Test
+    void recordsDialogueHistoryUnderTheSameConversation() {
+        ScriptedModel model = new ScriptedModel()
+                .tool("runSql", Map.of("sql", GOOD_SQL, "purpose", "main"))
+                .text("{\"status\":\"answered\",\"answer\":\"web-01\",\"sql\":null,\"caliber\":[]}");
+        List<Turn> history = List.of(
+                new Turn("user", "高危告警最多的资产名称"),
+                new Turn("assistant", "要看哪个时间范围？"));
+
+        service(model, rows(List.of("web-01", 5L)))
+                .ask(new AskRequest("最近一天", history, "conv-42"), this::record);
+
+        AskRun run = recordedRun();
+        assertEquals("conv-42", run.conversationId());
+        assertNotEquals(run.id(), run.conversationId());
+        assertEquals(history, run.history());
+        assertEquals("最近一天", run.question());
+    }
+
+    @Test
+    void recordsRunWhenAskFails() {
+        RuntimeException thrown = assertThrows(RuntimeException.class, () -> service(new BrokenModel(), rows())
+                .ask(new AskRequest("最近一天高危告警最多的资产名称", List.of()), this::record));
+
+        assertTrue(thrown.toString().contains("模型超时"), thrown.toString());
+        AskRun run = recordedRun();
+        assertEquals(AskRun.ERROR, run.status());
+        assertTrue(run.error().contains("模型超时"));
+        assertNull(run.answer());
+        assertTrue(executed.isEmpty());
+    }
+
+    @Test
+    void answerStillArrivesWhenRunCannotBeSaved() {
+        feedback = new MemoryAskFeedbackStore() {
+            @Override
+            public void saveRun(AskRun run) {
+                throw new IllegalStateException("联邦库不可用");
+            }
+        };
+        ScriptedModel model = new ScriptedModel()
+                .tool("runSql", Map.of("sql", GOOD_SQL, "purpose", "main"))
+                .text("{\"status\":\"answered\",\"answer\":\"web-01\",\"sql\":null,\"caliber\":[]}");
+
+        service(model, rows(List.of("web-01", 5L)))
+                .ask(new AskRequest("最近一天高危告警最多的资产名称", List.of()), this::record);
+
+        assertEquals("answer", events.get(events.size() - 1));
     }
 
     @Test
@@ -126,6 +200,11 @@ class AskServiceTest {
         assertEquals(List.of("告警", "资产"), clarify.options());
         assertTrue(model.toolResults().get(0).contains("mysql70.tsoc.asset"));
         assertTrue(executed.isEmpty());
+
+        AskRun run = recordedRun();
+        assertEquals(AskRun.CLARIFY, run.status());
+        assertEquals(clarify, run.evidence().get("clarify"));
+        assertNull(run.answer());
     }
 
     @Test
@@ -149,7 +228,12 @@ class AskServiceTest {
             executed.add(sql);
             return response;
         }, sql -> {
-        }, LlmClient.of(model), JsonMapper.builder().build(), new FederationProperties.Ask());
+        }, LlmClient.of(model), JsonMapper.builder().build(), new FederationProperties.Ask(), feedback);
+    }
+
+    private AskRun recordedRun() {
+        Map<?, ?> started = (Map<?, ?>) payloads.get(events.indexOf("run"));
+        return feedback.findRun((String) started.get("runId")).orElseThrow();
     }
 
     private void record(String event, Object data) {
@@ -172,6 +256,14 @@ class AskServiceTest {
             table.getColumns().add(new ColumnSnapshot(column, "varchar"));
         }
         return table;
+    }
+
+    private static final class BrokenModel implements ChatModel {
+
+        @Override
+        public ChatResponse doChat(ChatRequest request) {
+            throw new IllegalStateException("模型超时");
+        }
     }
 
     private static final class ScriptedModel implements ChatModel {

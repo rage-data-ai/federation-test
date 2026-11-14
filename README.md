@@ -43,7 +43,7 @@ cd web && npm install && npm run dev
 
 打开 http://localhost:5173 → **添加数据库** → 测试连接 → 保存。SQL 使用三部分表名：`catalog.schema.table`，例如 `mysql.shop.customer`。
 
-数据源、元数据和模型配置存在配置库的 `fed_catalog`、`fed_meta_table`、`fed_meta_column`、`fed_llm`。本体图在 `data/tdb2`。
+数据源、元数据和模型配置存在配置库的 `fed_catalog`、`fed_meta_table`、`fed_meta_column`、`fed_llm`。问数记录、评价和建议在 `fed_ask_run`、`fed_ask_feedback`、`fed_ask_suggestion`。本体图在 `data/tdb2`。
 
 一键体验（MySQL + Trino + 网关，控制台打进网关镜像，打开 http://localhost:18080）：
 
@@ -68,7 +68,10 @@ docker compose up -d --build
 | GET | `/api/v1/auth/me` | 当前身份（Bearer / JWT） |
 | GET | `/api/v1/llm/status` | 大模型是否已配置 |
 | PUT | `/api/v1/llm/config` | 写入大模型配置 |
-| POST | `/api/v1/ask` | 智能问数（SSE） |
+| POST | `/api/v1/ask` | 智能问数（SSE），首个事件 `run` 给出这次问数的记录号 |
+| GET | `/api/v1/ask/runs/{id}` | 一次问数的记录：问题、对话历史、回答、SQL、证据 |
+| PUT | `/api/v1/ask/runs/{id}/rating` | 评价这次问数：`up` / `down`，`null` 撤销 |
+| GET/POST/PUT/DELETE | `/api/v1/ask/suggestions/**` | 对问数的建议：提出、修改、管理员处置、删除 |
 | POST | `/api/v1/ontology/draft` | 按表起草本体 |
 | GET/POST/PUT/DELETE | `/api/v1/ontology/**` | 本体读写与推理 |
 | PUT | `/api/v1/ontology/{name}/certified` | 审定概念/派生概念（问数优先） |

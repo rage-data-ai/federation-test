@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import AskAnswerClarify from './components/ask/AskAnswerClarify.vue'
+import AskFeedback from './components/ask/AskFeedback.vue'
+import AskSuggestions from './components/ask/AskSuggestions.vue'
 import {
   SAMPLES,
   STAGE_LABEL,
@@ -11,19 +14,42 @@ import { useAskLlmStatus } from './composables/useAskLlmStatus'
 
 const { status, statusError, ready, needsKey, openLlmSettings } = useAskLlmStatus()
 const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskStream()
+
+const VIEWS = [
+  { key: 'chat', label: '对话' },
+  { key: 'suggestions', label: '建议' }
+] as const
+const view = ref<(typeof VIEWS)[number]['key']>('chat')
 </script>
 
 <template>
   <section class="ask" aria-labelledby="ask-title">
     <header class="module-head">
-      <h1 id="ask-title">智能问数</h1>
-      <div class="head-side">
+      <div class="head-main">
+        <h1 id="ask-title">智能问数</h1>
+        <nav class="views" aria-label="问数视图">
+          <button
+            v-for="item in VIEWS"
+            :key="item.key"
+            class="ghost"
+            :class="{ active: view === item.key }"
+            type="button"
+            :aria-current="view === item.key ? 'page' : undefined"
+            @click="view = item.key"
+          >
+            {{ item.label }}
+          </button>
+        </nav>
+      </div>
+      <div class="head-side" :class="{ offstage: view !== 'chat' }">
         <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">{{ needsKey ? '填写 API Key' : '未配置，去设置' }}</button>
         <span v-else-if="status" class="head-note">{{ status.protocol }} · {{ status.model }}</span>
         <button type="button" :disabled="busy || !turns.length" @click="clearTurns">新对话</button>
       </div>
     </header>
+    <AskSuggestions v-if="view === 'suggestions'" />
     <div
+      v-show="view === 'chat'"
       ref="scroller"
       class="thread"
       role="log"
@@ -139,11 +165,18 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
             :can-reply="idx === turns.length - 1"
             @pick="send"
           />
+          <AskFeedback
+            v-if="turn.done && turn.runId"
+            :run-id="turn.runId"
+            :answered="!!turn.answer"
+            :rating="turn.rating"
+            @rated="turn.rating = $event"
+          />
         </div>
       </article>
     </div>
 
-    <footer class="composer" role="region" aria-label="提问区">
+    <footer v-show="view === 'chat'" class="composer" role="region" aria-label="提问区">
       <label class="sr-only" for="ask-draft">问题输入</label>
       <textarea
         id="ask-draft"
@@ -178,6 +211,34 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
   flex-direction: column;
   min-height: 0;
   flex: 1;
+}
+
+.head-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* 切到建议时只是藏起来、仍然占位，标题栏高度不跟着跳。 */
+.offstage {
+  visibility: hidden;
+}
+
+.views {
+  display: flex;
+  gap: 2px;
+}
+
+.views button {
+  padding: 4px 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.views button.active {
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 600;
 }
 
 .thread {

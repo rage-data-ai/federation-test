@@ -3,6 +3,7 @@ import { askStream } from '../api'
 import type {
   AskMetadataReport,
   AskOntologyContext,
+  AskRating,
   AskSqlItem
 } from '../types'
 
@@ -23,6 +24,10 @@ export type AskStage = {
 
 export type AskTurn = {
   question: string
+  /** 网关给这次问数的记录号；流一开始就下发，评价和建议靠它指回这次问数。 */
+  runId: string
+  conversationId: string
+  rating: AskRating | null
   stages: AskStage[]
   ontology: AskOntologyContext | null
   answerability: Record<string, unknown> | null
@@ -51,9 +56,12 @@ export function lastStage(turn: Pick<AskTurn, 'stages'>): string {
   return stage ? String(stage.message ?? '提交中…') : '提交中…'
 }
 
-function emptyTurn(question: string): AskTurn {
+export function emptyTurn(question: string): AskTurn {
   return {
     question,
+    runId: '',
+    conversationId: '',
+    rating: null,
     stages: [],
     ontology: null,
     answerability: null,
@@ -87,9 +95,13 @@ function asRecord(data: unknown): Record<string, unknown> {
   return data && typeof data === 'object' ? (data as Record<string, unknown>) : {}
 }
 
-function applyEvent(turn: AskTurn, name: string, data: unknown): void {
+export function applyEvent(turn: AskTurn, name: string, data: unknown): void {
   const payload = asRecord(data)
   switch (name) {
+    case 'run':
+      turn.runId = typeof payload.runId === 'string' ? payload.runId : ''
+      turn.conversationId = typeof payload.conversationId === 'string' ? payload.conversationId : ''
+      break
     case 'stage':
       turn.stages.push(payload as AskStage)
       break
@@ -162,6 +174,7 @@ export function useAskStream() {
       return
     }
     const prior = buildHistory(turns.value)
+    const conversationId = turns.value.find((turn) => turn.conversationId)?.conversationId
     draft.value = ''
     turns.value.push(emptyTurn(question))
     const live = turns.value[turns.value.length - 1]
@@ -169,7 +182,7 @@ export function useAskStream() {
     controller = new AbortController()
     scrollDown()
     try {
-      await askStream({ question, history: prior }, (name, data) => onEvent(live, name, data), controller.signal)
+      await askStream({ question, history: prior, conversationId }, (name, data) => onEvent(live, name, data), controller.signal)
     } catch (e) {
       live.error = e instanceof Error ? e.message : String(e)
     } finally {

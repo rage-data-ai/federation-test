@@ -225,6 +225,57 @@ export type AskSqlItem = {
   [key: string]: unknown
 }
 
+export type AskRating = 'up' | 'down'
+
+export type AskRunStatus = 'answered' | 'clarify' | 'error'
+
+/** 网关为每次问数留下的记录；评价和建议都引用它。 */
+export type AskRun = {
+  id: string
+  conversationId: string
+  userName: string
+  question: string
+  history: Array<{ role: string; content: string }>
+  status: AskRunStatus
+  answer?: string | null
+  sql?: string | null
+  evidence: Record<string, unknown>
+  error?: string | null
+  createdAt: number
+  elapsedMs: number
+}
+
+export type AskRunView = {
+  run: AskRun
+  rating: AskRating | null
+}
+
+export type AskSuggestionStatus = 'open' | 'adopted' | 'rejected'
+
+export type AskSuggestionDisposition = 'knowledge' | 'prompt' | 'ontology'
+
+export type AskSuggestion = {
+  id: number
+  runId: string | null
+  runQuestion: string | null
+  userName: string
+  content: string
+  status: AskSuggestionStatus
+  disposition: AskSuggestionDisposition | null
+  reply: string | null
+  handledBy: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** null 的字段不改；disposition 传空串表示清掉去向。 */
+export type AskSuggestionPatch = {
+  content?: string
+  status?: AskSuggestionStatus
+  disposition?: AskSuggestionDisposition | ''
+  reply?: string
+}
+
 export function emptyOntology(): OntologyBundle {
   return { concepts: [], attributes: [], relations: [], codes: [], definedConcepts: [] }
 }

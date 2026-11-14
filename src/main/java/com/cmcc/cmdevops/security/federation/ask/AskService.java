@@ -20,11 +20,15 @@ import org.springframework.stereotype.Service;
 import com.cmcc.cmdevops.security.federation.ask.MetadataVerifier.MetadataReport;
 import com.cmcc.cmdevops.security.federation.ask.OntologyTools.BusinessContext;
 import com.cmcc.cmdevops.security.federation.ask.OntologyTools.ConceptSummary;
+import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackStore;
+import com.cmcc.cmdevops.security.federation.ask.feedback.AskRunRecorder;
+import com.cmcc.cmdevops.security.federation.ask.feedback.MemoryAskFeedbackStore;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 import com.cmcc.cmdevops.security.federation.llm.JsonReply;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.model.QueryRequest;
 import com.cmcc.cmdevops.security.federation.model.QueryResponse;
+import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.service.QueryService;
 
 import dev.langchain4j.service.AiServices;
@@ -37,7 +41,8 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * 智能问数编排：Ontology → Metadata → DataInsight。
  * <p>
- * 事件：stage、ontology、metadata、sql、result、clarify、answer、error，最后由调用方发 done。
+ * 事件：run、stage、ontology、metadata、sql、result、clarify、answer、error，最后由调用方发 done。
+ * 每次问数结束后落一条 {@link com.cmcc.cmdevops.security.federation.ask.feedback.AskRun}，供评价和建议引用。
  */
 @Service
 public class AskService {
@@ -98,6 +103,7 @@ public class AskService {
     private final LlmClient llm;
     private final ObjectMapper objectMapper;
     private final FederationProperties.Ask config;
+    private final AskFeedbackStore feedbackStore;
 
     @Autowired
     public AskService(
@@ -107,9 +113,10 @@ public class AskService {
             QueryService queryService,
             LlmClient llm,
             ObjectMapper objectMapper,
-            FederationProperties properties) {
+            FederationProperties properties,
+            AskFeedbackStore feedbackStore) {
         this(ontologyTools, verifier, sql -> execute(queryService, sql), guard::validate, llm, objectMapper,
-                properties.getAsk());
+                properties.getAsk(), feedbackStore);
     }
 
     AskService(
@@ -120,6 +127,18 @@ public class AskService {
             LlmClient llm,
             ObjectMapper objectMapper,
             FederationProperties.Ask config) {
+        this(ontologyTools, verifier, runner, validator, llm, objectMapper, config, new MemoryAskFeedbackStore());
+    }
+
+    AskService(
+            OntologyTools ontologyTools,
+            MetadataVerifier verifier,
+            Function<String, QueryResponse> runner,
+            Consumer<String> validator,
+            LlmClient llm,
+            ObjectMapper objectMapper,
+            FederationProperties.Ask config,
+            AskFeedbackStore feedbackStore) {
         this.ontologyTools = ontologyTools;
         this.verifier = verifier;
         this.runner = runner;
@@ -127,6 +146,7 @@ public class AskService {
         this.llm = llm;
         this.objectMapper = objectMapper;
         this.config = config;
+        this.feedbackStore = feedbackStore;
     }
 
     interface Explorer {
@@ -140,7 +160,14 @@ public class AskService {
     public record Turn(String role, String content) {
     }
 
-    public record AskRequest(String question, List<Turn> history) {
+    /**
+     * @param conversationId 同一段对话的多次问数传同一个 id；不传时每次问数自成一段
+     */
+    public record AskRequest(String question, List<Turn> history, String conversationId) {
+
+        public AskRequest(String question, List<Turn> history) {
+            this(question, history, null);
+        }
     }
 
     public record Clarify(String question, List<String> options) {
@@ -177,6 +204,29 @@ public class AskService {
             throw new IllegalArgumentException("问题不能为空");
         }
         llm.model();
+        AskRunRecorder recorder = new AskRunRecorder(
+                request, GatewayUser.current().name(), listener, System.currentTimeMillis());
+        listener.emit("run", Map.of("runId", recorder.id(), "conversationId", recorder.conversationId()));
+        try {
+            answer(request, recorder);
+        } catch (RuntimeException e) {
+            recorder.failed(e);
+            throw e;
+        } finally {
+            saveRun(recorder);
+        }
+    }
+
+    /** 记录失败不影响已经给出的回答。 */
+    private void saveRun(AskRunRecorder recorder) {
+        try {
+            feedbackStore.saveRun(recorder.toRun(System.currentTimeMillis()));
+        } catch (RuntimeException e) {
+            log.warn("问数记录保存失败 runId={}: {}", recorder.id(), e.toString());
+        }
+    }
+
+    private void answer(AskRequest request, AskListener listener) {
         String question = request.question().strip();
         String dialogue = dialogue(request);
 

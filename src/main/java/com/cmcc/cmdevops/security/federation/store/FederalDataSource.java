@@ -134,6 +134,57 @@ public class FederalDataSource {
                   PRIMARY KEY (fingerprint, embedder)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        ensureAskFeedbackSchema();
+    }
+
+    /** 问数记录、评价、建议。时间一律存 epoch 毫秒，不受连接时区影响。 */
+    private void ensureAskFeedbackSchema() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_ask_run (
+                  id VARCHAR(36) NOT NULL PRIMARY KEY,
+                  conversation_id VARCHAR(64) NOT NULL,
+                  user_name VARCHAR(255) NOT NULL,
+                  question TEXT NOT NULL,
+                  history MEDIUMTEXT NOT NULL,
+                  status VARCHAR(16) NOT NULL,
+                  answer MEDIUMTEXT NULL,
+                  sql_text MEDIUMTEXT NULL,
+                  evidence MEDIUMTEXT NOT NULL,
+                  error TEXT NULL,
+                  created_at BIGINT NOT NULL,
+                  elapsed_ms BIGINT NOT NULL,
+                  KEY idx_fed_ask_run_conversation (conversation_id, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_ask_feedback (
+                  run_id VARCHAR(36) NOT NULL,
+                  user_name VARCHAR(255) NOT NULL,
+                  rating VARCHAR(8) NOT NULL,
+                  created_at BIGINT NOT NULL,
+                  updated_at BIGINT NOT NULL,
+                  PRIMARY KEY (run_id, user_name),
+                  CONSTRAINT fk_fed_ask_feedback_run FOREIGN KEY (run_id)
+                    REFERENCES fed_ask_run (id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_ask_suggestion (
+                  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  run_id VARCHAR(36) NULL,
+                  user_name VARCHAR(255) NOT NULL,
+                  content TEXT NOT NULL,
+                  status VARCHAR(16) NOT NULL,
+                  disposition VARCHAR(16) NULL,
+                  reply TEXT NULL,
+                  handled_by VARCHAR(255) NULL,
+                  created_at BIGINT NOT NULL,
+                  updated_at BIGINT NOT NULL,
+                  KEY idx_fed_ask_suggestion_status (status, created_at),
+                  CONSTRAINT fk_fed_ask_suggestion_run FOREIGN KEY (run_id)
+                    REFERENCES fed_ask_run (id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
     }
 
     private void migrateLegacy(ObjectMapper objectMapper) {

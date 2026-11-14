@@ -97,6 +97,22 @@ test.describe('console smoke', () => {
     }
   })
 
+  test('llm dialog accepts any model name, not only presets', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: '大模型配置' }).click()
+    const dialog = page.getByRole('dialog', { name: '大模型' })
+    await expect(dialog).toBeVisible()
+    const model = dialog.getByLabel('模型')
+    await expect(model).toHaveAttribute('list', 'llm-model-presets')
+    await model.fill('my-local-qwen')
+    await expect(model).toHaveValue('my-local-qwen')
+    await dialog.getByRole('button', { name: 'GPT-4o' }).click()
+    await expect(model).toHaveValue('gpt-4o')
+    await expect(dialog.getByLabel('接口地址')).toHaveValue('https://api.openai.com/v1')
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+  })
+
   test('ask critical path exposes landmarks and composer semantics', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: '智能问数' }).click()
@@ -109,6 +125,117 @@ test.describe('console smoke', () => {
     await expect(composer).toBeVisible()
     await expect(page.getByRole('textbox', { name: '问题输入' })).toBeVisible()
     await expect(page.getByRole('button', { name: '发送问题' })).toBeDisabled()
+  })
+
+  test('rate an answer, suggest a fix, and handle the suggestion', async ({ page }) => {
+    const question = '最近一天高危告警最多的资产'
+    const suggestions: Array<Record<string, unknown>> = []
+    const ratings: unknown[] = []
+    const asked: Array<Record<string, unknown>> = []
+
+    await page.route('**/api/v1/llm/config', (route) =>
+      route.fulfill({
+        json: { configured: true, apiKeySet: true, protocol: 'openai', model: 'qwen', baseUrl: 'http://llm.local' }
+      })
+    )
+    await page.route('**/api/v1/auth/me', (route) =>
+      route.fulfill({
+        json: { name: 'root', roles: ['ADMIN', 'QUERY'], securityEnabled: false, jwtEnabled: false, catalogAcl: false, catalogs: [] }
+      })
+    )
+    await page.route('**/api/v1/ask', (route) => {
+      asked.push(route.request().postDataJSON())
+      const events: Array<[string, unknown]> = [
+        ['run', { runId: 'run-1', conversationId: 'conv-1' }],
+        ['answer', { answer: 'web-01 最多，5 条', sql: 'SELECT 1', columns: [], rows: [], rowCount: 0 }],
+        ['done', {}]
+      ]
+      return route.fulfill({
+        contentType: 'text/event-stream',
+        body: events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join('')
+      })
+    })
+    await page.route('**/api/v1/ask/runs/run-1/rating', (route) => {
+      const { rating } = route.request().postDataJSON()
+      ratings.push(rating)
+      return route.fulfill({ json: { run: { id: 'run-1' }, rating } })
+    })
+    await page.route('**/api/v1/ask/suggestions**', (route) => {
+      const request = route.request()
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON()
+        const created = {
+          id: suggestions.length + 1,
+          runId: body.runId,
+          runQuestion: body.runId ? question : null,
+          userName: 'root',
+          content: body.content,
+          status: 'open',
+          disposition: null,
+          reply: null,
+          handledBy: null,
+          createdAt: 1_794_000_000_000,
+          updatedAt: 1_794_000_000_000
+        }
+        suggestions.push(created)
+        return route.fulfill({ json: created })
+      }
+      if (request.method() === 'PUT') {
+        const patch = request.postDataJSON()
+        Object.assign(suggestions[0], patch, {
+          disposition: patch.disposition || null,
+          reply: patch.reply || null,
+          handledBy: 'root'
+        })
+        return route.fulfill({ json: suggestions[0] })
+      }
+      return route.fulfill({ json: suggestions })
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: '智能问数' }).click()
+    await page.getByRole('textbox', { name: '问题输入' }).fill(question)
+    await page.getByRole('button', { name: '发送问题' }).click()
+    await expect(page.getByText('web-01 最多，5 条')).toBeVisible()
+
+    const feedback = page.getByRole('group', { name: '评价这次问数' })
+    const useful = feedback.getByRole('button', { name: '有用' })
+    await useful.click()
+    await expect(useful).toHaveAttribute('aria-pressed', 'true')
+    expect(ratings).toEqual(['up'])
+
+    await feedback.getByRole('button', { name: '提建议' }).click()
+    await feedback.getByRole('textbox').fill('高危告警应该按 level >= 4 统计')
+    await feedback.getByRole('button', { name: '提交建议' }).click()
+    await expect(feedback.getByRole('status')).toContainText('建议已提交')
+    expect(suggestions[0]).toMatchObject({ runId: 'run-1', content: '高危告警应该按 level >= 4 统计' })
+
+    const views = page.getByRole('navigation', { name: '问数视图' })
+    await views.getByRole('button', { name: '建议' }).click()
+    const item = page.getByRole('list', { name: '建议列表' }).getByRole('listitem')
+    await expect(item).toHaveCount(1)
+    await expect(item).toContainText('待处理')
+    await expect(item).toContainText(question)
+    await expect(page.getByRole('region', { name: '提问区' })).toBeHidden()
+
+    await item.getByRole('button', { name: '采纳', exact: true }).click()
+    await item.getByRole('combobox').selectOption('ontology')
+    await item.getByRole('textbox').fill('已改派生概念')
+    await item.getByRole('button', { name: '确认采纳' }).click()
+    await expect(item).toContainText('已采纳')
+    await expect(item).toContainText('去向：本体')
+    await expect(item).toContainText('root 答复：已改派生概念')
+
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
+    const blocking = results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')
+    expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
+
+    await views.getByRole('button', { name: '对话' }).click()
+    await expect(page.getByText('web-01 最多，5 条')).toBeVisible()
+    await page.getByRole('textbox', { name: '问题输入' }).fill('只看生产环境')
+    await page.getByRole('button', { name: '发送问题' }).click()
+    await expect(page.getByRole('article', { name: '回合 2' })).toBeVisible()
+    expect(asked.map((body) => body.conversationId)).toEqual([undefined, 'conv-1'])
   })
 
   test('desktop shell visual baseline', async ({ page }) => {

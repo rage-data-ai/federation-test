@@ -1,6 +1,7 @@
 package com.cmcc.cmdevops.security.federation.api;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -13,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -148,12 +150,13 @@ class AskControllerWebTest {
 
         MvcResult mvcResult = mockMvc.perform(post("/api/v1/ask")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"question\":\"今天有多少告警？\",\"history\":[]}"))
+                        .content("{\"question\":\"今天有多少告警？\",\"history\":[],\"conversationId\":\"conv-1\"}"))
                 .andExpect(status().isOk())
                 .andReturn();
         mockMvc.perform(MockMvcRequestBuilders.asyncDispatch(mvcResult))
                 .andExpect(status().isOk())
                 .andExpect(content().string(Matchers.containsString("done")));
+        verify(askService).ask(eq(new AskRequest("今天有多少告警？", List.of(), "conv-1")), any());
     }
 
     @Test
