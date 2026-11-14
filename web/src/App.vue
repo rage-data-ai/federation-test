@@ -56,6 +56,7 @@ const showAuth = ref(false)
 const authDialog = ref<HTMLElement | null>(null)
 const authForm = reactive({ token: getAccessToken() })
 const authUser = ref<AuthMe | null>(null)
+provide('authUser', authUser)
 const authError = ref('')
 const authBusy = ref(false)
 useFocusTrap(showAuth, authDialog, () => {

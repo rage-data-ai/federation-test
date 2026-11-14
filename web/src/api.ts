@@ -1,5 +1,10 @@
 import { getAccessToken } from './auth'
 import type {
+  AskRating,
+  AskRunView,
+  AskSuggestion,
+  AskSuggestionPatch,
+  AskSuggestionStatus,
   AuthMe,
   CatalogRecord,
   DraftResult,
@@ -233,6 +238,45 @@ export function askAnswerable(question: string) {
     method: 'POST',
     body: JSON.stringify({ question })
   })
+}
+
+export function getAskRun(runId: string) {
+  return request<AskRunView>(`/api/v1/ask/runs/${encodeURIComponent(runId)}`)
+}
+
+/** rating 传 null 撤销评价。 */
+export function rateAskRun(runId: string, rating: AskRating | null) {
+  return request<AskRunView>(`/api/v1/ask/runs/${encodeURIComponent(runId)}/rating`, {
+    method: 'PUT',
+    body: JSON.stringify({ rating })
+  })
+}
+
+export function listAskSuggestions(filter: { status?: AskSuggestionStatus | ''; mine?: boolean } = {}) {
+  const query = new URLSearchParams()
+  if (filter.status) {
+    query.set('status', filter.status)
+  }
+  if (filter.mine) {
+    query.set('mine', 'true')
+  }
+  const suffix = query.toString()
+  return request<AskSuggestion[]>(`/api/v1/ask/suggestions${suffix ? `?${suffix}` : ''}`)
+}
+
+export function addAskSuggestion(content: string, runId?: string | null) {
+  return request<AskSuggestion>('/api/v1/ask/suggestions', {
+    method: 'POST',
+    body: JSON.stringify({ content, runId: runId || null })
+  })
+}
+
+export function updateAskSuggestion(id: number, patch: AskSuggestionPatch) {
+  return request<AskSuggestion>(`/api/v1/ask/suggestions/${id}`, { method: 'PUT', body: JSON.stringify(patch) })
+}
+
+export function deleteAskSuggestion(id: number) {
+  return request<Json>(`/api/v1/ask/suggestions/${id}`, { method: 'DELETE' })
 }
 
 async function postEvents(path: string, body: unknown, onEvent: SseHandler, signal?: AbortSignal) {
