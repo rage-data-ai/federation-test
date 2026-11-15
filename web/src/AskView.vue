@@ -2,6 +2,8 @@
 import { ref } from 'vue'
 import AskAnswerClarify from './components/ask/AskAnswerClarify.vue'
 import AskFeedback from './components/ask/AskFeedback.vue'
+import AskKnowledge from './components/ask/AskKnowledge.vue'
+import AskPrompts from './components/ask/AskPrompts.vue'
 import AskSuggestions from './components/ask/AskSuggestions.vue'
 import {
   SAMPLES,
@@ -17,7 +19,9 @@ const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskSt
 
 const VIEWS = [
   { key: 'chat', label: '对话' },
-  { key: 'suggestions', label: '建议' }
+  { key: 'suggestions', label: '建议' },
+  { key: 'knowledge', label: '知识库' },
+  { key: 'prompts', label: '提示词' }
 ] as const
 const view = ref<(typeof VIEWS)[number]['key']>('chat')
 </script>
@@ -48,6 +52,8 @@ const view = ref<(typeof VIEWS)[number]['key']>('chat')
       </div>
     </header>
     <AskSuggestions v-if="view === 'suggestions'" />
+    <AskKnowledge v-else-if="view === 'knowledge'" />
+    <AskPrompts v-else-if="view === 'prompts'" />
     <div
       v-show="view === 'chat'"
       ref="scroller"
@@ -114,6 +120,19 @@ const view = ref<(typeof VIEWS)[number]['key']>('chat')
                 缺口：{{ (turn.answerability.gaps as string[]).join('；') }}
               </p>
               <p v-if="typeof turn.answerability.suggestion === 'string'" class="line">{{ turn.answerability.suggestion }}</p>
+            </section>
+            <section v-if="turn.knowledge" class="step">
+              <h4>
+                <span class="tag">{{ STAGE_LABEL.knowledge }}</span>
+                参考知识
+                <em>{{ turn.knowledge.matches.length }} 条</em>
+              </h4>
+              <ul class="chips">
+                <li v-for="(hit, kidx) in turn.knowledge.matches" :key="hit.id ?? kidx">
+                  {{ hit.question || `知识 ${hit.id ?? kidx + 1}` }}
+                  <em v-if="hit.score != null">score {{ hit.score }}</em>
+                </li>
+              </ul>
             </section>
             <section v-if="turn.ontology" class="step">
               <h4>

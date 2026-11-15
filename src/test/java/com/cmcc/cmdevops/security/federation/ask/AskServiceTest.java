@@ -26,7 +26,14 @@ import com.cmcc.cmdevops.security.federation.ask.AskService.Turn;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackStore;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskRun;
 import com.cmcc.cmdevops.security.federation.ask.feedback.MemoryAskFeedbackStore;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledge;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeVectorIndex;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.MemoryAskKnowledgeStore;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.HashingTermEmbedder;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
+import com.cmcc.cmdevops.security.federation.security.GatewayRole;
+import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.metadata.ColumnSnapshot;
 import com.cmcc.cmdevops.security.federation.metadata.TableSnapshot;
@@ -223,12 +230,89 @@ class AskServiceTest {
         assertFalse(events.contains("sql"));
     }
 
+    @Test
+    void knowledgeHitCanAnswerWithoutOntology() {
+        GatewayUser.set(new GatewayUser("root", Set.of(GatewayRole.ADMIN, GatewayRole.QUERY)));
+        AskKnowledgeService knowledge = knowledgeService();
+        AskKnowledge item = knowledge.create(
+                "最近一天高危告警有多少？",
+                "共 12 条",
+                "SELECT count(*) FROM ck81.pangu.alert WHERE level >= 3",
+                List.of(Map.of("item", "高危", "source", "ontology")),
+                Map.of());
+        ScriptedModel model = new ScriptedModel()
+                .text("{\"status\":\"answered\",\"answer\":\"根据知识，共 12 条\",\"sql\":\"SELECT count(*) FROM ck81.pangu.alert WHERE level >= 3\",\"knowledgeId\":"
+                        + item.id() + "}");
+
+        service(model, rows(), knowledge).ask(new AskRequest("最近一天高危告警有多少？", List.of()), this::record);
+
+        assertEquals(List.of("run", "stage", "knowledge", "answer"), events);
+        assertFalse(events.contains("ontology"));
+        assertTrue(executed.isEmpty());
+        Map<?, ?> answer = (Map<?, ?>) payloads.get(events.lastIndexOf("answer"));
+        assertEquals("根据知识，共 12 条", answer.get("answer"));
+        assertEquals(item.id(), ((Number) answer.get("knowledgeId")).longValue());
+        assertEquals(AskRun.ANSWERED, recordedRun().status());
+        GatewayUser.clear();
+    }
+
+    @Test
+    void knowledgeMissContinuesOntologyPath() {
+        AskKnowledgeService knowledge = knowledgeService();
+        ScriptedModel model = new ScriptedModel()
+                .tool("runSql", Map.of("sql", GOOD_SQL, "purpose", "main"))
+                .text("""
+                        {"status":"answered","answer":"web-01 最多，5 条","sql":"%s",
+                         "caliber":[{"item":"高危告警","source":"ontology","detail":"level >= 3"}]}
+                        """.formatted(GOOD_SQL.replace("\"", "\\\"")));
+
+        service(model, rows(List.of("web-01", 5L)), knowledge)
+                .ask(new AskRequest("最近一天高危告警最多的资产名称", List.of()), this::record);
+
+        assertFalse(events.contains("knowledge"));
+        assertTrue(events.contains("ontology"));
+        assertEquals("web-01 最多，5 条", ((Map<?, ?>) payloads.get(events.lastIndexOf("answer"))).get("answer"));
+    }
+
+    @Test
+    void knowledgeContinueFallsThroughToOntology() {
+        GatewayUser.set(new GatewayUser("root", Set.of(GatewayRole.ADMIN, GatewayRole.QUERY)));
+        AskKnowledgeService knowledge = knowledgeService();
+        knowledge.create("最近一天高危告警有多少？", "共 12 条", "SELECT 1", List.of(), Map.of());
+        ScriptedModel model = new ScriptedModel()
+                .text("{\"status\":\"continue\",\"reason\":\"时间范围不同\"}")
+                .tool("runSql", Map.of("sql", GOOD_SQL, "purpose", "main"))
+                .text("""
+                        {"status":"answered","answer":"重新查库得到 5 条","sql":"%s",
+                         "caliber":[{"item":"高危告警","source":"ontology","detail":"level >= 3"}]}
+                        """.formatted(GOOD_SQL.replace("\"", "\\\"")));
+
+        service(model, rows(List.of("web-01", 5L)), knowledge)
+                .ask(new AskRequest("最近一天高危告警有多少？", List.of()), this::record);
+
+        assertTrue(events.contains("knowledge"));
+        assertTrue(events.contains("ontology"));
+        assertEquals("重新查库得到 5 条", ((Map<?, ?>) payloads.get(events.lastIndexOf("answer"))).get("answer"));
+        GatewayUser.clear();
+    }
+
+    private AskKnowledgeService knowledgeService() {
+        return new AskKnowledgeService(
+                new MemoryAskKnowledgeStore(),
+                new KnowledgeVectorIndex(new HashingTermEmbedder(), null, JsonMapper.builder().build()),
+                () -> 1_000L);
+    }
+
     private AskService service(ChatModel model, QueryResponse response) {
+        return service(model, response, null);
+    }
+
+    private AskService service(ChatModel model, QueryResponse response, AskKnowledgeService knowledge) {
         return new AskService(tools, verifier, sql -> {
             executed.add(sql);
             return response;
         }, sql -> {
-        }, LlmClient.of(model), JsonMapper.builder().build(), new FederationProperties.Ask(), feedback);
+        }, LlmClient.of(model), JsonMapper.builder().build(), new FederationProperties.Ask(), feedback, knowledge);
     }
 
     private AskRun recordedRun() {

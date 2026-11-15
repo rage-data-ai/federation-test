@@ -210,6 +210,9 @@ test.describe('console smoke', () => {
     await expect(feedback.getByRole('status')).toContainText('建议已提交')
     expect(suggestions[0]).toMatchObject({ runId: 'run-1', content: '高危告警应该按 level >= 4 统计' })
 
+    await page.route('**/api/v1/ask/knowledge**', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/ask/prompts**', (route) => route.fulfill({ json: [] }))
+
     const views = page.getByRole('navigation', { name: '问数视图' })
     await views.getByRole('button', { name: '建议' }).click()
     const item = page.getByRole('list', { name: '建议列表' }).getByRole('listitem')
@@ -225,6 +228,11 @@ test.describe('console smoke', () => {
     await expect(item).toContainText('已采纳')
     await expect(item).toContainText('去向：本体')
     await expect(item).toContainText('root 答复：已改派生概念')
+
+    await views.getByRole('button', { name: '知识库' }).click()
+    await expect(page.getByRole('form', { name: '新增知识' })).toBeVisible()
+    await views.getByRole('button', { name: '提示词' }).click()
+    await expect(page.getByRole('form', { name: '新增提示词' })).toBeVisible()
 
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
     const blocking = results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')

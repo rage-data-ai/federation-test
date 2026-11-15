@@ -1,6 +1,8 @@
 import { nextTick, onUnmounted, ref, type Ref } from 'vue'
 import { askStream } from '../api'
 import type {
+  AskKnowledgeHits,
+  AskKnowledgeMatch,
   AskMetadataReport,
   AskOntologyContext,
   AskRating,
@@ -13,7 +15,12 @@ export const SAMPLES = [
   '哪些主机在事件日志服务停止（事件 1100）之后，又出现了进程创建（事件 4688）？这样的主机有多少台？'
 ]
 
-export const STAGE_LABEL: Record<string, string> = { ontology: '本体', metadata: '元数据', insight: '分析' }
+export const STAGE_LABEL: Record<string, string> = {
+  ontology: '本体',
+  metadata: '元数据',
+  insight: '分析',
+  knowledge: '知识'
+}
 export const SOURCE_LABEL: Record<string, string> = { ontology: '本体定义', inferred: '推断', user: '用户指定' }
 export const SQL_STATUS: Record<string, string> = { executed: '已执行', rejected: '校验拒绝', failed: '执行失败' }
 
@@ -29,6 +36,7 @@ export type AskTurn = {
   conversationId: string
   rating: AskRating | null
   stages: AskStage[]
+  knowledge: AskKnowledgeHits | null
   ontology: AskOntologyContext | null
   answerability: Record<string, unknown> | null
   metadata: AskMetadataReport | null
@@ -63,6 +71,7 @@ export function emptyTurn(question: string): AskTurn {
     conversationId: '',
     rating: null,
     stages: [],
+    knowledge: null,
     ontology: null,
     answerability: null,
     metadata: null,
@@ -105,6 +114,12 @@ export function applyEvent(turn: AskTurn, name: string, data: unknown): void {
     case 'stage':
       turn.stages.push(payload as AskStage)
       break
+    case 'knowledge': {
+      const raw = payload.matches
+      const matches = Array.isArray(raw) ? (raw as AskKnowledgeMatch[]) : []
+      turn.knowledge = { matches }
+      break
+    }
     case 'ontology':
       turn.ontology = {
         ...asRecord(payload.context),

@@ -1,5 +1,12 @@
 import { getAccessToken } from './auth'
 import type {
+  AskKnowledge,
+  AskKnowledgeMatch,
+  AskKnowledgePatch,
+  AskKnowledgeStatus,
+  AskPrompt,
+  AskPromptPatch,
+  AskPromptScope,
   AskRating,
   AskRunView,
   AskSuggestion,
@@ -277,6 +284,96 @@ export function updateAskSuggestion(id: number, patch: AskSuggestionPatch) {
 
 export function deleteAskSuggestion(id: number) {
   return request<Json>(`/api/v1/ask/suggestions/${id}`, { method: 'DELETE' })
+}
+
+export function listAskKnowledge(status?: AskKnowledgeStatus | '') {
+  const query = new URLSearchParams()
+  if (status) {
+    query.set('status', status)
+  }
+  const suffix = query.toString()
+  return request<AskKnowledge[]>(`/api/v1/ask/knowledge${suffix ? `?${suffix}` : ''}`)
+}
+
+export function getAskKnowledge(id: number) {
+  return request<AskKnowledge>(`/api/v1/ask/knowledge/${id}`)
+}
+
+export function createAskKnowledge(body: {
+  question: string
+  answer: string
+  sql?: string | null
+  caliber?: Array<Record<string, unknown>>
+  evidence?: Record<string, unknown>
+}) {
+  return request<AskKnowledge>('/api/v1/ask/knowledge', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  })
+}
+
+export function updateAskKnowledge(id: number, patch: AskKnowledgePatch) {
+  return request<AskKnowledge>(`/api/v1/ask/knowledge/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch)
+  })
+}
+
+export function deleteAskKnowledge(id: number) {
+  return request<Json>(`/api/v1/ask/knowledge/${id}`, { method: 'DELETE' })
+}
+
+export function searchAskKnowledge(question: string, topK?: number) {
+  return request<AskKnowledgeMatch[]>('/api/v1/ask/knowledge/search', {
+    method: 'POST',
+    body: JSON.stringify({ question, topK })
+  })
+}
+
+export function listAskPrompts(scope?: AskPromptScope | '') {
+  const query = new URLSearchParams()
+  if (scope) {
+    query.set('scope', scope)
+  }
+  const suffix = query.toString()
+  return request<AskPrompt[]>(`/api/v1/ask/prompts${suffix ? `?${suffix}` : ''}`)
+}
+
+export function createAskPrompt(body: {
+  scope: AskPromptScope
+  content: string
+  source?: string
+}) {
+  return request<AskPrompt>('/api/v1/ask/prompts', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  })
+}
+
+export function updateAskPrompt(id: number, patch: AskPromptPatch) {
+  return request<AskPrompt>(`/api/v1/ask/prompts/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch)
+  })
+}
+
+export function activateAskPrompt(id: number) {
+  return request<AskPrompt>(`/api/v1/ask/prompts/${id}/activate`, {
+    method: 'POST',
+    body: '{}'
+  })
+}
+
+export function deleteAskPrompt(id: number) {
+  return request<Json>(`/api/v1/ask/prompts/${id}`, { method: 'DELETE' })
+}
+
+/** 管理员：根据开放建议生成全局草稿提示词。 */
+export function proposeAskPromptsFromFeedback() {
+  return request<AskPrompt>('/api/v1/ask/prompts/proposals', {
+    method: 'POST',
+    body: '{}'
+  })
 }
 
 async function postEvents(path: string, body: unknown, onEvent: SseHandler, signal?: AbortSignal) {

@@ -61,6 +61,25 @@ describe('applyEvent', () => {
     expect(turn.runId).toBe('')
     expect(turn.conversationId).toBe('')
   })
+
+  it('stores knowledge matches from the knowledge event', () => {
+    const turn = emptyTurn('最近一天高危告警有多少？')
+    expect(turn.knowledge).toBeNull()
+    applyEvent(turn, 'knowledge', {
+      matches: [
+        { id: 3, score: 0.91, question: '最近一天高危告警有多少？', answer: '12 条' }
+      ]
+    })
+    expect(turn.knowledge).toEqual({
+      matches: [{ id: 3, score: 0.91, question: '最近一天高危告警有多少？', answer: '12 条' }]
+    })
+  })
+
+  it('treats a knowledge event without matches as an empty list', () => {
+    const turn = emptyTurn('q')
+    applyEvent(turn, 'knowledge', {})
+    expect(turn.knowledge).toEqual({ matches: [] })
+  })
 })
 
 describe('useAskStream conversation', () => {

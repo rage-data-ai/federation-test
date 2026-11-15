@@ -4,11 +4,15 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.LongSupplier;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
+import com.cmcc.cmdevops.security.federation.ask.prompt.AskPromptService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 
@@ -16,9 +20,13 @@ import com.cmcc.cmdevops.security.federation.security.GatewayUser;
  * 评价与建议的业务规则。
  * <p>
  * 问数记录只对发起人和管理员可见；建议由提出人撰写、管理员处置。
+ * 评为有用时写入待审知识（见 {@link AskKnowledgeService#draftFromRun}）。
+ * 采纳并指定去向时落地到知识库 / 提示词草稿（本体去向仅记录，改本体仍走本体编辑）。
  */
 @Service
 public class AskFeedbackService {
+
+    private static final Logger log = LoggerFactory.getLogger(AskFeedbackService.class);
 
     public static final String UP = "up";
     public static final String DOWN = "down";
@@ -27,15 +35,28 @@ public class AskFeedbackService {
     static final int MAX_REPLY = 1000;
 
     private final AskFeedbackStore store;
+    private final AskKnowledgeService knowledge;
+    private final AskPromptService prompts;
     private final LongSupplier clock;
 
     @Autowired
-    public AskFeedbackService(AskFeedbackStore store) {
-        this(store, System::currentTimeMillis);
+    public AskFeedbackService(AskFeedbackStore store, AskKnowledgeService knowledge, AskPromptService prompts) {
+        this(store, knowledge, prompts, System::currentTimeMillis);
     }
 
     AskFeedbackService(AskFeedbackStore store, LongSupplier clock) {
+        this(store, null, null, clock);
+    }
+
+    AskFeedbackService(AskFeedbackStore store, AskKnowledgeService knowledge, LongSupplier clock) {
+        this(store, knowledge, null, clock);
+    }
+
+    public AskFeedbackService(
+            AskFeedbackStore store, AskKnowledgeService knowledge, AskPromptService prompts, LongSupplier clock) {
         this.store = store;
+        this.knowledge = knowledge;
+        this.prompts = prompts;
         this.clock = clock;
     }
 
@@ -62,6 +83,13 @@ public class AskFeedbackService {
             throw new IllegalArgumentException("只有给出了回答的问数才能评为有用");
         }
         store.rate(run.id(), GatewayUser.current().name(), rating, clock.getAsLong());
+        if (UP.equals(rating) && knowledge != null) {
+            try {
+                knowledge.draftFromRun(run);
+            } catch (RuntimeException e) {
+                log.warn("好评入库待审失败 runId={}: {}", run.id(), e.toString());
+            }
+        }
         return new RunView(run, rating);
     }
 
@@ -141,7 +169,28 @@ public class AskFeedbackService {
             return current;
         }
         store.updateSuggestion(updated);
+        if (AskSuggestion.ADOPTED.equals(updated.status())
+                && updated.disposition() != null
+                && !Objects.equals(updated.disposition(), current.disposition())) {
+            applyDisposition(updated);
+        }
         return updated;
+    }
+
+    /** 采纳去向落地；失败只打日志，不回滚建议状态。 */
+    private void applyDisposition(AskSuggestion suggestion) {
+        try {
+            if ("knowledge".equals(suggestion.disposition()) && knowledge != null) {
+                AskRun run = suggestion.runId() == null ? null : store.findRun(suggestion.runId()).orElse(null);
+                knowledge.draftFromSuggestion(run, suggestion.content());
+            } else if ("prompt".equals(suggestion.disposition()) && prompts != null) {
+                prompts.draftFromSuggestion(suggestion);
+            }
+            // ontology：只记录去向，改本体走 Ontology 编辑页
+        } catch (RuntimeException e) {
+            log.warn("建议去向落地失败 id={} disposition={}: {}",
+                    suggestion.id(), suggestion.disposition(), e.toString());
+        }
     }
 
     public void delete(long id) {
