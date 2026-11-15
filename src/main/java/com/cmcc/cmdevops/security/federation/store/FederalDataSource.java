@@ -137,6 +137,37 @@ public class FederalDataSource {
         ensureAskFeedbackSchema();
         ensureAskKnowledgeSchema();
         ensureAskPromptSchema();
+        ensureUserSchema();
+    }
+
+    /** 本地账号与登录会话。会话表只存令牌的 SHA-256。 */
+    private void ensureUserSchema() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_user (
+                  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  username VARCHAR(64) NOT NULL,
+                  display_name VARCHAR(128) NOT NULL,
+                  password_hash VARCHAR(100) NOT NULL,
+                  roles VARCHAR(64) NOT NULL,
+                  status VARCHAR(16) NOT NULL,
+                  created_at BIGINT NOT NULL,
+                  updated_at BIGINT NOT NULL,
+                  last_login_at BIGINT NOT NULL DEFAULT 0,
+                  UNIQUE KEY uk_fed_user_username (username)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_user_session (
+                  token_hash CHAR(64) NOT NULL PRIMARY KEY,
+                  user_id BIGINT NOT NULL,
+                  created_at BIGINT NOT NULL,
+                  expires_at BIGINT NOT NULL,
+                  KEY idx_fed_user_session_user (user_id),
+                  KEY idx_fed_user_session_expires (expires_at),
+                  CONSTRAINT fk_fed_user_session_user FOREIGN KEY (user_id)
+                    REFERENCES fed_user (id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
     }
 
     /** 问数知识正本：问题、问题–答案对、证据；向量在 Milvus，不进这张表。 */

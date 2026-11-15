@@ -53,6 +53,11 @@ federation:
     catalogs: {}
     # 行级：reader: mysql_shop.public.orders:tenant_id = 'acme'
     row-filters: {}
+    # 本地账号：登录会话有效期（小时），有请求时自动续期。
+    session-ttl-hours: ${FEDERATION_SESSION_TTL_HOURS:24}
+    # 启动时保证存在的本地管理员；账号已存在则不动。
+    admin-username: ${FEDERATION_ADMIN_USER:}
+    admin-password: ${FEDERATION_ADMIN_PASSWORD:}
     jwt:
       issuer-uri: ${FEDERATION_JWT_ISSUER_URI:}
       roles-claim: ${FEDERATION_JWT_ROLES_CLAIM:roles}

@@ -14,6 +14,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import com.cmcc.cmdevops.security.federation.account.UserService;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 
 import jakarta.servlet.FilterChain;
@@ -23,22 +24,31 @@ import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * 可选 Bearer Token 鉴权。{@code federation.security.enabled=true} 时保护 {@code /api/**}，
- * 健康检查与 Actuator 放行。角色见 {@link GatewayRole}。
+ * 健康检查、Actuator、注册和登录放行。令牌依次按静态配置、本地账号会话、IdP JWT 解析。
+ * 角色见 {@link GatewayRole}。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public class BearerAuthFilter extends OncePerRequestFilter {
 
+    /** 请求属性：当前身份来自本地账号会话时为 {@code Boolean.TRUE}。 */
+    public static final String LOCAL_ACCOUNT_ATTRIBUTE = "federation.auth.localAccount";
+
+    private static final Set<String> OPEN_AUTH_PATHS = Set.of("/api/v1/auth/register", "/api/v1/auth/login");
+
     private final FederationProperties properties;
     private final ObjectProvider<JwtAccessTokenService> jwtAccessTokens;
+    private final ObjectProvider<UserService> users;
     private final TokenRevocationService revocations;
 
     public BearerAuthFilter(
             FederationProperties properties,
             ObjectProvider<JwtAccessTokenService> jwtAccessTokens,
+            ObjectProvider<UserService> users,
             TokenRevocationService revocations) {
         this.properties = properties;
         this.jwtAccessTokens = jwtAccessTokens;
+        this.users = users;
         this.revocations = revocations;
     }
 
@@ -65,7 +75,7 @@ public class BearerAuthFilter extends OncePerRequestFilter {
                 filterChain.doFilter(request, response);
                 return;
             }
-            if (allowBackchannelWithoutBearer(request)) {
+            if (allowBackchannelWithoutBearer(request) || isOpenAuthRequest(request)) {
                 GatewayUser.set(GatewayUser.ANONYMOUS);
                 filterChain.doFilter(request, response);
                 return;
@@ -80,7 +90,7 @@ public class BearerAuthFilter extends OncePerRequestFilter {
                 unauthorized(response, "令牌已吊销");
                 return;
             }
-            GatewayUser user = resolveUser(token);
+            GatewayUser user = resolveUser(token, request);
             if (user == null) {
                 unauthorized(response, "无效的访问令牌");
                 return;
@@ -92,6 +102,9 @@ public class BearerAuthFilter extends OncePerRequestFilter {
         }
     }
 
+    private static boolean isOpenAuthRequest(HttpServletRequest request) {
+        return "POST".equals(request.getMethod()) && OPEN_AUTH_PATHS.contains(request.getRequestURI());
+    }
 
     private boolean allowBackchannelWithoutBearer(HttpServletRequest request) {
         String path = request.getRequestURI();
@@ -106,7 +119,7 @@ public class BearerAuthFilter extends OncePerRequestFilter {
         return configured.equals(provided);
     }
 
-    private GatewayUser resolveUser(String token) {
+    private GatewayUser resolveUser(String token, HttpServletRequest request) {
         if (token.isEmpty()) {
             return null;
         }
@@ -116,11 +129,16 @@ public class BearerAuthFilter extends OncePerRequestFilter {
                 return new GatewayUser(entry.getKey(), rolesOf(entry.getKey()));
             }
         }
-        JwtAccessTokenService jwt = jwtAccessTokens.getIfAvailable();
-        if (jwt != null && JwtAccessTokenService.looksLikeJwt(token)) {
-            return jwt.authenticate(token);
+        if (JwtAccessTokenService.looksLikeJwt(token)) {
+            JwtAccessTokenService jwt = jwtAccessTokens.getIfAvailable();
+            return jwt == null ? null : jwt.authenticate(token);
         }
-        return null;
+        UserService accounts = users.getIfAvailable();
+        GatewayUser local = accounts == null ? null : accounts.authenticate(token);
+        if (local != null) {
+            request.setAttribute(LOCAL_ACCOUNT_ATTRIBUTE, Boolean.TRUE);
+        }
+        return local;
     }
 
     private Set<GatewayRole> rolesOf(String username) {
