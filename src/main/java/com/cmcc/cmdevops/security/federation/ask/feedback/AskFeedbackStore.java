@@ -10,6 +10,15 @@ public interface AskFeedbackStore {
 
     Optional<AskRun> findRun(String id);
 
+    /**
+     * 某用户的问数记录，按创建时间倒序。
+     * {@code limit} ≤ 0 时不截断。
+     */
+    List<AskRun> listRunsByUser(String userName, int limit);
+
+    /** 某用户某段对话里的问数记录，按创建时间正序。 */
+    List<AskRun> listRunsByConversation(String userName, String conversationId);
+
     /** 同一用户对同一次问数只保留一条评价；{@code rating} 为 null 时撤销。 */
     void rate(String runId, String userName, String rating, long now);
 

@@ -25,6 +25,24 @@ public class MemoryAskFeedbackStore implements AskFeedbackStore {
     }
 
     @Override
+    public synchronized List<AskRun> listRunsByUser(String userName, int limit) {
+        return runs.values().stream()
+                .filter(run -> userName.equals(run.userName()))
+                .sorted(Comparator.comparingLong(AskRun::createdAt).reversed()
+                        .thenComparing(AskRun::id, Comparator.reverseOrder()))
+                .limit(limit <= 0 ? Long.MAX_VALUE : limit)
+                .toList();
+    }
+
+    @Override
+    public synchronized List<AskRun> listRunsByConversation(String userName, String conversationId) {
+        return runs.values().stream()
+                .filter(run -> userName.equals(run.userName()) && conversationId.equals(run.conversationId()))
+                .sorted(Comparator.comparingLong(AskRun::createdAt).thenComparing(AskRun::id))
+                .toList();
+    }
+
+    @Override
     public synchronized void rate(String runId, String userName, String rating, long now) {
         String key = runId + "\n" + userName;
         if (rating == null) {

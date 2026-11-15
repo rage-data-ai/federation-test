@@ -187,12 +187,40 @@ class AskFeedbackControllerWebTest {
     }
 
     @Test
+    void conversationsListAndLoadOwnOnly() throws Exception {
+        store.saveRun(new AskRun("run-2", "conv-1", "alice", "只看生产", List.of(), AskRun.ANSWERED,
+                "ok", null, Map.of(), null, 1_700_000_000_100L, 80));
+        store.saveRun(new AskRun("run-bob", "conv-bob", "bob", "bob 的问题", List.of(), AskRun.ANSWERED,
+                "x", null, Map.of(), null, 1_700_000_000_200L, 10));
+
+        mockMvc.perform(get("/api/v1/ask/conversations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].conversationId").value("conv-1"))
+                .andExpect(jsonPath("$[0].title").value("最近一天高危告警最多的资产"))
+                .andExpect(jsonPath("$[0].runCount").value(2))
+                .andExpect(jsonPath("$[0].lastStatus").value("answered"));
+
+        mockMvc.perform(get("/api/v1/ask/conversations/conv-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].run.id").value("run-1"))
+                .andExpect(jsonPath("$[1].run.id").value("run-2"));
+
+        mockMvc.perform(get("/api/v1/ask/conversations/conv-bob"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("对话不存在：conv-bob"));
+    }
+
+    @Test
     void needsQueryRole() throws Exception {
         GatewayUser.set(new GatewayUser("ops", Set.of(GatewayRole.ADMIN)));
 
         mockMvc.perform(get("/api/v1/ask/suggestions"))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/ask/runs/run-1"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/ask/conversations"))
                 .andExpect(status().isForbidden());
     }
 }

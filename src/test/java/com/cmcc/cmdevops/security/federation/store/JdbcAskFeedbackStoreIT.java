@@ -70,6 +70,25 @@ class JdbcAskFeedbackStoreIT {
     }
 
     @Test
+    void listsRunsByUserAndConversation() {
+        store.saveRun(new AskRun("r1", "c1", "alice", "首问", List.of(), AskRun.ANSWERED, "a", null, Map.of(),
+                null, 1_000, 5));
+        store.saveRun(new AskRun("r2", "c1", "alice", "追问", List.of(), AskRun.CLARIFY, null, null, Map.of(),
+                null, 2_000, 5));
+        store.saveRun(new AskRun("r3", "c2", "alice", "另一段", List.of(), AskRun.ANSWERED, "b", null, Map.of(),
+                null, 3_000, 5));
+        store.saveRun(new AskRun("r4", "c9", "bob", "别人的", List.of(), AskRun.ANSWERED, "c", null, Map.of(),
+                null, 4_000, 5));
+
+        assertEquals(List.of("r3", "r2", "r1"),
+                store.listRunsByUser("alice", 10).stream().map(AskRun::id).toList());
+        assertEquals(List.of("r3"), store.listRunsByUser("alice", 1).stream().map(AskRun::id).toList());
+        assertEquals(List.of("r1", "r2"),
+                store.listRunsByConversation("alice", "c1").stream().map(AskRun::id).toList());
+        assertTrue(store.listRunsByConversation("bob", "c1").isEmpty());
+    }
+
+    @Test
     void failedRunKeepsErrorWithoutAnswer() {
         store.saveRun(new AskRun("run-err", "run-err", "alice", "q", List.of(), AskRun.ERROR, null, null,
                 Map.of(), "模型超时", 1_000, 10));

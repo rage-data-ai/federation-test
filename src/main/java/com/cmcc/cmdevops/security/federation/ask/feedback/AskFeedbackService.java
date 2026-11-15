@@ -1,6 +1,10 @@
 package com.cmcc.cmdevops.security.federation.ask.feedback;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.LongSupplier;
 
@@ -33,6 +37,9 @@ public class AskFeedbackService {
 
     static final int MAX_CONTENT = 2000;
     static final int MAX_REPLY = 1000;
+    /** 对话列表最多扫多少条问数记录再聚合（防止一次拉全表）。 */
+    static final int CONVERSATION_SCAN = 500;
+    static final int DEFAULT_CONVERSATION_LIMIT = 50;
 
     private final AskFeedbackStore store;
     private final AskKnowledgeService knowledge;
@@ -64,6 +71,22 @@ public class AskFeedbackService {
     public record RunView(AskRun run, String rating) {
     }
 
+    /**
+     * 当前用户的一段对话摘要。
+     *
+     * @param title     首问（列表展示用）
+     * @param createdAt 首问时刻
+     * @param updatedAt 最近一次问数时刻
+     */
+    public record ConversationSummary(
+            String conversationId,
+            String title,
+            String lastStatus,
+            int runCount,
+            long createdAt,
+            long updatedAt) {
+    }
+
     /** 各字段为 null 表示不改；{@code disposition} 传空串表示清除。 */
     public record SuggestionPatch(String content, String status, String disposition, String reply) {
     }
@@ -71,6 +94,57 @@ public class AskFeedbackService {
     public RunView run(String runId) {
         AskRun run = visibleRun(runId);
         return new RunView(run, store.ratingOf(run.id(), GatewayUser.current().name()).orElse(null));
+    }
+
+    /** 当前用户的对话列表，按最近活动倒序。 */
+    public List<ConversationSummary> conversations(Integer limit) {
+        int cap = limit == null || limit <= 0 ? DEFAULT_CONVERSATION_LIMIT : Math.min(limit, 200);
+        String user = GatewayUser.current().name();
+        List<AskRun> runs = store.listRunsByUser(user, CONVERSATION_SCAN);
+        Map<String, ConversationSummary> byId = new LinkedHashMap<>();
+        for (AskRun run : runs) {
+            ConversationSummary existing = byId.get(run.conversationId());
+            if (existing == null) {
+                // 扫描按时间倒序：第一次见到的是最新回合，title 先占位，后面遇到更早的再改成首问。
+                byId.put(run.conversationId(), new ConversationSummary(
+                        run.conversationId(),
+                        run.question(),
+                        run.status(),
+                        1,
+                        run.createdAt(),
+                        run.createdAt()));
+            } else {
+                byId.put(run.conversationId(), new ConversationSummary(
+                        existing.conversationId(),
+                        run.question(),
+                        existing.lastStatus(),
+                        existing.runCount() + 1,
+                        run.createdAt(),
+                        existing.updatedAt()));
+            }
+        }
+        return byId.values().stream()
+                .sorted(Comparator.comparingLong(ConversationSummary::updatedAt).reversed()
+                        .thenComparing(ConversationSummary::conversationId, Comparator.reverseOrder()))
+                .limit(cap)
+                .toList();
+    }
+
+    /** 当前用户某段对话的全部回合（正序），带自己的评价。 */
+    public List<RunView> conversation(String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) {
+            throw new IllegalArgumentException("对话 id 不能为空");
+        }
+        String user = GatewayUser.current().name();
+        List<AskRun> runs = store.listRunsByConversation(user, conversationId.strip());
+        if (runs.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "对话不存在：" + conversationId);
+        }
+        List<RunView> views = new ArrayList<>(runs.size());
+        for (AskRun run : runs) {
+            views.add(new RunView(run, store.ratingOf(run.id(), user).orElse(null)));
+        }
+        return views;
     }
 
     /** @param rating {@link #UP} / {@link #DOWN}，null 表示撤销 */
