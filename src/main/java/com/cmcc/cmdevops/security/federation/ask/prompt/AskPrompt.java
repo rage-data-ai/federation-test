@@ -5,6 +5,12 @@ import java.util.Set;
 /**
  * 问数补充提示词。基础规则在 {@link com.cmcc.cmdevops.security.federation.ask.AskService} 常量里；
  * 这里存可维护的全局 / 个人补充段，compose 时接在基础规则之后（基础优先）。
+ * <p>
+ * 与 Hermes Agent 持久记忆的对应关系：
+ * <ul>
+ *   <li>{@link #GLOBAL} ↔ {@code MEMORY.md}：环境事实、口径约定、工具坑与经验（共享）</li>
+ *   <li>{@link #PERSONAL} ↔ {@code USER.md}：当前用户的偏好、沟通习惯与期望</li>
+ * </ul>
  *
  * @param scope {@link #GLOBAL} / {@link #PERSONAL}
  * @param owner 个人提示词所属用户；全局为空

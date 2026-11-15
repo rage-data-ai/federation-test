@@ -12,9 +12,15 @@ import { formatTime } from '../../composables/useAskSuggestions'
 import type { AskPrompt, AskPromptScope, AskPromptStatus, AuthMe } from '../../types'
 import { errMessage } from '../../types'
 
+/** 与 Hermes 对齐：global ≈ MEMORY.md，personal ≈ USER.md */
 const SCOPE_LABEL: Record<AskPromptScope, string> = {
-  global: '全局',
-  personal: '个人'
+  global: 'MEMORY（全局）',
+  personal: 'USER（个人）'
+}
+
+const SCOPE_HINT: Record<AskPromptScope, string> = {
+  global: '对应 Hermes MEMORY.md：环境事实、口径约定、工具坑与经验（共享）',
+  personal: '对应 Hermes USER.md：你的偏好、沟通习惯与期望'
 }
 
 const STATUS_LABEL: Record<AskPromptStatus, string> = {
@@ -197,9 +203,14 @@ async function proposeFromFeedback() {
           v-model="draft.content"
           rows="3"
           maxlength="8000"
-          placeholder="接在问数基础规则之后的补充说明，例如口径偏好、禁用表、回答风格"
+          :placeholder="
+            draft.scope === 'global'
+              ? 'MEMORY.md：环境事实、口径约定、禁用表、工具坑……'
+              : 'USER.md：回答尽量短、默认最近 24 小时、偏好的表达方式……'
+          "
         />
       </label>
+      <p class="hint">{{ SCOPE_HINT[draft.scope] }}</p>
       <button class="primary" type="submit" :disabled="busy || !draft.content.trim()">提交提示词</button>
     </form>
 

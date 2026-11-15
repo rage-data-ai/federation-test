@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- 问数补充提示词文案对齐 Hermes：`global`≈`MEMORY.md`，`personal`≈`USER.md`
+
 ### Added
 
 - 问数自学习：好评→待审知识、`fed_ask_knowledge` + Milvus 问题向量、命中后模型判定短路；全局/个人补充提示词；建议去向落地（知识/提示词/本体）

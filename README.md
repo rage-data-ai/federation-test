@@ -43,7 +43,7 @@ cd web && npm install && npm run dev
 
 打开 http://localhost:5173 → **添加数据库** → 测试连接 → 保存。SQL 使用三部分表名：`catalog.schema.table`，例如 `mysql.shop.customer`。
 
-数据源、元数据和模型配置存在配置库的 `fed_catalog`、`fed_meta_table`、`fed_meta_column`、`fed_llm`。问数记录、评价和建议在 `fed_ask_run`、`fed_ask_feedback`、`fed_ask_suggestion`；共享知识正本在 `fed_ask_knowledge`（问题向量在 Milvus，`MILVUS_URI`）；补充提示词在 `fed_ask_prompt`。本体图在 `data/tdb2`。
+数据源、元数据和模型配置存在配置库的 `fed_catalog`、`fed_meta_table`、`fed_meta_column`、`fed_llm`。问数记录、评价和建议在 `fed_ask_run`、`fed_ask_feedback`、`fed_ask_suggestion`；共享知识正本在 `fed_ask_knowledge`（问题向量在 Milvus，`MILVUS_URI`）；补充提示词在 `fed_ask_prompt`（全局≈Hermes `MEMORY.md`，个人≈`USER.md`）。本体图在 `data/tdb2`。
 
 一键体验（MySQL + Trino + 网关，控制台打进网关镜像，打开 http://localhost:18080）：
 
@@ -73,7 +73,7 @@ docker compose up -d --build
 | PUT | `/api/v1/ask/runs/{id}/rating` | 评价这次问数：`up` / `down`，`null` 撤销；`up` 会写入待审知识 |
 | GET/POST/PUT/DELETE | `/api/v1/ask/suggestions/**` | 对问数的建议：提出、修改、管理员处置、删除；采纳去向 `knowledge`/`prompt`/`ontology` |
 | GET/POST/PUT/DELETE | `/api/v1/ask/knowledge/**` | 共享知识正本；`POST .../search` 按问题召回已通过条目 |
-| GET/POST/PUT/DELETE | `/api/v1/ask/prompts/**` | 全局/个人补充提示词；`POST .../{id}/activate` 生效；`POST .../proposals` 从反馈生成草稿 |
+| GET/POST/PUT/DELETE | `/api/v1/ask/prompts/**` | 补充提示词（`global`≈Hermes `MEMORY.md`，`personal`≈`USER.md`）；`POST .../{id}/activate` 生效；`POST .../proposals` 从反馈生成草稿 |
 | POST | `/api/v1/ontology/draft` | 按表起草本体 |
 | GET/POST/PUT/DELETE | `/api/v1/ontology/**` | 本体读写与推理 |
 | PUT | `/api/v1/ontology/{name}/certified` | 审定概念/派生概念（问数优先） |

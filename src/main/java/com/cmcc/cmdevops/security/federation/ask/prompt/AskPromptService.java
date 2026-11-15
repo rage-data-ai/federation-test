@@ -18,15 +18,23 @@ import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 
 /**
  * 补充提示词维护与合成。基础规则由调用方传入；本服务只拼全局与个人生效段。
+ * <p>
+ * 语义对齐 Hermes：{@code global} ≈ {@code MEMORY.md}，{@code personal} ≈ {@code USER.md}。
  */
 @Service
 public class AskPromptService {
 
     public static final int MAX_CONTENT = 4000;
 
+    /** 注入系统提示时的小节标题，对应 Hermes MEMORY.md。 */
+    public static final String GLOBAL_SECTION = "MEMORY.md（全局）";
+
+    /** 注入系统提示时的小节标题，对应 Hermes USER.md。 */
+    public static final String PERSONAL_SECTION = "USER.md（个人）";
+
     private static final String PROPOSAL_PROMPT = """
-            你是问数系统的提示词编辑。根据用户反馈（建议与差评线索）起草一段「全局补充提示词」，
-            用来纠正口径、表达习惯或禁止事项。不要重复基础规则，不要写 SQL。
+            你是问数系统的提示词编辑。根据用户反馈（建议与差评线索）起草一段「MEMORY.md / 全局补充」，
+            记录环境事实、口径约定或禁止事项。不要写用户个人偏好（那属于 USER.md），不要重复基础规则，不要写 SQL。
             只输出提示词正文，不要标题或其它说明。
             """;
 
@@ -55,13 +63,13 @@ public class AskPromptService {
     public record PromptPatch(String content, String status) {
     }
 
-    /** 基础规则优先，其后追加全局、个人生效补充。 */
+    /** 基础规则优先，其后追加 MEMORY.md（全局）、USER.md（个人）生效补充。 */
     public String compose(String base) {
         StringBuilder out = new StringBuilder(base == null ? "" : base.strip());
-        store.activeGlobal().ifPresent(global -> append(out, "全局补充提示词", global.content()));
+        store.activeGlobal().ifPresent(global -> append(out, GLOBAL_SECTION, global.content()));
         String user = GatewayUser.current().name();
         if (user != null && !user.isBlank() && !"anonymous".equals(user)) {
-            store.activePersonal(user).ifPresent(personal -> append(out, "个人补充提示词", personal.content()));
+            store.activePersonal(user).ifPresent(personal -> append(out, PERSONAL_SECTION, personal.content()));
         }
         return out.toString();
     }
