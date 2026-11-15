@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import AskAnswerClarify from './components/ask/AskAnswerClarify.vue'
 import AskFeedback from './components/ask/AskFeedback.vue'
 import AskHistory from './components/ask/AskHistory.vue'
 import AskKnowledge from './components/ask/AskKnowledge.vue'
 import AskPrompts from './components/ask/AskPrompts.vue'
 import AskSuggestions from './components/ask/AskSuggestions.vue'
+import { listPublishedApps } from './api'
 import {
   SAMPLES,
   STAGE_LABEL,
@@ -14,10 +15,43 @@ import {
   useAskStream
 } from './composables/useAskStream'
 import { useAskLlmStatus } from './composables/useAskLlmStatus'
-import type { AskRunView } from './types'
+import type { AskRunView, PublishedApp } from './types'
+import { errMessage } from './types'
+
+const props = defineProps<{ appId?: string }>()
 
 const { status, statusError, ready, needsKey, openLlmSettings } = useAskLlmStatus()
-const { turns, draft, busy, scroller, send, stop, clearTurns, restoreConversation, onKey } = useAskStream()
+const selectedAppId = ref(props.appId || '')
+const publishedApps = ref<PublishedApp[]>([])
+const appError = ref('')
+const { turns, draft, busy, scroller, send, stop, clearTurns, restoreConversation, onKey } =
+  useAskStream(selectedAppId)
+
+watch(
+  () => props.appId,
+  (id) => {
+    if (id && id !== selectedAppId.value) {
+      selectedAppId.value = id
+      clearTurns()
+    }
+  }
+)
+
+watch(selectedAppId, () => {
+  clearTurns()
+})
+
+onMounted(async () => {
+  try {
+    publishedApps.value = await listPublishedApps()
+    if (!selectedAppId.value && publishedApps.value.length) {
+      const builtin = publishedApps.value.find((app) => app.appId === 'app-builtin-ask')
+      selectedAppId.value = builtin?.appId || publishedApps.value[0].appId
+    }
+  } catch (e) {
+    appError.value = errMessage(e)
+  }
+})
 
 const VIEWS = [
   { key: 'chat', label: '对话' },
@@ -66,11 +100,20 @@ function startNewConversation() {
         </nav>
       </div>
       <div class="head-side" :class="{ offstage: view !== 'chat' }">
+        <label v-if="view === 'chat'" class="app-pick">
+          <span class="sr-only">应用</span>
+          <select v-model="selectedAppId" :disabled="busy" aria-label="问数应用">
+            <option v-for="app in publishedApps" :key="app.appId" :value="app.appId">
+              {{ app.appName }}
+            </option>
+          </select>
+        </label>
         <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">{{ needsKey ? '填写 API Key' : '未配置，去设置' }}</button>
         <span v-else-if="status" class="head-note">{{ status.protocol }} · {{ status.model }}</span>
         <button type="button" :disabled="busy || !turns.length" @click="startNewConversation">新对话</button>
       </div>
     </header>
+    <p v-if="appError" class="err pad" role="alert">{{ appError }}</p>
     <AskSuggestions v-if="view === 'suggestions'" />
     <AskKnowledge v-else-if="view === 'knowledge'" />
     <AskPrompts v-else-if="view === 'prompts'" />
@@ -263,6 +306,20 @@ function startNewConversation() {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.app-pick select {
+  max-width: 180px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.pad {
+  margin: 0 16px;
 }
 
 /* 切到建议时只是藏起来、仍然占位，标题栏高度不跟着跳。 */

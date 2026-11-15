@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, provide, reactive, ref, type Component } from 'vue'
+// askAppId：从「问数应用」跳进问数页时带上已发布应用 id
 import { ApiError, authChangePassword, authLogout, authMe, llmConfig, onUnauthorized, saveLlm, testLlm } from './api'
 import { useFocusTrap } from './composables/useFocusTrap'
 import {
@@ -13,6 +14,7 @@ import {
   refreshAccessToken,
   setAccessToken
 } from './auth'
+import AppsView from './AppsView.vue'
 import AskView from './AskView.vue'
 import DatasourceView from './DatasourceView.vue'
 import LoginView from './LoginView.vue'
@@ -36,11 +38,18 @@ const MODULES: ModuleDef[] = [
   { key: 'datasource', label: '数据源管理', short: '数据源', icon: '⛁', component: DatasourceView },
   { key: 'ontology', label: '本体建模', short: '本体', icon: '◈', component: OntologyView },
   { key: 'ask', label: '智能问数', short: '问数', icon: '✦', component: AskView },
+  { key: 'apps', label: '问数应用', short: '应用', icon: '◇', component: AppsView },
   { key: 'users', label: '用户管理', short: '用户', icon: '☺', component: UsersView, adminOnly: true }
 ]
 
 const saved = localStorage.getItem('module')
 const active = ref(MODULES.some((item) => item.key === saved) ? (saved as string) : 'datasource')
+const askAppId = ref('')
+function openAskApp(appId: string) {
+  askAppId.value = appId
+  active.value = 'ask'
+  localStorage.setItem('module', 'ask')
+}
 
 const showLlm = ref(false)
 const llmDialog = ref<HTMLElement | null>(null)
@@ -412,7 +421,9 @@ function cycleTheme() {
 
     <main id="main-stage" class="stage" tabindex="-1">
       <KeepAlive>
-        <component :is="current" />
+        <AskView v-if="activeKey === 'ask'" :key="'ask'" :app-id="askAppId" />
+        <AppsView v-else-if="activeKey === 'apps'" :key="'apps'" @open-app="openAskApp" />
+        <component :is="current" v-else :key="activeKey" />
       </KeepAlive>
     </main>
 

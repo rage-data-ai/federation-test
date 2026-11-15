@@ -16,6 +16,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.cmcc.cmdevops.security.federation.ask.AskService;
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
+import com.cmcc.cmdevops.security.federation.chatflow.ChatflowRuntime;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient.Settings;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
@@ -30,10 +31,12 @@ public class AskController {
     private static final long TIMEOUT_MS = 15 * 60 * 1000L;
 
     private final AskService askService;
+    private final ChatflowRuntime chatflowRuntime;
     private final LlmClient llmClient;
 
-    public AskController(AskService askService, LlmClient llmClient) {
+    public AskController(AskService askService, ChatflowRuntime chatflowRuntime, LlmClient llmClient) {
         this.askService = askService;
+        this.chatflowRuntime = chatflowRuntime;
         this.llmClient = llmClient;
     }
 
@@ -84,7 +87,7 @@ public class AskController {
         Thread.ofVirtual().name("ask-", 0).start(() -> {
             GatewayUser.set(user);
             try {
-                askService.ask(request, (event, data) -> send(emitter, event, data));
+                chatflowRuntime.ask(request, (event, data) -> send(emitter, event, data));
             } catch (RuntimeException e) {
                 log.warn("问数失败: {}", e.getMessage(), e);
                 send(emitter, "error", Map.of("message", e.getMessage() == null ? e.toString() : e.getMessage()));

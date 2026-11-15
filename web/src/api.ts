@@ -16,13 +16,18 @@ import type {
   AuthMe,
   AuthSession,
   CatalogRecord,
+  ChatApp,
   DraftResult,
   ExampleItem,
+  FlowDraft,
+  FlowGraph,
+  FlowTemplate,
   LlmConfig,
   LlmStatus,
   LlmTestResult,
   MetadataTable,
   OntologyBundle,
+  PublishedApp,
   QueryResult,
   UserAccount,
   UserPatch
@@ -314,6 +319,66 @@ export function askAnswerable(question: string) {
     method: 'POST',
     body: JSON.stringify({ question })
   })
+}
+
+export function listFlowTemplates() {
+  return request<FlowTemplate[]>('/api/v1/flows/templates')
+}
+
+export function listFlows() {
+  return request<FlowDraft[]>('/api/v1/flows')
+}
+
+export function getFlow(id: string) {
+  return request<FlowDraft>(`/api/v1/flows/${encodeURIComponent(id)}`)
+}
+
+export function createFlow(body: { name?: string; template?: string }) {
+  return request<FlowDraft>('/api/v1/flows', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function updateFlow(id: string, body: { name?: string; graph?: FlowGraph }) {
+  return request<FlowDraft>(`/api/v1/flows/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body)
+  })
+}
+
+export function publishFlow(id: string) {
+  return request<{ id: string; flowId: string; version: number }>(
+    `/api/v1/flows/${encodeURIComponent(id)}/publish`,
+    { method: 'POST', body: '{}' }
+  )
+}
+
+export function listApps() {
+  return request<ChatApp[]>('/api/v1/apps')
+}
+
+export function listPublishedApps() {
+  return request<PublishedApp[]>('/api/v1/apps/published')
+}
+
+export function getApp(id: string) {
+  return request<ChatApp>(`/api/v1/apps/${encodeURIComponent(id)}`)
+}
+
+export function createApp(body: { name?: string; description?: string; flowId?: string; template?: string }) {
+  return request<ChatApp>('/api/v1/apps', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function updateApp(id: string, body: { name?: string; description?: string; flowId?: string }) {
+  return request<ChatApp>(`/api/v1/apps/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body)
+  })
+}
+
+export function publishApp(id: string, flowVersionId?: string) {
+  return request<{ id: number; appId: string; flowVersionId: string; publishedAt: number }>(
+    `/api/v1/apps/${encodeURIComponent(id)}/publish`,
+    { method: 'POST', body: JSON.stringify({ flowVersionId: flowVersionId || null }) }
+  )
 }
 
 export function listAskConversations(limit?: number) {

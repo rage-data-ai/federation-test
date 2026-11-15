@@ -220,11 +220,16 @@ public class AskService {
 
     /**
      * @param conversationId 同一段对话的多次问数传同一个 id；不传时每次问数自成一段
+     * @param appId          已发布应用 id；不传时走内置「智能问数」
      */
-    public record AskRequest(String question, List<Turn> history, String conversationId) {
+    public record AskRequest(String question, List<Turn> history, String conversationId, String appId) {
 
         public AskRequest(String question, List<Turn> history) {
-            this(question, history, null);
+            this(question, history, null, null);
+        }
+
+        public AskRequest(String question, List<Turn> history, String conversationId) {
+            this(question, history, conversationId, null);
         }
     }
 
