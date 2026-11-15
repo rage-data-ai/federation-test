@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, provide, reactive, ref, type Component } from 'vue'
-import { authLogout, authMe, llmConfig, saveLlm, testLlm } from './api'
+import { ApiError, authChangePassword, authLogout, authMe, llmConfig, onUnauthorized, saveLlm, testLlm } from './api'
 import { useFocusTrap } from './composables/useFocusTrap'
 import {
   beginOidcLogin,
@@ -15,7 +15,9 @@ import {
 } from './auth'
 import AskView from './AskView.vue'
 import DatasourceView from './DatasourceView.vue'
+import LoginView from './LoginView.vue'
 import OntologyView from './OntologyView.vue'
+import UsersView from './UsersView.vue'
 import { AGENT_MODELS, findModel } from './models'
 import type { AuthMe, LlmConfig, LlmStatus } from './types'
 import { errMessage } from './types'
@@ -26,17 +28,19 @@ type ModuleDef = {
   short: string
   icon: string
   component: Component
+  /** 只在开启鉴权且当前用户是管理员时出现。 */
+  adminOnly?: boolean
 }
 
 const MODULES: ModuleDef[] = [
   { key: 'datasource', label: '数据源管理', short: '数据源', icon: '⛁', component: DatasourceView },
   { key: 'ontology', label: '本体建模', short: '本体', icon: '◈', component: OntologyView },
-  { key: 'ask', label: '智能问数', short: '问数', icon: '✦', component: AskView }
+  { key: 'ask', label: '智能问数', short: '问数', icon: '✦', component: AskView },
+  { key: 'users', label: '用户管理', short: '用户', icon: '☺', component: UsersView, adminOnly: true }
 ]
 
 const saved = localStorage.getItem('module')
 const active = ref(MODULES.some((item) => item.key === saved) ? (saved as string) : 'datasource')
-const current = computed(() => MODULES.find((item) => item.key === active.value)?.component ?? DatasourceView)
 
 const showLlm = ref(false)
 const llmDialog = ref<HTMLElement | null>(null)
@@ -58,7 +62,9 @@ const authForm = reactive({ token: getAccessToken() })
 const authUser = ref<AuthMe | null>(null)
 provide('authUser', authUser)
 const authError = ref('')
+const authMessage = ref('')
 const authBusy = ref(false)
+const passwordForm = reactive({ oldPassword: '', newPassword: '' })
 useFocusTrap(showAuth, authDialog, () => {
   showAuth.value = false
 })
@@ -68,6 +74,32 @@ const authLabel = computed(() => {
     return `身份：${authUser.value.name}`
   }
   return getAccessToken() ? '身份：已配置令牌' : '身份：未登录'
+})
+/** 已登录的具名用户在侧栏直接显示名字；匿名或未连上网关时仍显示“身份”。 */
+const authShort = computed(() => {
+  const user = authUser.value
+  return user?.securityEnabled ? user.displayName || user.name : '身份'
+})
+
+/** checking：还不知道要不要登录；login：网关要求登录；ready：可以进入控制台。 */
+const gate = ref<'checking' | 'login' | 'ready'>('checking')
+const loginNotice = ref('')
+let recovering = false
+
+const modules = computed(() =>
+  MODULES.filter(
+    (item) => !item.adminOnly || (!!authUser.value?.securityEnabled && !!authUser.value.roles?.includes('ADMIN'))
+  )
+)
+const activeKey = computed(() =>
+  modules.value.some((item) => item.key === active.value) ? active.value : 'datasource'
+)
+const current = computed(
+  () => modules.value.find((item) => item.key === activeKey.value)?.component ?? DatasourceView
+)
+
+onUnauthorized(() => {
+  void handleUnauthorized()
 })
 
 const themeMode = ref(localStorage.getItem('theme-mode') || 'auto')
@@ -97,6 +129,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.clearInterval(themeTimer)
+  onUnauthorized(null)
 })
 
 async function refreshLlm() {
@@ -122,19 +155,80 @@ async function refreshAuth() {
   try {
     authUser.value = await authMe()
     authError.value = ''
+    gate.value = 'ready'
   } catch (e) {
     authUser.value = null
+    if (e instanceof ApiError && e.status === 401) {
+      return
+    }
+    // 网关连不上时照常进入控制台，由各模块自己提示。
+    gate.value = 'ready'
     if (getAccessToken()) {
       authError.value = errMessage(e)
     }
   }
 }
 
+/** 任一接口返回 401：先试 OIDC 刷新令牌，不行就回登录页。 */
+async function handleUnauthorized() {
+  if (recovering) {
+    return
+  }
+  recovering = true
+  try {
+    if (oidcEnabled && getRefreshToken()) {
+      try {
+        await refreshAccessToken()
+        authUser.value = await authMe()
+        gate.value = 'ready'
+        return
+      } catch {
+        // 刷新不了就走下面的重新登录
+      }
+    }
+    if (gate.value !== 'login') {
+      loginNotice.value = getAccessToken() ? '令牌无效或登录已过期，请重新登录' : ''
+    }
+    clearAccessToken()
+    authForm.token = ''
+    authUser.value = null
+    showAuth.value = false
+    gate.value = 'login'
+  } finally {
+    recovering = false
+  }
+}
+
+async function onSignedIn() {
+  loginNotice.value = ''
+  gate.value = 'checking'
+  await Promise.all([refreshLlm(), refreshAuth()])
+}
+
 function openAuth() {
   authForm.token = getAccessToken()
   authError.value = ''
+  authMessage.value = ''
+  passwordForm.oldPassword = ''
+  passwordForm.newPassword = ''
   showAuth.value = true
   refreshAuth()
+}
+
+async function changePassword() {
+  authBusy.value = true
+  authError.value = ''
+  authMessage.value = ''
+  try {
+    await authChangePassword(passwordForm.oldPassword, passwordForm.newPassword)
+    passwordForm.oldPassword = ''
+    passwordForm.newPassword = ''
+    authMessage.value = '密码已修改，其他设备上的登录已失效'
+  } catch (e) {
+    authError.value = errMessage(e)
+  } finally {
+    authBusy.value = false
+  }
 }
 
 async function saveAuthToken() {
@@ -161,6 +255,8 @@ async function logoutAuth() {
   authForm.token = ''
   authUser.value = null
   showAuth.value = false
+  loginNotice.value = ''
+  await refreshAuth()
 }
 
 async function logoutOidc() {
@@ -280,19 +376,20 @@ function cycleTheme() {
 </script>
 
 <template>
-  <div class="shell">
+  <LoginView v-if="gate === 'login'" :notice="loginNotice" @signed-in="onSignedIn" />
+  <div v-else-if="gate === 'ready'" class="shell">
     <a class="skip-link" href="#main-stage">跳到主内容</a>
     <nav class="rail" aria-label="模块">
       <div class="brand" title="跨源联邦查询">联邦</div>
       <button
-        v-for="item in MODULES"
+        v-for="item in modules"
         :key="item.key"
         class="module"
-        :class="{ active: active === item.key }"
+        :class="{ active: activeKey === item.key }"
         type="button"
         :title="item.label"
         :aria-label="item.label"
-        :aria-current="active === item.key ? 'page' : undefined"
+        :aria-current="activeKey === item.key ? 'page' : undefined"
         @click="open(item.key)"
       >
         <span class="glyph" aria-hidden="true">{{ item.icon }}</span>
@@ -301,7 +398,7 @@ function cycleTheme() {
       <div class="rail-foot">
         <button class="module" type="button" :title="authLabel" :aria-label="authLabel" @click="openAuth">
           <span class="glyph" aria-hidden="true">⚷</span>
-          <span class="name">身份</span>
+          <span class="name">{{ authShort }}</span>
         </button>
         <button class="module" :class="{ pending: llm && (!llm.configured || !llm.apiKeySet) }" type="button" title="大模型配置" aria-label="大模型配置" @click="openLlm">
           <span class="glyph" aria-hidden="true">✳</span>
@@ -321,6 +418,45 @@ function cycleTheme() {
 
     <div v-if="showAuth" class="mask" @click.self="showAuth = false">
       <form
+        v-if="authUser?.localAccount"
+        ref="authDialog"
+        class="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-title"
+        @submit.prevent="changePassword"
+      >
+        <h3 id="auth-title">访问身份</h3>
+        <p class="hint">
+          当前用户 {{ authUser.displayName || authUser.name }}（{{ authUser.name }}） · 角色
+          {{ (authUser.roles || []).join(', ') || '无' }}
+          · Catalog ACL {{ authUser.catalogAcl ? (authUser.catalogs || []).join(', ') || '无' : '未启用' }}
+        </p>
+        <label>
+          原密码
+          <input v-model="passwordForm.oldPassword" type="password" required autocomplete="current-password" />
+        </label>
+        <label>
+          新密码
+          <input
+            v-model="passwordForm.newPassword"
+            type="password"
+            required
+            minlength="8"
+            autocomplete="new-password"
+            placeholder="至少 8 位"
+          />
+        </label>
+        <p v-if="authMessage" class="ok" role="status">{{ authMessage }}</p>
+        <p v-if="authError" class="err" role="alert">{{ authError }}</p>
+        <div class="actions">
+          <button type="button" @click="logoutAuth">退出登录</button>
+          <button type="button" @click="showAuth = false">关闭</button>
+          <button class="primary" type="submit" :disabled="authBusy">{{ authBusy ? '保存中…' : '修改密码' }}</button>
+        </div>
+      </form>
+      <form
+        v-else
         ref="authDialog"
         class="dialog"
         role="dialog"
@@ -470,7 +606,11 @@ function cycleTheme() {
 }
 
 .name {
+  max-width: 54px;
+  overflow: hidden;
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rail-foot {

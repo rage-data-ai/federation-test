@@ -1,11 +1,19 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
+  ApiError,
   addAskSuggestion,
+  authChangePassword,
+  authLogin,
+  authRegister,
   dispatchSseChunk,
   listAskSuggestions,
   listCatalogs,
+  listUsers,
+  onUnauthorized,
   rateAskRun,
-  updateAskSuggestion
+  resetUserPassword,
+  updateAskSuggestion,
+  updateUser
 } from './api'
 
 describe('dispatchSseChunk', () => {
@@ -112,5 +120,96 @@ describe('ask feedback requests', () => {
       method: 'PUT',
       body: { status: 'adopted', disposition: 'ontology' }
     })
+  })
+})
+
+describe('accounts and session expiry', () => {
+  const unauthorized = vi.fn()
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    vi.stubGlobal('localStorage', { getItem: () => 'session-token', setItem: () => {}, removeItem: () => {} })
+    unauthorized.mockReset()
+    onUnauthorized(unauthorized)
+  })
+  afterEach(() => {
+    onUnauthorized(null)
+    vi.unstubAllGlobals()
+  })
+
+  function respond(status: number, body: unknown) {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: status < 400,
+      status,
+      statusText: String(status),
+      text: async () => JSON.stringify(body)
+    } as Response)
+  }
+
+  function lastCall() {
+    const [path, init] = vi.mocked(fetch).mock.calls.at(-1) as [string, RequestInit]
+    return { path, method: init.method, body: init.body ? JSON.parse(String(init.body)) : undefined }
+  }
+
+  it('posts credentials for login, register and password change', async () => {
+    respond(200, { token: 't', expiresAt: 1, user: { username: 'alice' } })
+    await expect(authLogin('alice', 'alice-pass-1')).resolves.toMatchObject({ token: 't' })
+    expect(lastCall()).toEqual({
+      path: '/api/v1/auth/login',
+      method: 'POST',
+      body: { username: 'alice', password: 'alice-pass-1' }
+    })
+
+    await authRegister('bob', 'bob-pass-11', '鲍勃')
+    expect(lastCall()).toEqual({
+      path: '/api/v1/auth/register',
+      method: 'POST',
+      body: { username: 'bob', password: 'bob-pass-11', displayName: '鲍勃' }
+    })
+
+    await authChangePassword('old-pass-11', 'new-pass-22')
+    expect(lastCall()).toEqual({
+      path: '/api/v1/auth/password',
+      method: 'POST',
+      body: { oldPassword: 'old-pass-11', newPassword: 'new-pass-22' }
+    })
+  })
+
+  it('calls the admin user endpoints', async () => {
+    respond(200, [])
+    await listUsers()
+    expect(lastCall().path).toBe('/api/v1/users')
+
+    await updateUser(7, { status: 'disabled' })
+    expect(lastCall()).toEqual({ path: '/api/v1/users/7', method: 'PUT', body: { status: 'disabled' } })
+
+    await resetUserPassword(7, 'reset-pass-33')
+    expect(lastCall()).toEqual({
+      path: '/api/v1/users/7/password',
+      method: 'POST',
+      body: { password: 'reset-pass-33' }
+    })
+  })
+
+  it('reports a 401 on any other endpoint as an expired session', async () => {
+    respond(401, { message: '无效的访问令牌' })
+    const error = await listCatalogs().catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ApiError)
+    expect((error as ApiError).status).toBe(401)
+    expect((error as ApiError).message).toBe('无效的访问令牌')
+    expect(unauthorized).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a 401 from login or register as wrong credentials, not an expired session', async () => {
+    respond(401, { message: '用户名或密码错误' })
+    await expect(authLogin('alice', 'wrong')).rejects.toThrow('用户名或密码错误')
+    await expect(authRegister('alice', 'wrong', '')).rejects.toBeInstanceOf(ApiError)
+    expect(unauthorized).not.toHaveBeenCalled()
+  })
+
+  it('leaves other failures alone', async () => {
+    respond(403, { message: '需要角色 ADMIN' })
+    await expect(listUsers()).rejects.toMatchObject({ status: 403 })
+    expect(unauthorized).not.toHaveBeenCalled()
   })
 })

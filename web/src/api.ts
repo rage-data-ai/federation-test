@@ -13,6 +13,7 @@ import type {
   AskSuggestionPatch,
   AskSuggestionStatus,
   AuthMe,
+  AuthSession,
   CatalogRecord,
   DraftResult,
   ExampleItem,
@@ -21,7 +22,9 @@ import type {
   LlmTestResult,
   MetadataTable,
   OntologyBundle,
-  QueryResult
+  QueryResult,
+  UserAccount,
+  UserPatch
 } from './types'
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null
@@ -49,6 +52,33 @@ function errorMessage(data: unknown, fallback: string): string {
   return fallback
 }
 
+/** 网关返回的非 2xx 响应；{@link status} 是 HTTP 状态码。 */
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+/** 登录和注册本身返回的 401 是“密码不对”，不代表会话失效。 */
+const SIGN_IN_PATHS = ['/api/v1/auth/login', '/api/v1/auth/register']
+
+let unauthorizedHandler: (() => void) | null = null
+
+/** 任一接口返回 401（令牌缺失、过期或被吊销）时回调，供外壳切到登录页。 */
+export function onUnauthorized(handler: (() => void) | null): void {
+  unauthorizedHandler = handler
+}
+
+function notifyUnauthorized(path: string, status: number): void {
+  if (status === 401 && !SIGN_IN_PATHS.includes(path)) {
+    unauthorizedHandler?.()
+  }
+}
+
 async function request<T = Json>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response
   try {
@@ -59,6 +89,7 @@ async function request<T = Json>(path: string, options: RequestInit = {}): Promi
   } catch {
     throw new Error('无法连接网关 localhost:18080，请先启动后端')
   }
+  notifyUnauthorized(path, response.status)
   const text = await response.text()
   if (!text) {
     throw new Error(response.ok ? '网关返回空响应' : `网关不可用 (${response.status})，请先启动后端`)
@@ -70,7 +101,7 @@ async function request<T = Json>(path: string, options: RequestInit = {}): Promi
     throw new Error(`网关返回非 JSON：${text.slice(0, 120)}`)
   }
   if (!response.ok) {
-    throw new Error(errorMessage(data, response.statusText))
+    throw new ApiError(errorMessage(data, response.statusText), response.status)
   }
   return data as T
 }
@@ -136,6 +167,42 @@ export function authMe() {
   return request<AuthMe>('/api/v1/auth/me')
 }
 
+export function authLogin(username: string, password: string) {
+  return request<AuthSession>('/api/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password })
+  })
+}
+
+export function authRegister(username: string, password: string, displayName: string) {
+  return request<AuthSession>('/api/v1/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, displayName })
+  })
+}
+
+export function authChangePassword(oldPassword: string, newPassword: string) {
+  return request<{ success: boolean }>('/api/v1/auth/password', {
+    method: 'POST',
+    body: JSON.stringify({ oldPassword, newPassword })
+  })
+}
+
+export function listUsers() {
+  return request<UserAccount[]>('/api/v1/users')
+}
+
+export function updateUser(id: number, patch: UserPatch) {
+  return request<UserAccount>(`/api/v1/users/${id}`, { method: 'PUT', body: JSON.stringify(patch) })
+}
+
+export function resetUserPassword(id: number, password: string) {
+  return request<{ success: boolean }>(`/api/v1/users/${id}/password`, {
+    method: 'POST',
+    body: JSON.stringify({ password })
+  })
+}
+
 export function llmStatus() {
   return request<LlmStatus>('/api/v1/llm/status')
 }
@@ -158,6 +225,7 @@ export function getOntology() {
 
 export async function getOntologyTurtle(): Promise<string> {
   const response = await fetch('/api/v1/ontology/turtle', { headers: headers() })
+  notifyUnauthorized('/api/v1/ontology/turtle', response.status)
   if (!response.ok) {
     throw new Error(`导出失败 (${response.status})`)
   }
@@ -391,6 +459,7 @@ async function postEvents(path: string, body: unknown, onEvent: SseHandler, sign
     }
     throw new Error('无法连接网关 localhost:18080，请先启动后端')
   }
+  notifyUnauthorized(path, response.status)
   if (!response.ok || !response.body) {
     const text = await response.text()
     let message: unknown = text

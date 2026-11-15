@@ -246,6 +246,117 @@ test.describe('console smoke', () => {
     expect(asked.map((body) => body.conversationId)).toEqual([undefined, 'conv-1'])
   })
 
+  test('gateway that requires login: sign in, manage users, sign out, and expire', async ({ page }) => {
+    const alice = {
+      name: 'alice',
+      displayName: '爱丽丝',
+      localAccount: true,
+      roles: ['ADMIN', 'QUERY'],
+      securityEnabled: true,
+      jwtEnabled: false,
+      catalogAcl: false,
+      catalogs: ['*']
+    }
+    const accounts = [
+      { id: 1, username: 'alice', displayName: '爱丽丝', roles: ['ADMIN', 'QUERY'], status: 'active', createdAt: 1, lastLoginAt: 2 },
+      { id: 2, username: 'bob', displayName: 'bob', roles: ['QUERY'], status: 'active', createdAt: 3, lastLoginAt: 0 }
+    ]
+    let sessionValid = true
+    const unauthorized = { status: 401, json: { message: '无效的访问令牌' } }
+    const signedIn = (route: import('@playwright/test').Route) =>
+      sessionValid && route.request().headers().authorization === 'Bearer tok-alice'
+
+    await page.route('**/api/v1/auth/me', (route) => route.fulfill(signedIn(route) ? { json: alice } : unauthorized))
+    await page.route('**/api/v1/auth/login', (route) => {
+      const body = route.request().postDataJSON() as { username: string; password: string }
+      return body.password === 'alice-pass-1'
+        ? route.fulfill({ json: { token: 'tok-alice', expiresAt: 9, user: accounts[0] } })
+        : route.fulfill({ status: 401, json: { message: '用户名或密码错误' } })
+    })
+    await page.route('**/api/v1/auth/logout', (route) => route.fulfill({ json: { success: true, revoked: true } }))
+    await page.route('**/api/v1/users', (route) => route.fulfill(signedIn(route) ? { json: accounts } : unauthorized))
+    await page.route('**/api/v1/users/2', (route) => {
+      accounts[1] = { ...accounts[1], ...(route.request().postDataJSON() as object) }
+      return route.fulfill({ json: accounts[1] })
+    })
+
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('navigation', { name: '模块' })).toHaveCount(0)
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
+    expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([])
+
+    await page.getByLabel('用户名').fill('alice')
+    await page.getByLabel('密码', { exact: true }).fill('wrong-pass-1')
+    await page.getByRole('button', { name: '登录', exact: true }).last().click()
+    await expect(page.getByRole('alert')).toHaveText('用户名或密码错误')
+    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+
+    await page.getByLabel('密码', { exact: true }).fill('alice-pass-1')
+    await page.getByRole('button', { name: '登录', exact: true }).last().click()
+    await expect(page.getByRole('navigation', { name: '模块' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '身份：alice' })).toContainText('爱丽丝')
+
+    await page.getByRole('button', { name: '用户管理' }).click()
+    const bob = page.getByRole('row', { name: /bob/ })
+    await expect(bob).toContainText('正常')
+    await bob.getByRole('button', { name: '禁用' }).click()
+    await expect(bob).toContainText('已禁用')
+    await expect(page.getByRole('row', { name: /alice/ }).getByRole('button', { name: '禁用' })).toBeDisabled()
+
+    await page.getByRole('button', { name: '身份：alice' }).click()
+    const dialog = page.getByRole('dialog', { name: '访问身份' })
+    await expect(dialog.getByLabel('原密码')).toBeFocused()
+    await dialog.getByRole('button', { name: '退出登录' }).click()
+    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('status')).toHaveCount(0)
+
+    await page.getByLabel('用户名').fill('alice')
+    await page.getByLabel('密码', { exact: true }).fill('alice-pass-1')
+    await page.getByRole('button', { name: '登录', exact: true }).last().click()
+    await page.getByRole('button', { name: '用户管理' }).click()
+    await expect(page.getByRole('row', { name: /bob/ })).toBeVisible()
+    sessionValid = false
+    await page.getByRole('button', { name: '刷新' }).click()
+    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('status')).toHaveText('令牌无效或登录已过期，请重新登录')
+  })
+
+  test('register form checks the confirmation before calling the gateway', async ({ page }) => {
+    const registered: unknown[] = []
+    let token = ''
+    await page.route('**/api/v1/auth/me', (route) =>
+      token && route.request().headers().authorization === `Bearer ${token}`
+        ? route.fulfill({
+            json: { name: 'carol', displayName: '卡萝', localAccount: true, roles: ['QUERY'], securityEnabled: true, jwtEnabled: false, catalogAcl: false, catalogs: ['*'] }
+          })
+        : route.fulfill({ status: 401, json: { message: '缺少 Authorization: Bearer <token>' } })
+    )
+    await page.route('**/api/v1/auth/register', (route) => {
+      registered.push(route.request().postDataJSON())
+      token = 'tok-carol'
+      return route.fulfill({ json: { token, expiresAt: 9, user: { id: 3, username: 'carol' } } })
+    })
+
+    await page.goto('/')
+    await page.getByRole('tab', { name: '注册' }).click()
+    await expect(page.getByRole('heading', { name: '注册账号', level: 1 })).toBeVisible()
+    await page.getByLabel('用户名').fill('carol')
+    await page.getByLabel('显示名（可选）').fill('卡萝')
+    await page.getByLabel('密码', { exact: true }).fill('carol-pass-1')
+    await page.getByLabel('确认密码').fill('carol-pass-2')
+    await page.getByRole('button', { name: '注册并登录' }).click()
+    await expect(page.getByRole('alert')).toHaveText('两次输入的密码不一致')
+    expect(registered).toEqual([])
+
+    await page.getByLabel('确认密码').fill('carol-pass-1')
+    await page.getByRole('button', { name: '注册并登录' }).click()
+    await expect(page.getByRole('navigation', { name: '模块' })).toBeVisible()
+    expect(registered).toEqual([{ username: 'carol', password: 'carol-pass-1', displayName: '卡萝' }])
+    await expect(page.getByRole('button', { name: '身份：carol' })).toContainText('卡萝')
+    await expect(page.getByRole('button', { name: '用户管理' })).toHaveCount(0)
+  })
+
   test('desktop shell visual baseline', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: '智能问数' }).click()
