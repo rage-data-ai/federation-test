@@ -218,6 +218,14 @@ public class FederationProperties {
          * 可用 {@code X-Backchannel-Secret} 头代替 ADMIN Bearer。
          */
         private String backchannelLogoutSecret = "";
+        /** 本地账号登录会话的有效期（小时）。有请求时自动续期，闲置超过这个时长需要重新登录。 */
+        private int sessionTtlHours = 24;
+        /**
+         * 启动时保证存在的本地管理员。两项都非空且该用户名还没有账号时创建；
+         * 账号已存在则不动（不会覆盖在控制台改过的密码）。
+         */
+        private String adminUsername = "";
+        private String adminPassword = "";
         private final Jwt jwt = new Jwt();
 
         public boolean isEnabled() {
@@ -282,6 +290,30 @@ public class FederationProperties {
 
         public void setBackchannelLogoutSecret(String backchannelLogoutSecret) {
             this.backchannelLogoutSecret = backchannelLogoutSecret == null ? "" : backchannelLogoutSecret;
+        }
+
+        public int getSessionTtlHours() {
+            return sessionTtlHours;
+        }
+
+        public void setSessionTtlHours(int sessionTtlHours) {
+            this.sessionTtlHours = sessionTtlHours;
+        }
+
+        public String getAdminUsername() {
+            return adminUsername;
+        }
+
+        public void setAdminUsername(String adminUsername) {
+            this.adminUsername = adminUsername == null ? "" : adminUsername;
+        }
+
+        public String getAdminPassword() {
+            return adminPassword;
+        }
+
+        public void setAdminPassword(String adminPassword) {
+            this.adminPassword = adminPassword == null ? "" : adminPassword;
         }
 
         public Jwt getJwt() {

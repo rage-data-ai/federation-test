@@ -13,7 +13,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.cmcc.cmdevops.security.federation.account.UserService;
+import com.cmcc.cmdevops.security.federation.account.UserService.Session;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
+import com.cmcc.cmdevops.security.federation.security.BearerAuthFilter;
 import com.cmcc.cmdevops.security.federation.security.CatalogAclService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
@@ -31,22 +34,61 @@ public class AuthController {
     private final FederationProperties properties;
     private final CatalogAclService catalogAcl;
     private final TokenRevocationService revocations;
+    private final UserService users;
 
     public AuthController(
             FederationProperties properties,
             CatalogAclService catalogAcl,
-            TokenRevocationService revocations) {
+            TokenRevocationService revocations,
+            UserService users) {
         this.properties = properties;
         this.catalogAcl = catalogAcl;
         this.revocations = revocations;
+        this.users = users;
+    }
+
+    public record RegisterBody(String username, String password, String displayName) {
+    }
+
+    public record LoginBody(String username, String password) {
+    }
+
+    public record PasswordBody(String oldPassword, String newPassword) {
+    }
+
+    /** 自助注册本地账号，成功即登录。无需 Bearer。 */
+    @PostMapping("/register")
+    public Session register(@RequestBody RegisterBody body) {
+        return users.register(body.username(), body.password(), body.displayName());
+    }
+
+    /** 用户名 + 密码登录，返回会话令牌。无需 Bearer。 */
+    @PostMapping("/login")
+    public Session login(@RequestBody LoginBody body) {
+        return users.login(body.username(), body.password());
+    }
+
+    /** 本地账号改自己的密码；其他设备上的会话随之失效。 */
+    @PostMapping("/password")
+    public Map<String, Object> changePassword(@RequestBody PasswordBody body, HttpServletRequest request) {
+        if (!isLocalAccount(request)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前身份不是本地账号，不能在这里改密码");
+        }
+        users.changePassword(GatewayUser.current().name(), body.oldPassword(), body.newPassword(), bearer(request));
+        return Map.of("success", true);
     }
 
     /** 返回当前 Bearer / JWT 解析后的身份；鉴权关闭时为 anonymous。 */
     @GetMapping("/me")
-    public Map<String, Object> me() {
+    public Map<String, Object> me(HttpServletRequest request) {
         GatewayUser user = GatewayUser.current();
+        boolean localAccount = isLocalAccount(request);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("name", user.name());
+        body.put("displayName", localAccount
+                ? users.find(user.name()).map(view -> view.displayName()).orElse(user.name())
+                : user.name());
+        body.put("localAccount", localAccount);
         body.put("roles", user.roles().stream().map(GatewayRole::name).sorted().collect(Collectors.toList()));
         body.put("securityEnabled", properties.getSecurity().isEnabled());
         body.put("jwtEnabled", properties.getSecurity().getJwt().isEnabled());
@@ -60,6 +102,7 @@ public class AuthController {
     public Map<String, Object> logout(HttpServletRequest request) {
         String token = bearer(request);
         if (token != null) {
+            users.logout(token);
             revocations.revoke(token);
         }
         return Map.of("success", true, "revoked", token != null);
@@ -122,6 +165,10 @@ public class AuthController {
             return;
         }
         throw new ResponseStatusException(HttpStatus.FORBIDDEN, "back-channel logout 未授权");
+    }
+
+    private static boolean isLocalAccount(HttpServletRequest request) {
+        return Boolean.TRUE.equals(request.getAttribute(BearerAuthFilter.LOCAL_ACCOUNT_ATTRIBUTE));
     }
 
     private static String bearer(HttpServletRequest request) {

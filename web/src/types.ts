@@ -2,11 +2,40 @@
 
 export type AuthMe = {
   name: string
+  /** 本地账号的显示名；其他身份与 name 相同。 */
+  displayName?: string
+  /** 当前身份来自网关本地账号（用户名 + 密码登录）。 */
+  localAccount?: boolean
   roles: string[]
   securityEnabled: boolean
   jwtEnabled: boolean
   catalogAcl: boolean
   catalogs: string[]
+}
+
+export type UserStatus = 'active' | 'disabled'
+
+export type UserAccount = {
+  id: number
+  username: string
+  displayName: string
+  roles: string[]
+  status: UserStatus
+  createdAt: number
+  /** 0 表示从未登录。 */
+  lastLoginAt: number
+}
+
+export type AuthSession = {
+  token: string
+  expiresAt: number
+  user: UserAccount
+}
+
+export type UserPatch = {
+  displayName?: string
+  roles?: string[]
+  status?: UserStatus
 }
 
 export type LlmConfig = {

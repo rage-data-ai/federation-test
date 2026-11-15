@@ -1,6 +1,8 @@
 # OIDC / JWT 接入指南
 
-网关作为**资源服务器**：校验 `Authorization: Bearer`（共享 token 或 IdP JWT）。控制台支持手动粘贴令牌，以及可选的 **Authorization Code + PKCE** 登录。
+**OIDC**（OpenID Connect）是建立在 OAuth 2.0 上的登录标准：用户在公司的身份提供商（IdP，如 Keycloak、Okta、企业微信对接的 IdP）上登录一次，IdP 发给控制台一个短期 `access_token`（JWT），网关再按公钥校验这个令牌，从而知道「是谁、有哪些角色」。本仓库**不自建 IdP**，只做资源服务器；没有公司 IdP 时请用本地账号（见 [`auth.md`](auth.md)）。
+
+网关校验 `Authorization: Bearer` 的顺序：静态配置令牌 → 本地账号会话 → IdP JWT。控制台登录页的「其他登录方式」里提供手动粘贴令牌，以及可选的 **Authorization Code + PKCE** OIDC 登录。
 
 ## 网关
 
@@ -31,8 +33,8 @@ VITE_OIDC_SCOPE=openid profile roles
 Keycloak：创建 Public client，开启 PKCE，Valid redirect URIs 包含控制台地址；Token mapper 写入 `roles`。  
 其它 IdP：控制台会请求 `{authority}/.well-known/openid-configuration`（OIDC Discovery）解析 authorize/token/logout；失败时回退 Keycloak 或 `/oauth2/v1/*` 约定路径。
 
-侧栏「身份」→「OIDC 登录」；回调后 `access_token` / `refresh_token` 写入 localStorage，并由 `api.ts` 自动附带。  
-可用「刷新令牌」调用 `grant_type=refresh_token`（见 `refreshAccessToken`）。
+登录页「其他登录方式」→「通过 OIDC 单点登录」；回调后 `access_token` / `refresh_token` 写入 localStorage，并由 `api.ts` 自动附带。  
+可用身份弹窗里的「刷新令牌」调用 `grant_type=refresh_token`（见 `refreshAccessToken`）。
 「OIDC 注销」清除本地令牌并跳转 IdP logout（`post_logout_redirect_uri`）。
 
 ## 表级 ACL

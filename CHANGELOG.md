@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- 本地账号：自助注册 / 密码登录（会话默认 24h、有请求续期）、管理员维护用户；控制台登录页与用户管理；见 `docs/auth.md`
+
 ### Changed
 
 - 问数补充提示词文案对齐 Hermes：`global`≈`MEMORY.md`，`personal`≈`USER.md`
