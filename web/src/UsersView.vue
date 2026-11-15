@@ -233,6 +233,7 @@ async function submitReset() {
 
 table {
   width: 100%;
+  min-width: 0;
   border-collapse: collapse;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -247,6 +248,7 @@ td {
   text-align: left;
   font-weight: 400;
   white-space: nowrap;
+  cursor: default;
 }
 
 thead th {
