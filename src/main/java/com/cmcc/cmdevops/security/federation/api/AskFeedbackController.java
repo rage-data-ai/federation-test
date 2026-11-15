@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackService;
+import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackService.ConversationSummary;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackService.RunView;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackService.SuggestionPatch;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskSuggestion;
@@ -38,6 +39,19 @@ public class AskFeedbackController {
     }
 
     public record SuggestionBody(String content, String runId) {
+    }
+
+    /** 当前用户的对话列表（按最近活动倒序）。 */
+    @GetMapping("/conversations")
+    public List<ConversationSummary> conversations(
+            @RequestParam(name = "limit", required = false) Integer limit) {
+        return service.conversations(limit);
+    }
+
+    /** 当前用户某段对话的全部问数回合（正序）。 */
+    @GetMapping("/conversations/{id}")
+    public List<RunView> conversation(@PathVariable("id") String id) {
+        return service.conversation(id);
     }
 
     @GetMapping("/runs/{id}")

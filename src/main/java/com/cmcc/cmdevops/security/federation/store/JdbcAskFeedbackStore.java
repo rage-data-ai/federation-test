@@ -62,13 +62,36 @@ public class JdbcAskFeedbackStore implements AskFeedbackStore {
                 run.elapsedMs());
     }
 
+    private static final String RUN_SELECT = """
+            SELECT id, conversation_id, user_name, question, history, status, answer, sql_text, evidence, error,
+                   created_at, elapsed_ms
+            FROM fed_ask_run
+            """;
+
     @Override
     public Optional<AskRun> findRun(String id) {
-        List<AskRun> rows = jdbc.query("""
-                SELECT id, conversation_id, user_name, question, history, status, answer, sql_text, evidence, error,
-                       created_at, elapsed_ms
-                FROM fed_ask_run WHERE id = ?
-                """, (rs, row) -> new AskRun(
+        return jdbc.query(RUN_SELECT + " WHERE id = ?", this::mapRun, id).stream().findFirst();
+    }
+
+    @Override
+    public List<AskRun> listRunsByUser(String userName, int limit) {
+        if (limit <= 0) {
+            return jdbc.query(RUN_SELECT + " WHERE user_name = ? ORDER BY created_at DESC, id DESC",
+                    this::mapRun, userName);
+        }
+        return jdbc.query(RUN_SELECT + " WHERE user_name = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+                this::mapRun, userName, limit);
+    }
+
+    @Override
+    public List<AskRun> listRunsByConversation(String userName, String conversationId) {
+        return jdbc.query(
+                RUN_SELECT + " WHERE user_name = ? AND conversation_id = ? ORDER BY created_at ASC, id ASC",
+                this::mapRun, userName, conversationId);
+    }
+
+    private AskRun mapRun(ResultSet rs, int row) throws SQLException {
+        return new AskRun(
                 rs.getString("id"),
                 rs.getString("conversation_id"),
                 rs.getString("user_name"),
@@ -82,8 +105,7 @@ public class JdbcAskFeedbackStore implements AskFeedbackStore {
                 }),
                 rs.getString("error"),
                 rs.getLong("created_at"),
-                rs.getLong("elapsed_ms")), id);
-        return rows.stream().findFirst();
+                rs.getLong("elapsed_ms"));
     }
 
     @Override

@@ -44,9 +44,9 @@ class AskFeedbackServiceTest {
 
     @BeforeEach
     void seedRuns() {
-        store.saveRun(run("run-alice", "alice", AskRun.ANSWERED));
-        store.saveRun(run("run-clarify", "alice", AskRun.CLARIFY));
-        store.saveRun(run("run-bob", "bob", AskRun.ANSWERED));
+        store.saveRun(run("run-alice", "conv-alice", "alice", AskRun.ANSWERED, 1_000));
+        store.saveRun(run("run-clarify", "conv-alice", "alice", AskRun.CLARIFY, 2_000));
+        store.saveRun(run("run-bob", "conv-bob", "bob", AskRun.ANSWERED, 1_500));
     }
 
     @AfterEach
@@ -277,7 +277,45 @@ class AskFeedbackServiceTest {
         return suggestions.stream().map(AskSuggestion::content).toList();
     }
 
-    private static AskRun run(String id, String user, String status) {
-        return new AskRun(id, id, user, "问题 " + id, List.of(), status, "回答", "SELECT 1", Map.of(), null, 1_000, 5);
+    @Test
+    void conversationsListOnlyOwnAndOrderByLatestActivity() {
+        store.saveRun(run("run-alice-2", "conv-alice-2", "alice", AskRun.ANSWERED, 3_000));
+        as("alice");
+
+        var list = service.conversations(10);
+        assertEquals(List.of("conv-alice-2", "conv-alice"),
+                list.stream().map(AskFeedbackService.ConversationSummary::conversationId).toList());
+        assertEquals("问题 run-alice", list.get(1).title());
+        assertEquals(2, list.get(1).runCount());
+        assertEquals(AskRun.CLARIFY, list.get(1).lastStatus());
+        assertEquals(1_000, list.get(1).createdAt());
+        assertEquals(2_000, list.get(1).updatedAt());
+
+        as("bob");
+        assertEquals(List.of("conv-bob"),
+                service.conversations(null).stream().map(AskFeedbackService.ConversationSummary::conversationId)
+                        .toList());
+    }
+
+    @Test
+    void conversationLoadsRunsInOrderWithOwnRating() {
+        as("alice");
+        service.rate("run-alice", "up");
+
+        var turns = service.conversation("conv-alice");
+        assertEquals(List.of("run-alice", "run-clarify"),
+                turns.stream().map(view -> view.run().id()).toList());
+        assertEquals("up", turns.get(0).rating());
+        assertNull(turns.get(1).rating());
+
+        as("bob");
+        assertEquals(HttpStatus.NOT_FOUND,
+                assertThrows(ResponseStatusException.class, () -> service.conversation("conv-alice")).getStatusCode());
+        assertThrows(IllegalArgumentException.class, () -> service.conversation(" "));
+    }
+
+    private static AskRun run(String id, String conversationId, String user, String status, long createdAt) {
+        return new AskRun(id, conversationId, user, "问题 " + id, List.of(), status, "回答", "SELECT 1", Map.of(),
+                null, createdAt, 5);
     }
 }

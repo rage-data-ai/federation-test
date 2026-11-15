@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AskAnswerClarify from './components/ask/AskAnswerClarify.vue'
 import AskFeedback from './components/ask/AskFeedback.vue'
+import AskHistory from './components/ask/AskHistory.vue'
 import AskKnowledge from './components/ask/AskKnowledge.vue'
 import AskPrompts from './components/ask/AskPrompts.vue'
 import AskSuggestions from './components/ask/AskSuggestions.vue'
@@ -13,9 +14,10 @@ import {
   useAskStream
 } from './composables/useAskStream'
 import { useAskLlmStatus } from './composables/useAskLlmStatus'
+import type { AskRunView } from './types'
 
 const { status, statusError, ready, needsKey, openLlmSettings } = useAskLlmStatus()
-const { turns, draft, busy, scroller, send, stop, clearTurns, onKey } = useAskStream()
+const { turns, draft, busy, scroller, send, stop, clearTurns, restoreConversation, onKey } = useAskStream()
 
 const VIEWS = [
   { key: 'chat', label: '对话' },
@@ -24,6 +26,24 @@ const VIEWS = [
   { key: 'prompts', label: '提示词' }
 ] as const
 const view = ref<(typeof VIEWS)[number]['key']>('chat')
+const historyRevision = ref(0)
+const activeConversationId = computed(
+  () => turns.value.find((turn) => turn.conversationId)?.conversationId || ''
+)
+
+watch(busy, (now, was) => {
+  if (was && !now && turns.value.some((turn) => turn.runId)) {
+    historyRevision.value += 1
+  }
+})
+
+function openConversation(views: AskRunView[]) {
+  restoreConversation(views)
+}
+
+function startNewConversation() {
+  clearTurns()
+}
 </script>
 
 <template>
@@ -48,14 +68,20 @@ const view = ref<(typeof VIEWS)[number]['key']>('chat')
       <div class="head-side" :class="{ offstage: view !== 'chat' }">
         <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">{{ needsKey ? '填写 API Key' : '未配置，去设置' }}</button>
         <span v-else-if="status" class="head-note">{{ status.protocol }} · {{ status.model }}</span>
-        <button type="button" :disabled="busy || !turns.length" @click="clearTurns">新对话</button>
+        <button type="button" :disabled="busy || !turns.length" @click="startNewConversation">新对话</button>
       </div>
     </header>
     <AskSuggestions v-if="view === 'suggestions'" />
     <AskKnowledge v-else-if="view === 'knowledge'" />
     <AskPrompts v-else-if="view === 'prompts'" />
+    <div v-show="view === 'chat'" class="chat-layout">
+      <AskHistory
+        :active-id="activeConversationId"
+        :revision="historyRevision"
+        @select="openConversation"
+        @create="startNewConversation"
+      />
     <div
-      v-show="view === 'chat'"
       ref="scroller"
       class="thread"
       role="log"
@@ -194,6 +220,7 @@ const view = ref<(typeof VIEWS)[number]['key']>('chat')
         </div>
       </article>
     </div>
+    </div>
 
     <footer v-show="view === 'chat'" class="composer" role="region" aria-label="提问区">
       <label class="sr-only" for="ask-draft">问题输入</label>
@@ -260,8 +287,15 @@ const view = ref<(typeof VIEWS)[number]['key']>('chat')
   font-weight: 600;
 }
 
+.chat-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .thread {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   padding: 16px 20px 24px;

@@ -6,6 +6,8 @@ import {
   authLogin,
   authRegister,
   dispatchSseChunk,
+  getAskConversation,
+  listAskConversations,
   listAskSuggestions,
   listCatalogs,
   listUsers,
@@ -90,6 +92,17 @@ describe('ask feedback requests', () => {
 
     await rateAskRun('run-1', null)
     expect(lastCall().body).toEqual({ rating: null })
+  })
+
+  it('lists and loads conversations', async () => {
+    await listAskConversations()
+    expect(lastCall().path).toBe('/api/v1/ask/conversations')
+
+    await listAskConversations(20)
+    expect(lastCall().path).toBe('/api/v1/ask/conversations?limit=20')
+
+    await getAskConversation('conv/1')
+    expect(lastCall().path).toBe('/api/v1/ask/conversations/conv%2F1')
   })
 
   it('lists suggestions with only the filters that are set', async () => {

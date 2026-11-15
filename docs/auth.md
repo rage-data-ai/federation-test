@@ -55,3 +55,4 @@ export FEDERATION_ADMIN_PASSWORD='……至少 8 位……'
 ## 与问数偏好的关系
 
 问数个人补充提示词（`USER.md`）按 `GatewayUser.current().name()` 归属；登录后不同用户互不可见，全局提示词与知识库仍共享。
+对话历史同样按用户隔离：`GET /api/v1/ask/conversations` 只返回当前用户的会话，控制台左侧「历史」可回看并继续追问。

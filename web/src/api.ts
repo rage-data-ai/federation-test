@@ -8,6 +8,7 @@ import type {
   AskPromptPatch,
   AskPromptScope,
   AskRating,
+  AskConversationSummary,
   AskRunView,
   AskSuggestion,
   AskSuggestionPatch,
@@ -313,6 +314,15 @@ export function askAnswerable(question: string) {
     method: 'POST',
     body: JSON.stringify({ question })
   })
+}
+
+export function listAskConversations(limit?: number) {
+  const query = limit && limit > 0 ? `?limit=${limit}` : ''
+  return request<AskConversationSummary[]>(`/api/v1/ask/conversations${query}`)
+}
+
+export function getAskConversation(conversationId: string) {
+  return request<AskRunView[]>(`/api/v1/ask/conversations/${encodeURIComponent(conversationId)}`)
 }
 
 export function getAskRun(runId: string) {

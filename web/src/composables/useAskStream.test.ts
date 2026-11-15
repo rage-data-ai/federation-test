@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { askStream, type SseHandler } from '../api'
-import { SAMPLES, applyEvent, cell, emptyTurn, lastStage, useAskStream } from './useAskStream'
+import {
+  SAMPLES,
+  applyEvent,
+  cell,
+  emptyTurn,
+  lastStage,
+  turnFromRunView,
+  useAskStream
+} from './useAskStream'
 
 vi.mock('../api', () => ({ askStream: vi.fn() }))
 
@@ -82,6 +90,54 @@ describe('applyEvent', () => {
   })
 })
 
+describe('turnFromRunView', () => {
+  it('restores answered and clarify turns from stored runs', () => {
+    const answered = turnFromRunView({
+      run: {
+        id: 'run-1',
+        conversationId: 'conv-1',
+        userName: 'alice',
+        question: '订单一共有多少笔',
+        history: [],
+        status: 'answered',
+        answer: '42 笔',
+        sql: 'SELECT 1',
+        evidence: { rows: [[42]], columns: ['cnt'], rowCount: 1 },
+        error: null,
+        createdAt: 1,
+        elapsedMs: 10
+      },
+      rating: 'up'
+    })
+    expect(answered.runId).toBe('run-1')
+    expect(answered.conversationId).toBe('conv-1')
+    expect(answered.rating).toBe('up')
+    expect(answered.answer?.answer).toBe('42 笔')
+    expect(answered.sqls[0]?.sql).toBe('SELECT 1')
+    expect(answered.done).toBe(true)
+
+    const clarify = turnFromRunView({
+      run: {
+        id: 'run-2',
+        conversationId: 'conv-1',
+        userName: 'alice',
+        question: '再细一点',
+        history: [],
+        status: 'clarify',
+        answer: null,
+        sql: null,
+        evidence: { clarify: { question: '要看哪个时间范围？', options: ['今天', '本周'] } },
+        error: null,
+        createdAt: 2,
+        elapsedMs: 5
+      },
+      rating: null
+    })
+    expect(clarify.clarify).toEqual({ question: '要看哪个时间范围？', options: ['今天', '本周'] })
+    expect(clarify.answer).toBeNull()
+  })
+})
+
 describe('useAskStream conversation', () => {
   beforeEach(() => {
     // 组合式函数在组件外调用时 Vue 会对 onUnmounted 告警，与这里要验证的行为无关。
@@ -120,5 +176,40 @@ describe('useAskStream conversation', () => {
     clearTurns()
     await send('换个问题')
     expect(bodies()[2]).toEqual({ question: '换个问题', history: [], conversationId: undefined })
+  })
+
+  it('restores a saved conversation and continues under its id', async () => {
+    const { turns, send, restoreConversation } = useAskStream()
+    restoreConversation([
+      {
+        run: {
+          id: 'run-9',
+          conversationId: 'conv-saved',
+          userName: 'alice',
+          question: '历史问题',
+          history: [],
+          status: 'answered',
+          answer: '历史回答',
+          sql: null,
+          evidence: {},
+          error: null,
+          createdAt: 1,
+          elapsedMs: 1
+        },
+        rating: null
+      }
+    ])
+    expect(turns.value).toHaveLength(1)
+    expect(turns.value[0].conversationId).toBe('conv-saved')
+
+    await send('接着问')
+    expect(vi.mocked(askStream).mock.calls.at(-1)?.[0]).toEqual({
+      question: '接着问',
+      history: [
+        { role: 'user', content: '历史问题' },
+        { role: 'assistant', content: '历史回答' }
+      ],
+      conversationId: 'conv-saved'
+    })
   })
 })

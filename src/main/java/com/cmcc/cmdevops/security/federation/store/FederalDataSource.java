@@ -232,9 +232,13 @@ public class FederalDataSource {
                   error TEXT NULL,
                   created_at BIGINT NOT NULL,
                   elapsed_ms BIGINT NOT NULL,
-                  KEY idx_fed_ask_run_conversation (conversation_id, created_at)
+                  KEY idx_fed_ask_run_conversation (conversation_id, created_at),
+                  KEY idx_fed_ask_run_user (user_name, created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        if (!indexExists("fed_ask_run", "idx_fed_ask_run_user")) {
+            jdbc.execute("ALTER TABLE fed_ask_run ADD KEY idx_fed_ask_run_user (user_name, created_at)");
+        }
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS fed_ask_feedback (
                   run_id VARCHAR(36) NOT NULL,

@@ -279,6 +279,16 @@ export type AskRunView = {
   rating: AskRating | null
 }
 
+/** 当前用户一段对话的摘要（列表用）。 */
+export type AskConversationSummary = {
+  conversationId: string
+  title: string
+  lastStatus: AskRunStatus
+  runCount: number
+  createdAt: number
+  updatedAt: number
+}
+
 export type AskSuggestionStatus = 'open' | 'adopted' | 'rejected'
 
 export type AskSuggestionDisposition = 'knowledge' | 'prompt' | 'ontology'
