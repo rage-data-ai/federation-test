@@ -357,7 +357,111 @@ test.describe('console smoke', () => {
     await expect(page.getByRole('button', { name: '用户管理' })).toHaveCount(0)
   })
 
+  test('ask history lists own conversations and restores turns', async ({ page }) => {
+    const conversations = [
+      {
+        conversationId: 'conv-1',
+        title: '最近一天高危告警最多的资产',
+        lastStatus: 'answered',
+        runCount: 2,
+        createdAt: 1,
+        updatedAt: 2
+      }
+    ]
+    const turns = [
+      {
+        run: {
+          id: 'run-1',
+          conversationId: 'conv-1',
+          userName: 'alice',
+          question: '最近一天高危告警最多的资产',
+          history: [],
+          status: 'answered',
+          answer: 'web-01 最多，5 条',
+          sql: 'SELECT 1',
+          evidence: {},
+          error: null,
+          createdAt: 1,
+          elapsedMs: 10
+        },
+        rating: null
+      },
+      {
+        run: {
+          id: 'run-2',
+          conversationId: 'conv-1',
+          userName: 'alice',
+          question: '只看生产环境',
+          history: [],
+          status: 'answered',
+          answer: '生产环境 3 条',
+          sql: null,
+          evidence: {},
+          error: null,
+          createdAt: 2,
+          elapsedMs: 8
+        },
+        rating: 'up'
+      }
+    ]
+    await page.route('**/api/v1/auth/me', (route) =>
+      route.fulfill({
+        json: {
+          name: 'alice',
+          roles: ['QUERY'],
+          securityEnabled: false,
+          jwtEnabled: false,
+          catalogAcl: false,
+          catalogs: []
+        }
+      })
+    )
+    await page.route('**/api/v1/llm/config', (route) =>
+      route.fulfill({
+        json: { configured: true, apiKeySet: true, protocol: 'openai', model: 'qwen', baseUrl: 'http://llm.local' }
+      })
+    )
+    // Default module (datasource) loads in parallel; without stubs a secured gateway 401s and kicks to login.
+    await page.route('**/api/v1/catalogs', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/examples', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/metadata**', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/ask/conversations/conv-1', (route) => route.fulfill({ json: turns }))
+    await page.route('**/api/v1/ask/conversations', (route) => {
+      if (route.request().method() === 'GET' && !/\/conversations\/[^/?]+/.test(route.request().url())) {
+        return route.fulfill({ json: conversations })
+      }
+      return route.continue()
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: '智能问数' }).click()
+    const history = page.getByRole('complementary', { name: '对话历史' })
+    await expect(history).toBeVisible()
+    await expect(history.getByRole('button', { name: /最近一天高危告警最多的资产/ })).toBeVisible()
+    await history.getByRole('button', { name: /最近一天高危告警最多的资产/ }).click()
+    await expect(page.getByRole('article', { name: '回合 1' })).toContainText('web-01 最多，5 条')
+    await expect(page.getByRole('article', { name: '回合 2' })).toContainText('生产环境 3 条')
+    await expect(history.getByRole('button', { name: /最近一天高危告警最多的资产/ })).toHaveAttribute(
+      'aria-current',
+      'true'
+    )
+  })
+
   test('desktop shell visual baseline', async ({ page }) => {
+    await page.route('**/api/v1/auth/me', (route) =>
+      route.fulfill({
+        json: { name: 'root', roles: ['ADMIN', 'QUERY'], securityEnabled: false, jwtEnabled: false, catalogAcl: false, catalogs: [] }
+      })
+    )
+    await page.route('**/api/v1/llm/config', (route) =>
+      route.fulfill({
+        json: { configured: true, apiKeySet: true, protocol: 'openai', model: 'qwen', baseUrl: 'http://llm.local' }
+      })
+    )
+    await page.route('**/api/v1/catalogs', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/examples', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/metadata**', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/ask/conversations', (route) => route.fulfill({ json: [] }))
     await page.goto('/')
     await page.getByRole('button', { name: '智能问数' }).click()
     await expect(page.locator('#ask-title')).toBeVisible()

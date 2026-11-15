@@ -6,6 +6,7 @@ import type {
   AskMetadataReport,
   AskOntologyContext,
   AskRating,
+  AskRunView,
   AskSqlItem
 } from '../types'
 
@@ -84,6 +85,51 @@ export function emptyTurn(question: string): AskTurn {
     done: false,
     showTrace: true
   }
+}
+
+/** 把落库的问数记录还原成对话页上的一回合（过程轨迹不回放，只恢复问答与评价）。 */
+export function turnFromRunView(view: AskRunView): AskTurn {
+  const run = view.run
+  const evidence = run.evidence || {}
+  const turn = emptyTurn(run.question)
+  turn.runId = run.id
+  turn.conversationId = run.conversationId
+  turn.rating = view.rating
+  turn.done = true
+  turn.showTrace = false
+  turn.error = run.error || ''
+  if (run.sql) {
+    turn.sqls = [{ status: 'executed', sql: run.sql }]
+  } else if (Array.isArray(evidence.sqls)) {
+    turn.sqls = evidence.sqls as AskSqlItem[]
+  }
+  if (Array.isArray(evidence.rows) && evidence.rows.length) {
+    turn.results = [
+      {
+        columns: Array.isArray(evidence.columns) ? evidence.columns : [],
+        rows: evidence.rows,
+        rowCount: typeof evidence.rowCount === 'number' ? evidence.rowCount : evidence.rows.length
+      }
+    ]
+  }
+  if (run.status === 'answered' && run.answer) {
+    turn.answer = {
+      answer: run.answer,
+      sql: run.sql ?? undefined,
+      caliber: evidence.caliber,
+      steps: evidence.steps,
+      columns: evidence.columns,
+      rowCount: evidence.rowCount,
+      rows: evidence.rows
+    }
+  } else if (run.status === 'clarify') {
+    const clarify = evidence.clarify
+    turn.clarify =
+      clarify && typeof clarify === 'object'
+        ? (clarify as Record<string, unknown>)
+        : { question: run.answer || '需要补充信息', options: [] }
+  }
+  return turn
 }
 
 function buildHistory(turns: AskTurn[]): ChatHistoryItem[] {
@@ -216,7 +262,17 @@ export function useAskStream() {
   }
 
   function clearTurns() {
+    controller?.abort()
     turns.value = []
+  }
+
+  /** 用一段已落库的对话替换当前回合，之后追问会带上同一 conversationId。 */
+  function restoreConversation(views: AskRunView[]) {
+    controller?.abort()
+    busy.value = false
+    controller = null
+    turns.value = views.map(turnFromRunView)
+    scrollDown()
   }
 
   function onKey(event: KeyboardEvent) {
@@ -236,6 +292,7 @@ export function useAskStream() {
     send,
     stop,
     clearTurns,
+    restoreConversation,
     onKey,
     scrollDown
   }
