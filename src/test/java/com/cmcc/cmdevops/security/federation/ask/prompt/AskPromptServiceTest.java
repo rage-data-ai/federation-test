@@ -36,6 +36,8 @@ class AskPromptServiceTest {
 
         String composed = service.compose("基础规则");
         assertTrue(composed.startsWith("基础规则"));
+        assertTrue(composed.contains(AskPromptService.GLOBAL_SECTION));
+        assertTrue(composed.contains(AskPromptService.PERSONAL_SECTION));
         assertTrue(composed.contains("全局：默认最近 7 天"));
         assertTrue(composed.contains("个人：回答尽量短"));
     }

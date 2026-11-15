@@ -333,7 +333,10 @@ export type AskPromptStatus = 'draft' | 'active' | 'archived'
 
 export type AskPromptSource = 'human' | 'model'
 
-/** 问数补充提示词：全局 / 个人，compose 时接在基础规则之后。 */
+/**
+ * 问数补充提示词：全局 / 个人，compose 时接在基础规则之后。
+ * Hermes 对应：`global` ≈ MEMORY.md，`personal` ≈ USER.md。
+ */
 export type AskPrompt = {
   id: number
   scope: AskPromptScope

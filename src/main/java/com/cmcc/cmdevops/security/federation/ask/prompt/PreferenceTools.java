@@ -6,7 +6,7 @@ import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 
 /**
- * 问数分析师可调用：把用户明确说出的偏好写成个人补充提示词（立即生效，可在「提示词」页撤销/改）。
+ * 问数分析师可调用：把用户明确说出的偏好写入 USER.md（个人）补充提示词（立即生效，可在「提示词」页撤销/改）。
  */
 @Component
 public class PreferenceTools {
@@ -17,10 +17,10 @@ public class PreferenceTools {
         this.prompts = prompts;
     }
 
-    @Tool("当用户明确要求记住某种问数偏好（口径、默认时间范围、回答风格等）时调用。"
-            + "写入个人补充提示词并立即生效；不要用于一次性澄清。")
+    @Tool("当用户明确要求记住某种问数偏好（默认时间范围、回答风格、沟通习惯等）时调用。"
+            + "写入 USER.md（个人）补充提示词并立即生效；环境/口径类共享约定请勿写入这里；不要用于一次性澄清。")
     public String rememberPreference(@P("要用自然语言写下的偏好，一两句即可") String preference) {
         AskPrompt saved = prompts.rememberPreference(preference);
-        return "已记住为个人提示词 #" + saved.id() + "（可在提示词页撤销）";
+        return "已写入 USER.md（个人）提示词 #" + saved.id() + "（可在提示词页撤销）";
     }
 }
