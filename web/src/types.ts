@@ -395,6 +395,48 @@ export type AskPromptPatch = {
   status?: AskPromptStatus
 }
 
+export type FlowGraph = {
+  startNodeId: string
+  nodes: Array<{ id: string; type: string; title: string; config?: Record<string, unknown> }>
+  edges: Array<{ from: string; to: string; when?: string | null }>
+}
+
+export type FlowDraft = {
+  id: string
+  name: string
+  owner: string
+  graph: FlowGraph
+  status: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type ChatApp = {
+  id: string
+  name: string
+  description: string
+  flowId: string
+  owner: string
+  status: 'draft' | 'published' | 'archived' | string
+  currentReleaseId: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export type PublishedApp = {
+  appId: string
+  appName: string
+  releaseId: number
+  flowVersionId: string
+  graph: FlowGraph
+}
+
+export type FlowTemplate = {
+  id: string
+  name: string
+  description: string
+}
+
 export function emptyOntology(): OntologyBundle {
   return { concepts: [], attributes: [], relations: [], codes: [], definedConcepts: [] }
 }

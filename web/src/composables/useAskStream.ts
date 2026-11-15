@@ -208,8 +208,9 @@ export function applyEvent(turn: AskTurn, name: string, data: unknown): void {
 
 /**
  * SSE ask flow: turns, draft, busy, send/stop, and scroll.
+ * @param appId 已发布应用 id；空则走网关内置「智能问数」
  */
-export function useAskStream() {
+export function useAskStream(appId?: Ref<string>) {
   const turns = ref<AskTurn[]>([])
   const draft = ref('')
   const busy = ref(false)
@@ -243,7 +244,12 @@ export function useAskStream() {
     controller = new AbortController()
     scrollDown()
     try {
-      await askStream({ question, history: prior, conversationId }, (name, data) => onEvent(live, name, data), controller.signal)
+      const body: Record<string, unknown> = { question, history: prior, conversationId }
+      const selectedApp = appId?.value?.trim()
+      if (selectedApp) {
+        body.appId = selectedApp
+      }
+      await askStream(body, (name, data) => onEvent(live, name, data), controller.signal)
     } catch (e) {
       live.error = e instanceof Error ? e.message : String(e)
     } finally {

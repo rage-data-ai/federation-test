@@ -138,6 +138,59 @@ public class FederalDataSource {
         ensureAskKnowledgeSchema();
         ensureAskPromptSchema();
         ensureUserSchema();
+        ensureChatflowSchema();
+    }
+
+    /** 可配置问数流程与可发布应用。 */
+    private void ensureChatflowSchema() {
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_flow (
+                  id VARCHAR(64) NOT NULL PRIMARY KEY,
+                  name VARCHAR(128) NOT NULL,
+                  owner VARCHAR(128) NOT NULL,
+                  graph_json MEDIUMTEXT NOT NULL,
+                  status VARCHAR(16) NOT NULL,
+                  created_at BIGINT NOT NULL,
+                  updated_at BIGINT NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_flow_version (
+                  id VARCHAR(64) NOT NULL PRIMARY KEY,
+                  flow_id VARCHAR(64) NOT NULL,
+                  version INT NOT NULL,
+                  graph_json MEDIUMTEXT NOT NULL,
+                  published_by VARCHAR(128) NOT NULL,
+                  published_at BIGINT NOT NULL,
+                  UNIQUE KEY uk_fed_flow_version (flow_id, version),
+                  KEY idx_fed_flow_version_flow (flow_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_app (
+                  id VARCHAR(64) NOT NULL PRIMARY KEY,
+                  name VARCHAR(128) NOT NULL,
+                  description VARCHAR(512) NOT NULL,
+                  flow_id VARCHAR(64) NOT NULL,
+                  owner VARCHAR(128) NOT NULL,
+                  status VARCHAR(16) NOT NULL,
+                  current_release_id BIGINT NULL,
+                  created_at BIGINT NOT NULL,
+                  updated_at BIGINT NOT NULL,
+                  KEY idx_fed_app_flow (flow_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_app_release (
+                  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  app_id VARCHAR(64) NOT NULL,
+                  flow_version_id VARCHAR(64) NOT NULL,
+                  graph_json MEDIUMTEXT NOT NULL,
+                  published_by VARCHAR(128) NOT NULL,
+                  published_at BIGINT NOT NULL,
+                  KEY idx_fed_app_release_app (app_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
     }
 
     /** 本地账号与登录会话。会话表只存令牌的 SHA-256。 */

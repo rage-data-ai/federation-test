@@ -35,6 +35,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import com.cmcc.cmdevops.security.federation.ask.AskListener;
 import com.cmcc.cmdevops.security.federation.ask.AskService;
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
+import com.cmcc.cmdevops.security.federation.chatflow.ChatflowRuntime;
 import com.cmcc.cmdevops.security.federation.config.WebMvcSecurityConfiguration;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient.Settings;
@@ -52,6 +53,9 @@ class AskControllerWebTest {
 
     @MockitoBean
     private AskService askService;
+
+    @MockitoBean
+    private ChatflowRuntime chatflowRuntime;
 
     @MockitoBean
     private LlmClient llmClient;
@@ -146,7 +150,7 @@ class AskControllerWebTest {
             AskListener listener = invocation.getArgument(1);
             listener.emit("answer", Map.of("text", "42"));
             return null;
-        }).when(askService).ask(any(AskRequest.class), any());
+        }).when(chatflowRuntime).ask(any(AskRequest.class), any());
 
         MvcResult mvcResult = mockMvc.perform(post("/api/v1/ask")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -156,13 +160,13 @@ class AskControllerWebTest {
         mockMvc.perform(MockMvcRequestBuilders.asyncDispatch(mvcResult))
                 .andExpect(status().isOk())
                 .andExpect(content().string(Matchers.containsString("done")));
-        verify(askService).ask(eq(new AskRequest("今天有多少告警？", List.of(), "conv-1")), any());
+        verify(chatflowRuntime).ask(eq(new AskRequest("今天有多少告警？", List.of(), "conv-1")), any());
     }
 
     @Test
     void askErrorIsStreamed() throws Exception {
         doThrow(new IllegalStateException("llm-not-configured"))
-                .when(askService).ask(any(AskRequest.class), any());
+                .when(chatflowRuntime).ask(any(AskRequest.class), any());
 
         MvcResult mvcResult = mockMvc.perform(post("/api/v1/ask")
                         .contentType(MediaType.APPLICATION_JSON)
