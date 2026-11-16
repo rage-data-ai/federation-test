@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, provide, reactive, ref, type Component } from 'vue'
 // askAppId：从「问数应用」跳进问数页时带上已发布应用 id
-import { ApiError, authChangePassword, authLogout, authMe, llmConfig, onUnauthorized, saveLlm, testLlm } from './api'
+import {
+  ApiError,
+  authChangePassword,
+  authLogout,
+  authMe,
+  authSetupStatus,
+  llmConfig,
+  onUnauthorized,
+  saveLlm,
+  testLlm
+} from './api'
 import { useFocusTrap } from './composables/useFocusTrap'
 import {
   beginOidcLogin,
@@ -20,6 +30,7 @@ import DatasourceView from './DatasourceView.vue'
 import KnowledgeView from './KnowledgeView.vue'
 import LoginView from './LoginView.vue'
 import OntologyView from './OntologyView.vue'
+import SetupView from './SetupView.vue'
 import UsersView from './UsersView.vue'
 import { AGENT_MODELS, findModel } from './models'
 import type { AuthMe, LlmConfig, LlmStatus } from './types'
@@ -89,18 +100,16 @@ const authLabel = computed(() => {
 /** 已登录的具名用户在侧栏直接显示名字；匿名或未连上网关时仍显示“身份”。 */
 const authShort = computed(() => {
   const user = authUser.value
-  return user?.securityEnabled ? user.displayName || user.name : '身份'
+  return user?.displayName || user?.name || '身份'
 })
 
-/** checking：还不知道要不要登录；login：网关要求登录；ready：可以进入控制台。 */
-const gate = ref<'checking' | 'login' | 'ready'>('checking')
+/** checking → setup（首次管理员）/ login / ready。鉴权始终开启。 */
+const gate = ref<'checking' | 'setup' | 'login' | 'ready'>('checking')
 const loginNotice = ref('')
 let recovering = false
 
 const modules = computed(() =>
-  MODULES.filter(
-    (item) => !item.adminOnly || (!!authUser.value?.securityEnabled && !!authUser.value.roles?.includes('ADMIN'))
-  )
+  MODULES.filter((item) => !item.adminOnly || !!authUser.value?.roles?.includes('ADMIN'))
 )
 const activeKey = computed(() =>
   modules.value.some((item) => item.key === active.value) ? active.value : 'datasource'
@@ -135,7 +144,7 @@ onMounted(async () => {
     showAuth.value = true
   }
   authForm.token = getAccessToken()
-  await Promise.all([refreshLlm(), refreshAuth()])
+  await Promise.all([refreshLlm(), bootstrapGate()])
 })
 
 onUnmounted(() => {
@@ -162,6 +171,27 @@ function applyModel(id: string) {
   llmForm.baseUrl = preset.baseUrl
 }
 
+/** 先看是否需要首次管理员，再走登录态。 */
+async function bootstrapGate() {
+  try {
+    const status = await authSetupStatus()
+    if (status.needsSetup) {
+      clearAccessToken()
+      authUser.value = null
+      gate.value = 'setup'
+      return
+    }
+  } catch (e) {
+    // 网关连不上时仍进控制台，由各模块自己提示。
+    gate.value = 'ready'
+    if (getAccessToken()) {
+      authError.value = errMessage(e)
+    }
+    return
+  }
+  await refreshAuth()
+}
+
 async function refreshAuth() {
   try {
     authUser.value = await authMe()
@@ -170,9 +200,9 @@ async function refreshAuth() {
   } catch (e) {
     authUser.value = null
     if (e instanceof ApiError && e.status === 401) {
+      gate.value = 'login'
       return
     }
-    // 网关连不上时照常进入控制台，由各模块自己提示。
     gate.value = 'ready'
     if (getAccessToken()) {
       authError.value = errMessage(e)
@@ -387,7 +417,8 @@ function cycleTheme() {
 </script>
 
 <template>
-  <LoginView v-if="gate === 'login'" :notice="loginNotice" @signed-in="onSignedIn" />
+  <SetupView v-if="gate === 'setup'" @signed-in="onSignedIn" />
+  <LoginView v-else-if="gate === 'login'" :notice="loginNotice" @signed-in="onSignedIn" />
   <div v-else-if="gate === 'ready'" class="shell">
     <a class="skip-link" href="#main-stage">跳到主内容</a>
     <nav class="rail" aria-label="模块">

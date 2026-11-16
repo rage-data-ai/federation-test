@@ -45,14 +45,21 @@ class AuthControllerWebTest {
     @TestConfiguration
     static class Accounts {
         @Bean
-        UserService userService(FederationProperties properties) {
-            return new UserService(
-                    new MemoryUserStore(), properties, new BCryptPasswordEncoder(4), System::currentTimeMillis);
+        MemoryUserStore memoryUserStore() {
+            return new MemoryUserStore();
+        }
+
+        @Bean
+        UserService userService(MemoryUserStore store, FederationProperties properties) {
+            return new UserService(store, properties, new BCryptPasswordEncoder(4), System::currentTimeMillis);
         }
     }
 
     @Autowired
     private UserService users;
+
+    @Autowired
+    private MemoryUserStore userStore;
 
     @Autowired
     private MockMvc mockMvc;
@@ -62,15 +69,16 @@ class AuthControllerWebTest {
 
     @BeforeEach
     void setUp() {
+        userStore.clear();
         properties.getSecurity().setEnabled(true);
         properties.getSecurity().getJwt().setIssuerUri("https://idp.example/realms/demo");
+        users.bootstrapAdmin("root", "root-pass-11", "管理员");
         GatewayUser.set(new GatewayUser("alice", Set.of(GatewayRole.QUERY, GatewayRole.ADMIN)));
     }
 
     @AfterEach
     void tearDown() {
         GatewayUser.clear();
-        properties.getSecurity().setEnabled(false);
         properties.getSecurity().getJwt().setIssuerUri("");
         properties.getSecurity().setBackchannelLogoutSecret("");
     }
@@ -160,11 +168,28 @@ class AuthControllerWebTest {
     }
 
     @Test
-    void registerRefusedWhileSecurityDisabled() throws Exception {
-        properties.getSecurity().setEnabled(false);
-        mockMvc.perform(post("/api/v1/auth/register")
+    void setupStatusAndBootstrapAdmin() throws Exception {
+        userStore.clear();
+        mockMvc.perform(get("/api/v1/auth/setup-status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.needsSetup").value(true));
+
+        mockMvc.perform(post("/api/v1/auth/setup")
                         .contentType("application/json")
-                        .content("{\"username\":\"erin\",\"password\":\"erin-pass-11\"}"))
+                        .content("{\"username\":\"admin\",\"password\":\"admin-pass-1\",\"displayName\":\"管理员\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isNotEmpty())
+                .andExpect(jsonPath("$.user.username").value("admin"))
+                .andExpect(jsonPath("$.user.roles[0]").value("ADMIN"))
+                .andExpect(jsonPath("$.user.roles[1]").value("QUERY"));
+
+        mockMvc.perform(get("/api/v1/auth/setup-status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.needsSetup").value(false));
+
+        mockMvc.perform(post("/api/v1/auth/setup")
+                        .contentType("application/json")
+                        .content("{\"username\":\"other\",\"password\":\"other-pass-1\"}"))
                 .andExpect(status().isConflict());
     }
 

@@ -79,4 +79,11 @@ public final class MemoryUserStore implements UserStore {
     public synchronized void deleteExpiredSessions(long now) {
         sessions.values().removeIf(session -> session.expiresAt() <= now);
     }
+
+    /** 测试用：清空账号与会话。 */
+    public synchronized void clear() {
+        users.clear();
+        sessions.clear();
+        nextId.set(1);
+    }
 }

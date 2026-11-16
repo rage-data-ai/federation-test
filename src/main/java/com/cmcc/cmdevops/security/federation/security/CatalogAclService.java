@@ -34,7 +34,7 @@ public class CatalogAclService {
     }
 
     public boolean isEnforced() {
-        return properties.getSecurity().isEnabled() && !properties.getSecurity().getCatalogs().isEmpty();
+        return !properties.getSecurity().getCatalogs().isEmpty();
     }
 
     public boolean allows(String catalog) {

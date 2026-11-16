@@ -82,38 +82,46 @@ public class UserService {
         this.absentUserHash = encoder.encode("absent-user");
     }
 
-    /** 按配置补上启动管理员；账号已存在则不动。 */
+    /** 按配置补上启动管理员；账号已存在则不动。也可在控制台首次启动向导里创建。 */
     @PostConstruct
     public void ensureAdmin() {
         String name = properties.getSecurity().getAdminUsername().trim().toLowerCase(Locale.ROOT);
         String password = properties.getSecurity().getAdminPassword();
         if (name.isEmpty() || password.isEmpty()) {
+            if (needsSetup()) {
+                log.info("尚未配置本地管理员：请打开控制台完成首次初始化，或设置 FEDERATION_ADMIN_USER / FEDERATION_ADMIN_PASSWORD");
+            }
             return;
         }
+        createAdminAccount(name, password, name, "env");
+    }
+
+    /** 库里还没有任何本地账号时，需要首次管理员初始化。 */
+    public boolean needsSetup() {
+        return store.list().isEmpty();
+    }
+
+    /**
+     * 首次启动向导创建管理员并登录。仅当 {@link #needsSetup()} 为 true 时可调用。
+     */
+    public Session bootstrapAdmin(String username, String password, String displayName) {
+        if (!needsSetup()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "管理员已配置，请直接登录");
+        }
+        String name = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
         if (!USERNAME.matcher(name).matches() || reserved(name)) {
-            throw new IllegalStateException("启动管理员用户名不可用：" + name);
+            throw new IllegalArgumentException("用户名需为 3–32 位小写字母、数字或 . _ -，且以字母或数字开头");
         }
-        try {
-            checkPassword(password);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalStateException("启动管理员密码不合要求：" + e.getMessage(), e);
-        }
-        if (store.findByUsername(name).isPresent()) {
-            return;
-        }
-        long now = clock.getAsLong();
-        try {
-            store.insert(new UserAccount(
-                    0, name, name, encoder.encode(password),
-                    EnumSet.of(GatewayRole.ADMIN, GatewayRole.QUERY), UserAccount.ACTIVE, now, now, 0));
-            log.info("已创建启动管理员 {}", name);
-        } catch (DuplicateUsernameException e) {
-            log.debug("启动管理员 {} 已由其他实例创建", name);
-        }
+        checkPassword(password);
+        UserAccount created = createAdminAccount(name, password, cleanDisplayName(displayName, name), "setup");
+        log.info("AUDIT setup-admin user={}", name);
+        return openSession(created, clock.getAsLong());
     }
 
     public Session register(String username, String password, String displayName) {
-        requireSecurityEnabled();
+        if (needsSetup()) {
+            throw new IllegalStateException("请先完成首次管理员配置");
+        }
         String name = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
         if (!USERNAME.matcher(name).matches()) {
             throw new IllegalArgumentException("用户名需为 3–32 位小写字母、数字或 . _ -，且以字母或数字开头");
@@ -136,7 +144,9 @@ public class UserService {
     }
 
     public Session login(String username, String password) {
-        requireSecurityEnabled();
+        if (needsSetup()) {
+            throw new IllegalStateException("尚未配置管理员，请先完成初始化");
+        }
         String name = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
         if (!USERNAME.matcher(name).matches()) {
             throw badCredentials();
@@ -270,9 +280,29 @@ public class UserService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "账号不存在：" + id));
     }
 
-    private void requireSecurityEnabled() {
-        if (!properties.getSecurity().isEnabled()) {
-            throw new IllegalStateException("网关未开启鉴权，无需登录；设置 FEDERATION_SECURITY_ENABLED=true 后可用");
+    private UserAccount createAdminAccount(String name, String password, String displayName, String source) {
+        if (!USERNAME.matcher(name).matches() || reserved(name)) {
+            throw new IllegalStateException("启动管理员用户名不可用：" + name);
+        }
+        try {
+            checkPassword(password);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("启动管理员密码不合要求：" + e.getMessage(), e);
+        }
+        if (store.findByUsername(name).isPresent()) {
+            return store.findByUsername(name).orElseThrow();
+        }
+        long now = clock.getAsLong();
+        try {
+            UserAccount created = store.insert(new UserAccount(
+                    0, name, displayName, encoder.encode(password),
+                    EnumSet.of(GatewayRole.ADMIN, GatewayRole.QUERY), UserAccount.ACTIVE, now, now, 0));
+            log.info("已创建启动管理员 {}（来源 {}）", name, source);
+            return created;
+        } catch (DuplicateUsernameException e) {
+            log.debug("启动管理员 {} 已由其他实例创建", name);
+            return store.findByUsername(name)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "管理员已配置，请直接登录", e));
         }
     }
 

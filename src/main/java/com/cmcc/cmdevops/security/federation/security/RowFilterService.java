@@ -52,8 +52,7 @@ public class RowFilterService {
     }
 
     public boolean isConfigured() {
-        return properties.getSecurity().isEnabled()
-                && !properties.getSecurity().getRowFilters().isEmpty();
+        return !properties.getSecurity().getRowFilters().isEmpty();
     }
 
     public List<Rule> rulesForCurrentUser() {

@@ -38,6 +38,8 @@ class UserServiceTest {
         properties.getSecurity().setEnabled(true);
         store = new MemoryUserStore();
         service = new UserService(store, properties, new BCryptPasswordEncoder(4), now::get);
+        // 普通用例先有管理员，自助注册才开放；专门测 setup 的用例会清库。
+        service.bootstrapAdmin("root", "root-pass-11", "管理员");
     }
 
     @Test
@@ -66,7 +68,7 @@ class UserServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.register("alice", "密".repeat(25), null));
         assertThrows(IllegalArgumentException.class,
                 () -> service.register("alice", "alice-pass-1", "x".repeat(65)));
-        assertTrue(store.list().isEmpty());
+        assertEquals(1, store.list().size(), "仅保留 BeforeEach 创建的管理员");
     }
 
     @Test
@@ -76,19 +78,39 @@ class UserServiceTest {
         properties.getSecurity().getRowFilters().put("tenant", "a.b.c:x = 1");
         service.register("alice", "alice-pass-1", null);
 
-        for (String name : List.of("alice", "ALICE", "anonymous", "demo", "analyst", "tenant")) {
+        for (String name : List.of("alice", "ALICE", "anonymous", "demo", "analyst", "tenant", "root")) {
             ResponseStatusException e = assertThrows(ResponseStatusException.class,
                     () -> service.register(name, "another-pass-1", null), name);
             assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
         }
-        assertEquals(1, store.list().size());
+        assertEquals(2, store.list().size());
     }
 
     @Test
-    void registerAndLoginRefusedWhileSecurityDisabled() {
+    void registerAndLoginStillWorkWhenEnabledFlagIsFalse() {
         properties.getSecurity().setEnabled(false);
+        assertNotNull(service.login("root", "root-pass-11"));
+        assertNotNull(service.register("alice", "alice-pass-1", null));
+    }
+
+    @Test
+    void bootstrapAdminCreatesFirstAdminAndBlocksRepeat() {
+        store.clear();
+        service = new UserService(store, properties, new BCryptPasswordEncoder(4), now::get);
+        assertTrue(service.needsSetup());
         assertThrows(IllegalStateException.class, () -> service.register("alice", "alice-pass-1", null));
         assertThrows(IllegalStateException.class, () -> service.login("alice", "alice-pass-1"));
+
+        Session session = service.bootstrapAdmin("Root", "root-pass-11", " 管理员 ");
+        assertFalse(service.needsSetup());
+        assertEquals("root", session.user().username());
+        assertEquals("管理员", session.user().displayName());
+        assertEquals(List.of("ADMIN", "QUERY"), session.user().roles());
+        assertNotNull(service.authenticate(session.token()));
+
+        assertEquals(HttpStatus.CONFLICT, assertThrows(ResponseStatusException.class,
+                () -> service.bootstrapAdmin("other", "other-pass-1", null)).getStatusCode());
+        assertNotNull(service.register("alice", "alice-pass-1", null));
     }
 
     @Test
@@ -200,8 +222,6 @@ class UserServiceTest {
 
     @Test
     void adminPromotesAndDisablesUsers() {
-        long adminId = service.register("root", "root-pass-11", null).user().id();
-        service.update(adminId, new UserPatch(null, List.of("admin"), null), "bootstrap");
         Session alice = service.register("alice", "alice-pass-1", null);
 
         UserView promoted = service.update(alice.user().id(), new UserPatch("爱丽丝", List.of("ADMIN"), null), "root");
@@ -223,8 +243,7 @@ class UserServiceTest {
 
     @Test
     void adminCannotLockSelfOutAndInputIsValidated() {
-        long rootId = service.register("root", "root-pass-11", null).user().id();
-        service.update(rootId, new UserPatch(null, List.of("ADMIN"), null), "bootstrap");
+        long rootId = service.find("root").orElseThrow().id();
 
         assertThrows(IllegalArgumentException.class,
                 () -> service.update(rootId, new UserPatch(null, null, "disabled"), "root"));
@@ -256,6 +275,8 @@ class UserServiceTest {
 
     @Test
     void ensureAdminCreatesConfiguredAdminOnce() {
+        store.clear();
+        service = new UserService(store, properties, new BCryptPasswordEncoder(4), now::get);
         service.ensureAdmin();
         assertTrue(store.list().isEmpty(), "未配置时不建账号");
 
@@ -273,6 +294,8 @@ class UserServiceTest {
 
     @Test
     void ensureAdminRejectsUnusableConfiguration() {
+        store.clear();
+        service = new UserService(store, properties, new BCryptPasswordEncoder(4), now::get);
         properties.getSecurity().setAdminUsername("anonymous");
         properties.getSecurity().setAdminPassword("root-pass-11");
         assertThrows(IllegalStateException.class, service::ensureAdmin);

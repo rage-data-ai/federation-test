@@ -56,6 +56,21 @@ public class AuthController {
     public record PasswordBody(String oldPassword, String newPassword) {
     }
 
+    public record SetupBody(String username, String password, String displayName) {
+    }
+
+    /** 是否还需要首次管理员初始化。无需 Bearer。 */
+    @GetMapping("/setup-status")
+    public Map<String, Object> setupStatus() {
+        return Map.of("needsSetup", users.needsSetup());
+    }
+
+    /** 首次启动创建管理员并登录。无需 Bearer；仅库中无账号时可用。 */
+    @PostMapping("/setup")
+    public Session setup(@RequestBody SetupBody body) {
+        return users.bootstrapAdmin(body.username(), body.password(), body.displayName());
+    }
+
     /** 自助注册本地账号，成功即登录。无需 Bearer。 */
     @PostMapping("/register")
     public Session register(@RequestBody RegisterBody body) {
@@ -78,7 +93,7 @@ public class AuthController {
         return Map.of("success", true);
     }
 
-    /** 返回当前 Bearer / JWT 解析后的身份；鉴权关闭时为 anonymous。 */
+    /** 返回当前 Bearer / JWT 解析后的身份。鉴权始终开启。 */
     @GetMapping("/me")
     public Map<String, Object> me(HttpServletRequest request) {
         GatewayUser user = GatewayUser.current();
@@ -90,7 +105,8 @@ public class AuthController {
                 : user.name());
         body.put("localAccount", localAccount);
         body.put("roles", user.roles().stream().map(GatewayRole::name).sorted().collect(Collectors.toList()));
-        body.put("securityEnabled", properties.getSecurity().isEnabled());
+        body.put("securityEnabled", true);
+        body.put("needsSetup", users.needsSetup());
         body.put("jwtEnabled", properties.getSecurity().getJwt().isEnabled());
         body.put("catalogAcl", catalogAcl.isEnforced());
         body.put("catalogs", catalogAcl.currentGrants().stream().sorted().collect(Collectors.toList()));

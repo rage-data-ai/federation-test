@@ -7,7 +7,6 @@
 ## 网关
 
 ```bash
-export FEDERATION_SECURITY_ENABLED=true
 export FEDERATION_JWT_ISSUER_URI=https://idp.example/realms/federation
 export FEDERATION_JWT_ROLES_CLAIM=roles
 ```

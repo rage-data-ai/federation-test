@@ -23,9 +23,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * 可选 Bearer Token 鉴权。{@code federation.security.enabled=true} 时保护 {@code /api/**}，
- * 健康检查、Actuator、注册和登录放行。令牌依次按静态配置、本地账号会话、IdP JWT 解析。
- * 角色见 {@link GatewayRole}。
+ * Bearer Token 鉴权：保护 {@code /api/**}；健康检查、Actuator、注册 / 登录 / 首次管理员初始化放行。
+ * 令牌依次按静态配置、本地账号会话、IdP JWT 解析。角色见 {@link GatewayRole}。
+ * {@code federation.security.enabled=false} 已废弃，不会关闭鉴权。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
@@ -34,7 +34,10 @@ public class BearerAuthFilter extends OncePerRequestFilter {
     /** 请求属性：当前身份来自本地账号会话时为 {@code Boolean.TRUE}。 */
     public static final String LOCAL_ACCOUNT_ATTRIBUTE = "federation.auth.localAccount";
 
-    private static final Set<String> OPEN_AUTH_PATHS = Set.of("/api/v1/auth/register", "/api/v1/auth/login");
+    private static final Set<String> OPEN_AUTH_POST_PATHS = Set.of(
+            "/api/v1/auth/register",
+            "/api/v1/auth/login",
+            "/api/v1/auth/setup");
 
     private final FederationProperties properties;
     private final ObjectProvider<JwtAccessTokenService> jwtAccessTokens;
@@ -70,11 +73,6 @@ public class BearerAuthFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain) throws ServletException, IOException {
         try {
-            if (!properties.getSecurity().isEnabled()) {
-                GatewayUser.set(GatewayUser.ANONYMOUS);
-                filterChain.doFilter(request, response);
-                return;
-            }
             if (allowBackchannelWithoutBearer(request) || isOpenAuthRequest(request)) {
                 GatewayUser.set(GatewayUser.ANONYMOUS);
                 filterChain.doFilter(request, response);
@@ -103,7 +101,14 @@ public class BearerAuthFilter extends OncePerRequestFilter {
     }
 
     private static boolean isOpenAuthRequest(HttpServletRequest request) {
-        return "POST".equals(request.getMethod()) && OPEN_AUTH_PATHS.contains(request.getRequestURI());
+        String path = request.getRequestURI();
+        if (path == null) {
+            return false;
+        }
+        if ("GET".equals(request.getMethod()) && "/api/v1/auth/setup-status".equals(path)) {
+            return true;
+        }
+        return "POST".equals(request.getMethod()) && OPEN_AUTH_POST_PATHS.contains(path);
     }
 
     private boolean allowBackchannelWithoutBearer(HttpServletRequest request) {
