@@ -13,6 +13,7 @@
 - 知识库独立主菜单；类型 `smart_ask` / `general`；对话记忆窗口（开始节点 / 全局配置）
 - DAG 调色板支持拖到画布添加节点
 - ChatFlow 白盒拆跑：knowledge/ontology/metadata/insight 真实执行并按 outcome 选边；节点可配 `skills`（本体/知识/偏好/SQL）；`llm_chat` 可勾选工具技能
+- ChatFlow 节点入参/出参（Dify 变量）：`sys.*`、`{{#nodeId.field#}}`、`config.inputs`、运行时变量池与 `vars` 事件；画布 Inputs/Outputs 面板
 
 ### Changed
 

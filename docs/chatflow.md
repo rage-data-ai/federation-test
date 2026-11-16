@@ -31,10 +31,14 @@
 - 节点坐标写入 `config.x` / `config.y`，与一期 JSON 兼容
 - 「智能问数」默认图展开为 `knowledge → ontology → metadata → insight`（含短路/澄清边）；`FlowRunner` 仍折叠为一次 `AskService.ask`（真拆跑见阶段 2.5 / [`chatflow-stage-nodes.md`](chatflow-stage-nodes.md)）
 
+### 阶段 2.6 — 节点入参 / 出参（Dify 变量，已落地）
+
+见 [`chatflow-node-io.md`](chatflow-node-io.md)：`sys.*` + `{{#nodeId.field#}}`、`config.inputs`、变量池、`vars` SSE。
+
 ### 阶段 3 — 应用能力加深
 
 - 应用级提示词 / 知识库范围
-- 变量与会话记忆节点
+- 自定义会话变量（开始节点）；条件边表达式
 - 对外发布令牌（不登录控制台也能打应用）
 - HTTP / Webhook 节点（若有真实需求再加）
 

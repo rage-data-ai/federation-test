@@ -1,6 +1,7 @@
 package com.cmcc.cmdevops.security.federation.chatflow;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -14,19 +15,21 @@ import com.cmcc.cmdevops.security.federation.ask.AskService;
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
 import com.cmcc.cmdevops.security.federation.ask.AskService.Turn;
 import com.cmcc.cmdevops.security.federation.ask.AskSkillIds;
+import com.cmcc.cmdevops.security.federation.ask.AskStageResult;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskRunRecorder;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeTools;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowNode;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowModels.PublishedApp;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
+import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 
 /**
- * 按发布图执行节点（Dify 式白盒）：
+ * 按发布图执行节点（Dify 式白盒 + 变量入参/出参）：
  * <ul>
- *   <li>{@code knowledge}/{@code ontology}/{@code metadata}/{@code insight}：真实拆跑，按 outcome 选边</li>
- *   <li>{@code builtin_ask}：整段 {@link AskService#ask}</li>
- *   <li>{@code llm_chat}：可按 config.skills 绑定 ontology / preference / knowledge 工具</li>
+ *   <li>运行前灌入 {@code sys.*}；每节点解析 {@code config.inputs}，写出 {@code nodeId.*}</li>
+ *   <li>阶段节点真实拆跑并按 outcome 选边</li>
+ *   <li>{@code llm_chat} 支持提示词变量插值与工具技能</li>
  * </ul>
  */
 @Component
@@ -50,10 +53,11 @@ public class FlowRunner {
         graph.validate();
         assertCompatibleAskNodes(graph);
         AskRequest scoped = withHistoryWindow(graph, withAppMeta(request, app));
+        FlowVariablePool pool = FlowVariablePool.fromRequest(scoped, GatewayUser.current().name());
 
         boolean stageGraph = graph.nodes().stream().anyMatch(node -> DefaultFlows.isAskStageType(node.type()));
         if (stageGraph) {
-            runWhiteBox(graph, scoped, listener);
+            runWhiteBox(graph, scoped, listener, pool);
             return;
         }
 
@@ -61,25 +65,29 @@ public class FlowRunner {
         String lastOutcome = "default";
         for (int hop = 0; hop < MAX_HOPS && nodeId != null; hop++) {
             FlowNode node = graph.node(nodeId);
+            Map<String, Object> inputs = resolveNodeInputs(node, pool);
             switch (node.type()) {
-                case "start" -> lastOutcome = "default";
+                case "start" -> {
+                    lastOutcome = "default";
+                    pool.putNode(node.id(), Map.of(
+                            "query", pool.sys().get("query"),
+                            "history", pool.sys().get("history"),
+                            "conversation_id", pool.sys().get("conversation_id")));
+                }
                 case "end" -> {
                     return;
                 }
                 case "builtin_ask" -> {
-                    askService.ask(scoped, listener);
+                    askService.ask(requestWithQuery(scoped, inputs), listener);
                     lastOutcome = "default";
+                    pool.putNode(node.id(), Map.of("outcome", lastOutcome));
                 }
                 case "llm_chat" -> {
                     AskRunRecorder recorder = askService.beginRun(scoped, listener);
                     try {
-                        askService.runLlmChat(
-                                scoped,
-                                recorder,
-                                stringConfig(node, "systemPrompt", "你是有帮助的中文助手。"),
-                                AskSkillIds.normalize(node.config().get("skills"), AskSkillIds.DEFAULT_LLM_CHAT),
-                                knowledgeTools);
-                        lastOutcome = "default";
+                        AskStageResult result = runResolvedLlm(node, scoped, recorder, inputs, pool);
+                        lastOutcome = result.outcome();
+                        pool.putNode(node.id(), result.outputs());
                     } catch (RuntimeException e) {
                         askService.failAndFinish(recorder, e);
                         throw e;
@@ -97,8 +105,7 @@ public class FlowRunner {
         log.warn("流程跳转超过 {} 次，已停止 appId={}", MAX_HOPS, app.appId());
     }
 
-    /** 阶段图：单次 run 信封，按节点真实执行并用 outcome 选边。 */
-    private void runWhiteBox(FlowGraph graph, AskRequest scoped, AskListener listener) {
+    private void runWhiteBox(FlowGraph graph, AskRequest scoped, AskListener listener, FlowVariablePool pool) {
         AskRunRecorder recorder = askService.beginRun(scoped, listener);
         AskFlowState state = new AskFlowState();
         String nodeId = graph.startNodeId();
@@ -106,48 +113,59 @@ public class FlowRunner {
         try {
             for (int hop = 0; hop < MAX_HOPS && nodeId != null; hop++) {
                 FlowNode node = graph.node(nodeId);
+                Map<String, Object> inputs = resolveNodeInputs(node, pool);
+                AskRequest nodeRequest = requestWithQuery(scoped, inputs);
+                AskStageResult result;
                 switch (node.type()) {
-                    case "start" -> lastOutcome = "default";
+                    case "start" -> {
+                        lastOutcome = "default";
+                        pool.putNode(node.id(), Map.of(
+                                "query", pool.sys().get("query"),
+                                "history", pool.sys().get("history"),
+                                "conversation_id", pool.sys().get("conversation_id")));
+                        result = null;
+                    }
                     case "end" -> {
                         return;
                     }
                     case "knowledge" -> {
-                        int topK = intConfig(node, "topK", AskKnowledgeService.DEFAULT_TOP_K);
-                        lastOutcome = askService.runKnowledge(scoped, recorder, state, topK);
+                        int topK = FlowVarRefs.asInt(inputs, "topK", AskKnowledgeService.DEFAULT_TOP_K);
+                        result = askService.runKnowledge(nodeRequest, recorder, state, topK);
                     }
-                    case "ontology" -> lastOutcome = askService.runOntology(
-                            scoped,
+                    case "ontology" -> result = askService.runOntology(
+                            nodeRequest,
                             recorder,
                             state,
-                            AskSkillIds.normalize(node.config().get("skills"), AskSkillIds.DEFAULT_ONTOLOGY));
-                    case "metadata" -> lastOutcome = askService.runMetadata(
-                            scoped, recorder, state, boolConfig(node, "recover", true));
-                    case "insight" -> lastOutcome = askService.runInsight(
-                            scoped,
+                            AskSkillIds.normalize(
+                                    FlowVarRefs.asSkills(inputs, "skills", AskSkillIds.DEFAULT_ONTOLOGY),
+                                    AskSkillIds.DEFAULT_ONTOLOGY));
+                    case "metadata" -> result = askService.runMetadata(
+                            nodeRequest, recorder, state, FlowVarRefs.asBool(inputs, "recover", true));
+                    case "insight" -> result = askService.runInsight(
+                            nodeRequest,
                             recorder,
                             state,
-                            AskSkillIds.normalize(node.config().get("skills"), AskSkillIds.DEFAULT_INSIGHT));
-                    case "llm_chat" -> {
-                        askService.runLlmChat(
-                                scoped,
-                                recorder,
-                                stringConfig(node, "systemPrompt", "你是有帮助的中文助手。"),
-                                AskSkillIds.normalize(node.config().get("skills"), AskSkillIds.DEFAULT_LLM_CHAT),
-                                knowledgeTools);
-                        lastOutcome = "default";
-                    }
+                            AskSkillIds.normalize(
+                                    FlowVarRefs.asSkills(inputs, "skills", AskSkillIds.DEFAULT_INSIGHT),
+                                    AskSkillIds.DEFAULT_INSIGHT));
+                    case "llm_chat" -> result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool);
                     case "builtin_ask" -> throw new IllegalArgumentException("白盒阶段图不应包含 builtin_ask");
                     default -> throw new IllegalArgumentException("暂不支持的节点类型：" + node.type());
                 }
-                if ("end".equals(node.type())) {
-                    return;
+                if (result != null) {
+                    lastOutcome = result.outcome();
+                    pool.putNode(node.id(), result.outputs());
+                    emitVars(listener, node.id(), result.outputs(), pool);
                 }
                 String next = graph.next(nodeId, lastOutcome);
                 if (next == null) {
                     if (!"answered".equals(lastOutcome)
                             && !"clarify".equals(lastOutcome)
-                            && !"error".equals(lastOutcome)) {
-                        listener.emit("error", Map.of("message", "流程在节点 " + nodeId + " 后没有出口（outcome=" + lastOutcome + ")"));
+                            && !"error".equals(lastOutcome)
+                            && !"default".equals(lastOutcome)) {
+                        listener.emit(
+                                "error",
+                                Map.of("message", "流程在节点 " + nodeId + " 后没有出口（outcome=" + lastOutcome + ")"));
                     }
                     return;
                 }
@@ -162,7 +180,68 @@ public class FlowRunner {
         }
     }
 
-    /** 禁止在同一张图里混用整段 builtin_ask 与拆分阶段节点。 */
+    private AskStageResult runResolvedLlm(
+            FlowNode node,
+            AskRequest scoped,
+            AskListener listener,
+            Map<String, Object> inputs,
+            FlowVariablePool pool) {
+        String system = FlowVarRefs.asString(
+                inputs,
+                "systemPrompt",
+                stringConfig(node, "systemPrompt", "你是有帮助的中文助手。"));
+        system = FlowVarRefs.interpolate(system, pool);
+        Object skillsRaw = inputs.containsKey("skills")
+                ? inputs.get("skills")
+                : node.config().get("skills");
+        return askService.runLlmChat(
+                requestWithQuery(scoped, inputs),
+                listener,
+                system,
+                AskSkillIds.normalize(skillsRaw, AskSkillIds.DEFAULT_LLM_CHAT),
+                knowledgeTools);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> resolveNodeInputs(FlowNode node, FlowVariablePool pool) {
+        FlowNodePorts.Spec spec = FlowNodePorts.spec(node.type());
+        Map<String, Object> configured = new LinkedHashMap<>();
+        Object rawInputs = node.config().get("inputs");
+        if (rawInputs instanceof Map<?, ?> map) {
+            configured.putAll((Map<String, Object>) map);
+        }
+        // 兼容旧图：顶层 topK / skills / systemPrompt / recover 视作未显式绑定时的字面量
+        copyIfAbsent(configured, node.config(), "topK");
+        copyIfAbsent(configured, node.config(), "skills");
+        copyIfAbsent(configured, node.config(), "systemPrompt");
+        copyIfAbsent(configured, node.config(), "recover");
+        copyIfAbsent(configured, node.config(), "memoryWindowTurns");
+        return FlowVarRefs.resolveInputs(spec.defaultInputs(), configured, pool);
+    }
+
+    private static void copyIfAbsent(Map<String, Object> target, Map<String, Object> source, String key) {
+        if (!target.containsKey(key) && source.containsKey(key)) {
+            target.put(key, source.get(key));
+        }
+    }
+
+    private static AskRequest requestWithQuery(AskRequest scoped, Map<String, Object> inputs) {
+        String query = FlowVarRefs.asString(inputs, "query", scoped.question());
+        if (query.equals(scoped.question())) {
+            return scoped;
+        }
+        return new AskRequest(query, scoped.history(), scoped.conversationId(), scoped.appId());
+    }
+
+    private static void emitVars(
+            AskListener listener, String nodeId, Map<String, Object> outputs, FlowVariablePool pool) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("nodeId", nodeId);
+        payload.put("outputs", outputs);
+        payload.put("paths", pool.listPaths());
+        listener.emit("vars", payload);
+    }
+
     static void assertCompatibleAskNodes(FlowGraph graph) {
         boolean hasBuiltin = graph.nodes().stream().anyMatch(node -> "builtin_ask".equals(node.type()));
         boolean hasStages = graph.nodes().stream().anyMatch(node -> DefaultFlows.isAskStageType(node.type()));
@@ -175,7 +254,6 @@ public class FlowRunner {
         return new AskRequest(request.question(), request.history(), request.conversationId(), app.appId());
     }
 
-    /** 截断对话历史；优先读开始节点 config.memoryWindowTurns。 */
     AskRequest withHistoryWindow(FlowGraph graph, AskRequest request) {
         int window = properties.getAsk().getHistoryWindowTurns();
         try {
@@ -201,32 +279,6 @@ public class FlowRunner {
         Object value = node.config().get(key);
         if (value instanceof String text && !text.isBlank()) {
             return text;
-        }
-        return fallback;
-    }
-
-    private static int intConfig(FlowNode node, String key, int fallback) {
-        Object value = node.config().get(key);
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-        if (value instanceof String text && !text.isBlank()) {
-            try {
-                return Integer.parseInt(text.strip());
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
-    }
-
-    private static boolean boolConfig(FlowNode node, String key, boolean fallback) {
-        Object value = node.config().get(key);
-        if (value instanceof Boolean bool) {
-            return bool;
-        }
-        if (value instanceof String text && !text.isBlank()) {
-            return Boolean.parseBoolean(text.strip());
         }
         return fallback;
     }

@@ -27,6 +27,7 @@ import com.cmcc.cmdevops.security.federation.ask.AskListener;
 import com.cmcc.cmdevops.security.federation.ask.AskService;
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
 import com.cmcc.cmdevops.security.federation.ask.AskService.Turn;
+import com.cmcc.cmdevops.security.federation.ask.AskStageResult;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskRunRecorder;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeTools;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowEdge;
@@ -53,15 +54,19 @@ class FlowRunnerTest {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
         when(askService.beginRun(any(), any())).thenReturn(recorder);
-        when(askService.runKnowledge(any(), any(), any(), anyInt())).thenReturn("continue");
-        when(askService.runOntology(any(), any(), any(), any())).thenReturn("continue");
-        when(askService.runMetadata(any(), any(), any(), eq(true))).thenReturn("continue");
-        when(askService.runInsight(any(), any(), any(), any())).thenReturn("answered");
+        when(askService.runKnowledge(any(), any(), any(), anyInt()))
+                .thenReturn(AskStageResult.of("continue", Map.of("answered", false)));
+        when(askService.runOntology(any(), any(), any(), any()))
+                .thenReturn(AskStageResult.of("continue"));
+        when(askService.runMetadata(any(), any(), any(), eq(true)))
+                .thenReturn(AskStageResult.of("continue", Map.of("tables", 1)));
+        when(askService.runInsight(any(), any(), any(), any()))
+                .thenReturn(AskStageResult.of("answered", Map.of("answer", "ok", "sql", "select 1")));
 
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
         PublishedApp app = new PublishedApp("app-1", "问数", 1L, "fv-1", DefaultFlows.builtinAsk());
-        runner.run(app, new AskRequest("q", List.of()), (event, data) -> {
-        });
+        List<String> events = new ArrayList<>();
+        runner.run(app, new AskRequest("q", List.of()), (event, data) -> events.add(event));
 
         verify(askService, never()).ask(any(), any());
         verify(askService).runKnowledge(any(), eq(recorder), any(AskFlowState.class), eq(5));
@@ -69,6 +74,7 @@ class FlowRunnerTest {
         verify(askService).runMetadata(any(), eq(recorder), any(AskFlowState.class), eq(true));
         verify(askService).runInsight(any(), eq(recorder), any(AskFlowState.class), any());
         verify(askService).finishRun(recorder);
+        assertTrue(events.contains("vars"));
     }
 
     @Test
@@ -76,7 +82,8 @@ class FlowRunnerTest {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
         when(askService.beginRun(any(), any())).thenReturn(recorder);
-        when(askService.runKnowledge(any(), any(), any(), anyInt())).thenReturn("answered");
+        when(askService.runKnowledge(any(), any(), any(), anyInt()))
+                .thenReturn(AskStageResult.of("answered", Map.of("answer", "hit")));
 
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
         PublishedApp app = new PublishedApp("app-1", "问数", 1L, "fv-1", DefaultFlows.builtinAsk());
@@ -130,10 +137,10 @@ class FlowRunnerTest {
             outer[0].emit("run", Map.of("runId", "r1", "conversationId", "c1"));
             return recorder;
         });
-        org.mockito.Mockito.doAnswer(invocation -> {
+        when(askService.runLlmChat(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
             outer[0].emit("answer", Map.of("answer", "你好"));
-            return null;
-        }).when(askService).runLlmChat(any(), any(), any(), any(), any());
+            return AskStageResult.of("default", Map.of("answer", "你好"));
+        });
 
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
         List<String> events = new ArrayList<>();
@@ -149,7 +156,8 @@ class FlowRunnerTest {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
         when(askService.beginRun(any(), any())).thenReturn(recorder);
-        when(askService.runKnowledge(any(), any(), any(), anyInt())).thenReturn("answered");
+        when(askService.runKnowledge(any(), any(), any(), anyInt()))
+                .thenReturn(AskStageResult.of("answered"));
         FederationProperties props = new FederationProperties();
         props.getAsk().setHistoryWindowTurns(50);
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), props);
