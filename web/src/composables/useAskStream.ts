@@ -46,6 +46,8 @@ export type AskTurn = {
   filterChecks: Record<string, unknown>[]
   answer: Record<string, unknown> | null
   clarify: Record<string, unknown> | null
+  /** ChatFlow 变量池快照（vars SSE）。 */
+  vars: Array<{ nodeId: string; outputs: Record<string, unknown>; paths: string[] }>
   error: string
   done: boolean
   showTrace: boolean
@@ -81,6 +83,7 @@ export function emptyTurn(question: string): AskTurn {
     filterChecks: [],
     answer: null,
     clarify: null,
+    vars: [],
     error: '',
     done: false,
     showTrace: true
@@ -204,6 +207,15 @@ export function applyEvent(turn: AskTurn, name: string, data: unknown): void {
     case 'clarify':
       turn.clarify = payload
       break
+    case 'vars': {
+      const nodeId = typeof payload.nodeId === 'string' ? payload.nodeId : ''
+      const outputs = asRecord(payload.outputs)
+      const paths = Array.isArray(payload.paths)
+        ? payload.paths.filter((item): item is string => typeof item === 'string')
+        : []
+      turn.vars = [...(turn.vars || []), { nodeId, outputs, paths }]
+      break
+    }
     case 'error':
       turn.error = typeof payload.message === 'string' ? payload.message : String(payload.message ?? '')
       break

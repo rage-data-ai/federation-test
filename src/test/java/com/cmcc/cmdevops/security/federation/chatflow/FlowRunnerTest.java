@@ -152,6 +152,51 @@ class FlowRunnerTest {
     }
 
     @Test
+    void llmChatMemoryWindowOverridesHistory() {
+        AskService askService = mock(AskService.class);
+        AskRunRecorder recorder = mock(AskRunRecorder.class);
+        when(askService.beginRun(any(), any())).thenReturn(recorder);
+        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+                .thenReturn(AskStageResult.of("default", Map.of("answer", "ok")));
+        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        FlowGraph graph = FlowGraph.of(
+                "start",
+                List.of(
+                        new FlowNode("start", "start", "开始", Map.of("memoryWindowTurns", 50)),
+                        new FlowNode(
+                                "chat",
+                                "llm_chat",
+                                "对话",
+                                Map.of("memoryWindowTurns", 2, "systemPrompt", "hi", "skills", List.of())),
+                        new FlowNode("end", "end", "结束", Map.of())),
+                List.of(
+                        new FlowEdge("start", "chat", "default"),
+                        new FlowEdge("chat", "end", "default")));
+        List<Turn> history = List.of(
+                new Turn("user", "q1"),
+                new Turn("assistant", "a1"),
+                new Turn("user", "q2"),
+                new Turn("assistant", "a2"),
+                new Turn("user", "q3"),
+                new Turn("assistant", "a3"));
+        runner.run(
+                new PublishedApp("app-llm-mem", "对话", 1L, "fv", graph),
+                new AskRequest("q4", history),
+                (event, data) -> {
+                });
+        verify(askService).runLlmChat(
+                argThat(req -> {
+                    assertEquals(2, req.history().size());
+                    assertEquals("q3", req.history().get(0).content());
+                    return true;
+                }),
+                any(),
+                any(),
+                any(),
+                any());
+    }
+
+    @Test
     void startNodeMemoryWindowTrimsHistory() {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);

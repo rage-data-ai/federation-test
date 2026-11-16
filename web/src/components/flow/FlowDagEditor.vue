@@ -17,7 +17,7 @@ import {
 } from '../../flow/graphAdapter'
 import { EDGE_WHEN_OPTIONS, NODE_CATALOG, catalogItem } from '../../flow/nodeCatalog'
 import { asRef, parseRef, portsFor, SYS_VARS } from '../../flow/nodePorts'
-import { SKILL_CATALOG, skillsForNode, type AskSkillId } from '../../flow/skillCatalog'
+import { skillsBindableOn, skillsForNode, type AskSkillId } from '../../flow/skillCatalog'
 import FlowNodeCard from './FlowNodeCard.vue'
 
 import '@vue-flow/core/dist/style.css'
@@ -158,8 +158,12 @@ function defaultConfig(type: string): Record<string, unknown> {
     return {
       ...base,
       systemPrompt: String(ports.defaultInputs.systemPrompt || '你是有帮助的中文助手。'),
+      memoryWindowTurns: 12,
       skills: [] as string[]
     }
+  }
+  if (type === 'answer') {
+    return { ...base, text: '{{#sys.query#}}' }
   }
   if (type === 'start') {
     return { memoryWindowTurns: 12 }
@@ -281,7 +285,14 @@ function updateInputValue(name: string, value: unknown) {
   const data = nodeData(selectedNode.value)
   const inputs = { ...((data.config.inputs || {}) as Record<string, unknown>), [name]: value }
   updateNodeConfig('inputs', inputs)
-  if (name === 'topK' || name === 'systemPrompt' || name === 'recover' || name === 'skills') {
+  if (
+    name === 'topK' ||
+    name === 'systemPrompt' ||
+    name === 'recover' ||
+    name === 'skills' ||
+    name === 'memoryWindowTurns' ||
+    name === 'text'
+  ) {
     updateNodeConfig(name, value)
   }
 }
@@ -307,19 +318,20 @@ function availableVarPaths(currentNodeId: string): Array<{ path: string; label: 
 }
 
 function skillAllowed(flowType: string, skillId: AskSkillId): boolean {
-  if (flowType === 'llm_chat') {
-    return skillId === 'ontology' || skillId === 'preference' || skillId === 'knowledge'
+  return skillsBindableOn(flowType).some((skill) => skill.id === skillId)
+}
+
+function insertVarIntoPrompt(path: string) {
+  if (!selectedNode.value || !path) {
+    return
   }
-  if (flowType === 'ontology') {
-    return skillId === 'ontology'
-  }
-  if (flowType === 'insight') {
-    return skillId === 'sql' || skillId === 'preference'
-  }
-  if (flowType === 'knowledge') {
-    return skillId === 'knowledge'
-  }
-  return false
+  const data = nodeData(selectedNode.value)
+  const current = String(
+    inputValue(data.config, 'systemPrompt', data.config.systemPrompt || '') ?? ''
+  )
+  const snippet = asRef(path)
+  const next = current ? `${current}\n${snippet}` : snippet
+  updateInputValue('systemPrompt', next)
 }
 
 function updateNodeConfig(key: string, value: unknown) {
@@ -487,21 +499,37 @@ const selectedData = computed(() => nodeData(selectedNode.value))
             @change="updateNodeTitle(($event.target as HTMLInputElement).value)"
           />
         </label>
-        <label v-if="selectedData.flowType === 'start'">
+        <label v-if="selectedData.flowType === 'start' || selectedData.flowType === 'llm_chat'">
           对话记忆（最近 N 条消息）
           <input
-            :value="Number(selectedData.config.memoryWindowTurns ?? 12)"
+            :value="
+              Number(
+                inputValue(
+                  selectedData.config,
+                  'memoryWindowTurns',
+                  selectedData.config.memoryWindowTurns ?? 12
+                )
+              )
+            "
             type="number"
             min="0"
             max="100"
             :disabled="readonly"
             @change="
-              updateNodeConfig(
-                'memoryWindowTurns',
-                Number(($event.target as HTMLInputElement).value) || 0
-              )
+              selectedData.flowType === 'llm_chat'
+                ? updateInputValue(
+                    'memoryWindowTurns',
+                    Number(($event.target as HTMLInputElement).value) || 0
+                  )
+                : updateNodeConfig(
+                    'memoryWindowTurns',
+                    Number(($event.target as HTMLInputElement).value) || 0
+                  )
             "
           />
+          <small v-if="selectedData.flowType === 'llm_chat'" class="hint">
+            仅作用于本 LLM 节点；覆盖开始节点窗口。
+          </small>
         </label>
         <fieldset
           v-if="portsFor(selectedData.flowType).inputs.length"
@@ -544,15 +572,45 @@ const selectedData = computed(() => nodeData(selectedNode.value))
             <template v-else-if="port.name === 'skills'">
               <span class="hint">见下方「工具技能」</span>
             </template>
-            <template v-else-if="port.name === 'systemPrompt'">
+            <template v-else-if="port.name === 'systemPrompt' || port.name === 'text'">
               <textarea
                 rows="4"
-                :value="String(inputValue(selectedData.config, 'systemPrompt', selectedData.config.systemPrompt || ''))"
+                :value="
+                  String(
+                    inputValue(
+                      selectedData.config,
+                      port.name,
+                      selectedData.config[port.name] || portsFor(selectedData.flowType).defaultInputs[port.name] || ''
+                    )
+                  )
+                "
                 :disabled="readonly"
                 @change="
-                  updateInputValue('systemPrompt', ($event.target as HTMLTextAreaElement).value)
+                  updateInputValue(port.name, ($event.target as HTMLTextAreaElement).value)
                 "
               />
+              <label v-if="port.name === 'systemPrompt'" class="inline">
+                插入变量
+                <select
+                  :disabled="readonly"
+                  @change="
+                    insertVarIntoPrompt(($event.target as HTMLSelectElement).value);
+                    ($event.target as HTMLSelectElement).value = ''
+                  "
+                >
+                  <option value="">选择…</option>
+                  <option
+                    v-for="item in availableVarPaths(selectedNode.id)"
+                    :key="item.path"
+                    :value="item.path"
+                  >
+                    {{ item.path }}
+                  </option>
+                </select>
+              </label>
+            </template>
+            <template v-else-if="port.name === 'memoryWindowTurns'">
+              <span class="hint">见上方「对话记忆」</span>
             </template>
             <template v-else>
               <select
@@ -603,15 +661,15 @@ const selectedData = computed(() => nodeData(selectedNode.value))
         </fieldset>
 
         <fieldset
-          v-if="['llm_chat', 'ontology', 'insight', 'knowledge'].includes(selectedData.flowType)"
+          v-if="skillsBindableOn(selectedData.flowType).length"
           class="skills"
           :disabled="readonly"
         >
-          <legend>工具技能</legend>
+          <legend>工具技能（自由绑定）</legend>
           <label
-            v-for="skill in SKILL_CATALOG.filter((item) => skillAllowed(selectedData.flowType, item.id))"
+            v-for="skill in skillsBindableOn(selectedData.flowType)"
             :key="skill.id"
-            class="check"
+            class="check skill-block"
           >
             <input
               type="checkbox"
@@ -622,11 +680,17 @@ const selectedData = computed(() => nodeData(selectedNode.value))
             <span>
               <strong>{{ skill.label }}</strong>
               <small>{{ skill.description }}</small>
+              <ul class="tool-list">
+                <li v-for="tool in skill.tools" :key="tool.name">
+                  <code>{{ tool.name }}</code> {{ tool.label }}
+                </li>
+              </ul>
+              <small v-if="selectedData.flowType === 'llm_chat' && skill.id === 'sql'" class="hint">
+                llm_chat 勾选后会提示改用 insight 节点执行 SQL。
+              </small>
             </span>
           </label>
-          <p class="hint">
-            运行时按节点真实执行；入参/出参走变量池（Dify 式）。
-          </p>
+          <p class="hint">已有工具按技能包展示；勾选即绑定到本节点运行时。</p>
         </fieldset>
         <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除节点</button>
       </template>
@@ -733,6 +797,17 @@ const selectedData = computed(() => nodeData(selectedNode.value))
 .io-out small {
   display: block;
   color: var(--muted);
+}
+
+.skill-block .tool-list {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.skill-block code {
+  font-size: 10px;
 }
 
 .palette {

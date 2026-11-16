@@ -80,7 +80,8 @@ export const NODE_PORTS: Record<string, NodePortSpec> = {
     inputs: [
       { name: 'query', label: '用户消息', description: '默认绑定 sys.query' },
       { name: 'systemPrompt', label: '系统提示词', description: '支持 {{#var#}}' },
-      { name: 'skills', label: '工具技能', description: 'ontology / knowledge / preference' }
+      { name: 'memoryWindowTurns', label: '记忆轮数', description: '覆盖开始节点；0=无历史' },
+      { name: 'skills', label: '工具技能', description: '可自由勾选已有工具包' }
     ],
     outputs: [
       { name: 'outcome', label: '结果条件', description: 'default' },
@@ -89,8 +90,17 @@ export const NODE_PORTS: Record<string, NodePortSpec> = {
     defaultInputs: {
       query: '{{#sys.query#}}',
       systemPrompt: '你是有帮助的中文助手。',
+      memoryWindowTurns: 12,
       skills: []
     }
+  },
+  answer: {
+    inputs: [{ name: 'text', label: '回答模板', description: '支持 {{#var#}}；直接输出为最终回答' }],
+    outputs: [
+      { name: 'outcome', label: '结果条件', description: 'default' },
+      { name: 'answer', label: '回复文本', description: '' }
+    ],
+    defaultInputs: { text: '{{#sys.query#}}' }
   },
   builtin_ask: {
     inputs: [{ name: 'query', label: '查询文本', description: '默认绑定 sys.query' }],

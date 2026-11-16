@@ -94,6 +94,18 @@ public class FlowRunner {
                     }
                     askService.finishRun(recorder);
                 }
+                case "answer" -> {
+                    AskRunRecorder recorder = askService.beginRun(scoped, listener);
+                    try {
+                        AskStageResult result = runAnswerNode(inputs, pool, recorder);
+                        lastOutcome = result.outcome();
+                        pool.putNode(node.id(), result.outputs());
+                    } catch (RuntimeException e) {
+                        askService.failAndFinish(recorder, e);
+                        throw e;
+                    }
+                    askService.finishRun(recorder);
+                }
                 default -> throw new IllegalArgumentException("暂不支持的节点类型：" + node.type());
             }
             String next = graph.next(nodeId, lastOutcome);
@@ -149,6 +161,7 @@ public class FlowRunner {
                                     FlowVarRefs.asSkills(inputs, "skills", AskSkillIds.DEFAULT_INSIGHT),
                                     AskSkillIds.DEFAULT_INSIGHT));
                     case "llm_chat" -> result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool);
+                    case "answer" -> result = runAnswerNode(inputs, pool, recorder);
                     case "builtin_ask" -> throw new IllegalArgumentException("白盒阶段图不应包含 builtin_ask");
                     default -> throw new IllegalArgumentException("暂不支持的节点类型：" + node.type());
                 }
@@ -180,6 +193,20 @@ public class FlowRunner {
         }
     }
 
+    private static AskStageResult runAnswerNode(
+            Map<String, Object> inputs, FlowVariablePool pool, AskListener listener) {
+        String template = FlowVarRefs.asString(inputs, "text", "{{#sys.query#}}");
+        String text = FlowVarRefs.interpolate(template, pool);
+        listener.emit("stage", Map.of("name", "answer", "message", "直接输出回答"));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("answer", text);
+        payload.put("sql", null);
+        payload.put("caliber", List.of());
+        payload.put("steps", List.of(Map.of("agent", "answer")));
+        listener.emit("answer", payload);
+        return AskStageResult.of("default", Map.of("answer", text));
+    }
+
     private AskStageResult runResolvedLlm(
             FlowNode node,
             AskRequest scoped,
@@ -194,12 +221,34 @@ public class FlowRunner {
         Object skillsRaw = inputs.containsKey("skills")
                 ? inputs.get("skills")
                 : node.config().get("skills");
+        AskRequest withQuery = requestWithQuery(scoped, inputs);
+        // llm_chat 可单独覆盖记忆窗口（优先于开始节点已截断的 history）
+        int llmWindow = FlowVarRefs.asInt(inputs, "memoryWindowTurns", -1);
+        if (llmWindow < 0 && node.config().get("memoryWindowTurns") instanceof Number number) {
+            llmWindow = number.intValue();
+        }
+        AskRequest forLlm = llmWindow >= 0 ? trimHistory(withQuery, llmWindow) : withQuery;
         return askService.runLlmChat(
-                requestWithQuery(scoped, inputs),
+                forLlm,
                 listener,
                 system,
                 AskSkillIds.normalize(skillsRaw, AskSkillIds.DEFAULT_LLM_CHAT),
                 knowledgeTools);
+    }
+
+    private static AskRequest trimHistory(AskRequest request, int window) {
+        List<Turn> history = request.history() == null ? List.of() : request.history();
+        if (window <= 0) {
+            return new AskRequest(request.question(), List.of(), request.conversationId(), request.appId());
+        }
+        if (history.size() <= window) {
+            return request;
+        }
+        return new AskRequest(
+                request.question(),
+                new ArrayList<>(history.subList(history.size() - window, history.size())),
+                request.conversationId(),
+                request.appId());
     }
 
     @SuppressWarnings("unchecked")

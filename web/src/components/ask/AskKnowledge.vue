@@ -4,10 +4,17 @@ import {
   createAskKnowledge,
   deleteAskKnowledge,
   listAskKnowledge,
+  searchAskKnowledge,
   updateAskKnowledge
 } from '../../api'
 import { formatTime } from '../../composables/useAskSuggestions'
-import type { AskKnowledge, AskKnowledgeKind, AskKnowledgeStatus, AuthMe } from '../../types'
+import type {
+  AskKnowledge,
+  AskKnowledgeKind,
+  AskKnowledgeMatch,
+  AskKnowledgeStatus,
+  AuthMe
+} from '../../types'
 import { errMessage } from '../../types'
 
 const STATUS_LABEL: Record<AskKnowledgeStatus, string> = {
@@ -38,6 +45,16 @@ const reviewing = reactive<{ id: number; status: AskKnowledgeStatus; note: strin
   status: 'approved',
   note: ''
 })
+
+const recall = reactive({
+  question: '',
+  kind: 'smart_ask' as AskKnowledgeKind | '',
+  topK: 5
+})
+const recallHits = ref<AskKnowledgeMatch[]>([])
+const recallBusy = ref(false)
+const recallError = ref('')
+const recallRan = ref(false)
 
 onMounted(load)
 watch([status, kind], load)
@@ -122,6 +139,48 @@ function canDelete(item: AskKnowledge): boolean {
   return item.status === 'pending' && item.createdBy === (authUser.value?.name ?? '')
 }
 
+async function runRecallTest() {
+  const question = recall.question.trim()
+  if (!question || recallBusy.value) {
+    return
+  }
+  recallBusy.value = true
+  recallError.value = ''
+  recallRan.value = true
+  try {
+    recallHits.value = await searchAskKnowledge(
+      question,
+      Math.max(1, Number(recall.topK) || 5),
+      recall.kind || undefined
+    )
+  } catch (e) {
+    recallHits.value = []
+    recallError.value = errMessage(e)
+  } finally {
+    recallBusy.value = false
+  }
+}
+
+function hitScore(hit: AskKnowledgeMatch): string {
+  const score = typeof hit.score === 'number' ? hit.score : Number(hit.score)
+  if (!Number.isFinite(score)) {
+    return '—'
+  }
+  return score.toFixed(3)
+}
+
+function hitQuestion(hit: AskKnowledgeMatch): string {
+  return hit.knowledge?.question || hit.question || ''
+}
+
+function hitAnswer(hit: AskKnowledgeMatch): string {
+  return hit.knowledge?.answerPair?.answer || hit.answer || ''
+}
+
+function hitId(hit: AskKnowledgeMatch): number | string {
+  return hit.knowledge?.id ?? hit.id ?? '—'
+}
+
 async function removeItem(item: AskKnowledge) {
   if (!confirm(`删除知识「${item.question.slice(0, 40)}」？`)) {
     return
@@ -164,6 +223,58 @@ async function removeItem(item: AskKnowledge) {
         提交知识
       </button>
     </form>
+
+    <section class="recall" aria-labelledby="recall-title">
+      <header class="recall-head">
+        <h2 id="recall-title">召回测试</h2>
+        <p class="hint">输入问题，直接查看向量/内存检索命中（不跑大模型判定）。仅检索「已通过」知识。</p>
+      </header>
+      <form class="recall-form" aria-label="知识召回测试" @submit.prevent="runRecallTest">
+        <label>
+          测试问题
+          <textarea
+            v-model="recall.question"
+            rows="2"
+            maxlength="2000"
+            placeholder="例如：最近一天高危告警有多少？"
+          />
+        </label>
+        <div class="recall-row">
+          <label class="inline">
+            类型
+            <select v-model="recall.kind">
+              <option value="">全部（默认智能问数）</option>
+              <option v-for="(label, key) in KIND_LABEL" :key="key" :value="key">{{ label }}</option>
+            </select>
+          </label>
+          <label class="inline">
+            TopK
+            <input v-model.number="recall.topK" type="number" min="1" max="20" />
+          </label>
+          <button
+            class="primary"
+            type="submit"
+            :disabled="recallBusy || !recall.question.trim()"
+          >
+            {{ recallBusy ? '检索中…' : '测试召回' }}
+          </button>
+        </div>
+      </form>
+      <p v-if="recallError" class="err banner" role="alert">{{ recallError }}</p>
+      <p v-else-if="recallRan && !recallBusy" class="hint" role="status">
+        {{ recallHits.length ? `命中 ${recallHits.length} 条` : '无命中' }}
+      </p>
+      <ol v-if="recallHits.length" class="recall-hits" aria-label="召回结果">
+        <li v-for="(hit, index) in recallHits" :key="`${hitId(hit)}-${index}`" class="hit">
+          <div class="meta">
+            <span class="score">#{{ index + 1 }} · score {{ hitScore(hit) }}</span>
+            <span class="hint">id {{ hitId(hit) }}</span>
+          </div>
+          <p class="content"><b>问</b> {{ hitQuestion(hit) }}</p>
+          <p class="content"><b>答</b> {{ hitAnswer(hit) }}</p>
+        </li>
+      </ol>
+    </section>
 
     <div class="filters">
       <label class="inline">
@@ -371,5 +482,55 @@ textarea {
 .actions {
   display: flex;
   gap: 8px;
+}
+
+.recall {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2, var(--panel));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recall-head h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.recall-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recall-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.recall-hits {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hit {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.score {
+  font-variant-numeric: tabular-nums;
+  color: var(--ok, #75b798);
 }
 </style>
