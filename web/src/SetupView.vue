@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { authSetup } from './api'
 import { setAccessToken } from './auth'
 import { errMessage } from './types'
@@ -9,8 +9,20 @@ const emit = defineEmits<{ 'signed-in': [] }>()
 const form = reactive({ username: '', displayName: '', password: '', confirm: '' })
 const busy = ref(false)
 const error = ref('')
+const usernameInput = ref<HTMLInputElement | null>(null)
 
 const mismatch = computed(() => !!form.confirm && form.confirm !== form.password)
+const canSubmit = computed(
+  () =>
+    form.username.trim().length >= 3 &&
+    form.password.length >= 8 &&
+    form.confirm === form.password &&
+    !busy.value
+)
+
+onMounted(() => {
+  void nextTick(() => usernameInput.value?.focus())
+})
 
 async function submit() {
   if (mismatch.value) {
@@ -32,18 +44,21 @@ async function submit() {
 </script>
 
 <template>
-  <main class="login">
-    <section class="card" aria-labelledby="setup-title">
+  <main class="auth-gate">
+    <section class="auth-gate__panel" aria-labelledby="setup-title">
       <header>
-        <p class="brand">联邦</p>
-        <h1 id="setup-title">首次配置管理员</h1>
-        <p class="hint">控制台需要登录。请创建第一个管理员账号，之后可用它登录并管理其他用户。</p>
+        <p class="auth-gate__brand">联邦</p>
+        <h1 id="setup-title" class="auth-gate__title">创建管理员</h1>
+        <p class="auth-gate__lead">
+          首次使用需设置管理员。完成后即可登录，并在「用户」里管理其他人。
+        </p>
       </header>
 
-      <form @submit.prevent="submit">
+      <form class="auth-gate__form" @submit.prevent="submit">
         <label>
-          管理员用户名
+          用户名
           <input
+            ref="usernameInput"
             v-model.trim="form.username"
             name="username"
             required
@@ -80,76 +95,12 @@ async function submit() {
             :aria-invalid="mismatch"
           />
         </label>
+        <p v-if="mismatch" class="auth-gate__field-hint" role="status">两次输入的密码不一致</p>
         <p v-if="error" class="err" role="alert">{{ error }}</p>
-        <button class="primary" type="submit" :disabled="busy">
-          {{ busy ? '创建中…' : '创建管理员并进入' }}
+        <button class="primary" type="submit" :disabled="!canSubmit">
+          {{ busy ? '创建中…' : '创建并进入' }}
         </button>
       </form>
     </section>
   </main>
 </template>
-
-<style scoped>
-.login {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100%;
-  padding: 24px;
-}
-
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: min(400px, 100%);
-  padding: 28px 28px 22px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
-}
-
-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.brand {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  color: var(--accent-2);
-}
-
-h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-}
-
-header .hint {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--muted);
-}
-
-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-form .primary {
-  margin-top: 4px;
-  padding: 10px;
-}
-
-.err {
-  margin: 0;
-  font-size: 13px;
-}
-</style>

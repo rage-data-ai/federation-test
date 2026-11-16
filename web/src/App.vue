@@ -419,6 +419,9 @@ function cycleTheme() {
 <template>
   <SetupView v-if="gate === 'setup'" @signed-in="onSignedIn" />
   <LoginView v-else-if="gate === 'login'" :notice="loginNotice" @signed-in="onSignedIn" />
+  <div v-else-if="gate === 'checking'" class="auth-gate__checking" role="status" aria-live="polite">
+    正在连接网关…
+  </div>
   <div v-else-if="gate === 'ready'" class="shell">
     <a class="skip-link" href="#main-stage">跳到主内容</a>
     <nav class="rail" aria-label="模块">

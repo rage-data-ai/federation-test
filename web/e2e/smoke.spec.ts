@@ -325,12 +325,12 @@ test.describe('console smoke', () => {
     })
 
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: '首次配置管理员', level: 1 })).toBeVisible()
-    await page.getByLabel('管理员用户名').fill('admin')
+    await expect(page.getByRole('heading', { name: '创建管理员', level: 1 })).toBeVisible()
+    await page.getByLabel('用户名').fill('admin')
     await page.getByLabel('显示名（可选）').fill('管理员')
     await page.getByLabel('密码', { exact: true }).fill('admin-pass-1')
     await page.getByLabel('确认密码').fill('admin-pass-1')
-    await page.getByRole('button', { name: '创建管理员并进入' }).click()
+    await page.getByRole('button', { name: '创建并进入' }).click()
     await expect(page.getByRole('navigation', { name: '模块' })).toBeVisible()
     await expect(page.getByRole('button', { name: '身份：admin' })).toContainText('管理员')
   })
@@ -378,7 +378,7 @@ test.describe('console smoke', () => {
     })
 
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '登录控制台', level: 1 })).toBeVisible()
     await expect(page.getByRole('navigation', { name: '模块' })).toHaveCount(0)
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
     expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([])
@@ -387,7 +387,7 @@ test.describe('console smoke', () => {
     await page.getByLabel('密码', { exact: true }).fill('wrong-pass-1')
     await page.getByRole('button', { name: '登录', exact: true }).last().click()
     await expect(page.getByRole('alert')).toHaveText('用户名或密码错误')
-    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '登录控制台', level: 1 })).toBeVisible()
 
     await page.getByLabel('密码', { exact: true }).fill('alice-pass-1')
     await page.getByRole('button', { name: '登录', exact: true }).last().click()
@@ -405,7 +405,7 @@ test.describe('console smoke', () => {
     const dialog = page.getByRole('dialog', { name: '访问身份' })
     await expect(dialog.getByLabel('原密码')).toBeFocused()
     await dialog.getByRole('button', { name: '退出登录' }).click()
-    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '登录控制台', level: 1 })).toBeVisible()
     await expect(page.getByRole('status')).toHaveCount(0)
 
     await page.getByLabel('用户名').fill('alice')
@@ -415,7 +415,7 @@ test.describe('console smoke', () => {
     await expect(page.getByRole('row', { name: /bob/ })).toBeVisible()
     sessionValid = false
     await page.getByRole('button', { name: '刷新' }).click()
-    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '登录控制台', level: 1 })).toBeVisible()
     await expect(page.getByRole('status')).toHaveText('令牌无效或登录已过期，请重新登录')
   })
 
@@ -453,11 +453,12 @@ test.describe('console smoke', () => {
     await page.getByLabel('显示名（可选）').fill('卡萝')
     await page.getByLabel('密码', { exact: true }).fill('carol-pass-1')
     await page.getByLabel('确认密码').fill('carol-pass-2')
-    await page.getByRole('button', { name: '注册并登录' }).click()
-    await expect(page.getByRole('alert')).toHaveText('两次输入的密码不一致')
+    await expect(page.getByRole('status')).toHaveText('两次输入的密码不一致')
+    await expect(page.getByRole('button', { name: '注册并登录' })).toBeDisabled()
     expect(registered).toEqual([])
 
     await page.getByLabel('确认密码').fill('carol-pass-1')
+    await expect(page.getByRole('button', { name: '注册并登录' })).toBeEnabled()
     await page.getByRole('button', { name: '注册并登录' }).click()
     await expect(page.getByRole('navigation', { name: '模块' })).toBeVisible()
     expect(registered).toEqual([{ username: 'carol', password: 'carol-pass-1', displayName: '卡萝' }])
