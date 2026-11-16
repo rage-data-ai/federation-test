@@ -29,7 +29,6 @@ import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
 import com.cmcc.cmdevops.security.federation.ask.AskService.Turn;
 import com.cmcc.cmdevops.security.federation.ask.AskStageResult;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskRunRecorder;
-import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeTools;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowEdge;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowNode;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowModels.PublishedApp;
@@ -63,7 +62,7 @@ class FlowRunnerTest {
         when(askService.runInsight(any(), any(), any(), any()))
                 .thenReturn(AskStageResult.of("answered", Map.of("answer", "ok", "sql", "select 1")));
 
-        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        FlowRunner runner = new FlowRunner(askService, new FederationProperties());
         PublishedApp app = new PublishedApp("app-1", "问数", 1L, "fv-1", DefaultFlows.builtinAsk());
         List<String> events = new ArrayList<>();
         runner.run(app, new AskRequest("q", List.of()), (event, data) -> events.add(event));
@@ -85,7 +84,7 @@ class FlowRunnerTest {
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
                 .thenReturn(AskStageResult.of("answered", Map.of("answer", "hit")));
 
-        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        FlowRunner runner = new FlowRunner(askService, new FederationProperties());
         PublishedApp app = new PublishedApp("app-1", "问数", 1L, "fv-1", DefaultFlows.builtinAsk());
         runner.run(app, new AskRequest("q", List.of()), (event, data) -> {
         });
@@ -98,7 +97,7 @@ class FlowRunnerTest {
     @Test
     void legacyBuiltinAskStillDelegates() {
         AskService askService = mock(AskService.class);
-        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        FlowRunner runner = new FlowRunner(askService, new FederationProperties());
         PublishedApp app = new PublishedApp("app-legacy", "旧问数", 1L, "fv-1", DefaultFlows.legacyBuiltinAsk());
         runner.run(app, new AskRequest("q", List.of()), (event, data) -> {
         });
@@ -119,7 +118,7 @@ class FlowRunnerTest {
                         new FlowEdge("ask", "knowledge", "default"),
                         new FlowEdge("knowledge", "end", "default")));
         AskService askService = mock(AskService.class);
-        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        FlowRunner runner = new FlowRunner(askService, new FederationProperties());
         PublishedApp app = new PublishedApp("app-x", "混用", 1L, "fv-x", mixed);
         assertThrows(
                 IllegalArgumentException.class,
@@ -137,12 +136,12 @@ class FlowRunnerTest {
             outer[0].emit("run", Map.of("runId", "r1", "conversationId", "c1"));
             return recorder;
         });
-        when(askService.runLlmChat(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(askService.runLlmChat(any(), any(), any(), any())).thenAnswer(invocation -> {
             outer[0].emit("answer", Map.of("answer", "你好"));
             return AskStageResult.of("default", Map.of("answer", "你好"));
         });
 
-        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        FlowRunner runner = new FlowRunner(askService, new FederationProperties());
         List<String> events = new ArrayList<>();
         PublishedApp app = new PublishedApp("app-2", "对话", 2L, "fv-2", DefaultFlows.llmChat());
         runner.run(app, new AskRequest("hi", List.of()), (event, data) -> events.add(event));
@@ -156,9 +155,9 @@ class FlowRunnerTest {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
         when(askService.beginRun(any(), any())).thenReturn(recorder);
-        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+        when(askService.runLlmChat(any(), any(), any(), any()))
                 .thenReturn(AskStageResult.of("default", Map.of("answer", "ok")));
-        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        FlowRunner runner = new FlowRunner(askService, new FederationProperties());
         FlowGraph graph = FlowGraph.of(
                 "start",
                 List.of(
@@ -192,7 +191,6 @@ class FlowRunnerTest {
                 }),
                 any(),
                 any(),
-                any(),
                 any());
     }
 
@@ -205,7 +203,7 @@ class FlowRunnerTest {
                 .thenReturn(AskStageResult.of("answered"));
         FederationProperties props = new FederationProperties();
         props.getAsk().setHistoryWindowTurns(50);
-        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), props);
+        FlowRunner runner = new FlowRunner(askService, props);
         FlowGraph graph = FlowGraph.of(
                 "start",
                 List.of(

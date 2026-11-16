@@ -26,7 +26,6 @@ import com.cmcc.cmdevops.security.federation.ask.feedback.MemoryAskFeedbackStore
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledge;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService.Match;
-import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeTools;
 import com.cmcc.cmdevops.security.federation.ask.prompt.AskPromptService;
 import com.cmcc.cmdevops.security.federation.ask.prompt.PreferenceTools;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
@@ -494,29 +493,20 @@ public class AskService {
     }
 
     /**
-     * 大模型对话节点：按 skills 绑定 ontology / preference / knowledge 工具（Agent 模式）。
+     * 大模型对话节点：按 skills 绑定 ontology / preference（Agent 模式）。
+     * 知识检索用知识库节点，SQL 用洞察节点，不在此重复挂载。
      */
     public AskStageResult runLlmChat(
             AskRequest request,
             AskListener listener,
             String systemPromptText,
-            Iterable<String> skills,
-            KnowledgeTools knowledgeTools) {
-        Set<String> skillSet = AskSkillIds.normalize(skills, AskSkillIds.DEFAULT_LLM_CHAT);
+            Iterable<String> skills) {
+        Set<String> skillSet = AskSkillIds.forLlmChat(skills);
         Map<String, Object> llmStage = new LinkedHashMap<>();
         llmStage.put("name", "llm");
         llmStage.put("message", "大模型对话");
         llmStage.put("skills", List.copyOf(skillSet));
         listener.emit("stage", llmStage);
-        if (skillSet.contains(AskSkillIds.SQL)) {
-            listener.emit(
-                    "stage",
-                    Map.of(
-                            "name",
-                            "llm",
-                            "message",
-                            "已勾选 sql 技能：llm_chat 暂不挂载 InsightSession（请用 insight 节点执行 SQL）"));
-        }
         String system = systemPromptText == null || systemPromptText.isBlank() ? "你是有帮助的中文助手。" : systemPromptText;
         String user = dialogue(request);
         List<Object> tools = new ArrayList<>();
@@ -525,9 +515,6 @@ public class AskService {
         }
         if (skillSet.contains(AskSkillIds.PREFERENCE) && preferenceTools != null) {
             tools.add(preferenceTools);
-        }
-        if (skillSet.contains(AskSkillIds.KNOWLEDGE) && knowledgeTools != null) {
-            tools.add(knowledgeTools);
         }
         String answerText;
         if (tools.isEmpty()) {

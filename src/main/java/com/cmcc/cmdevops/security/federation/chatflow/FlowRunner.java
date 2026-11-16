@@ -18,7 +18,6 @@ import com.cmcc.cmdevops.security.federation.ask.AskSkillIds;
 import com.cmcc.cmdevops.security.federation.ask.AskStageResult;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskRunRecorder;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
-import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeTools;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowNode;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowModels.PublishedApp;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
@@ -39,12 +38,10 @@ public class FlowRunner {
     private static final int MAX_HOPS = 32;
 
     private final AskService askService;
-    private final KnowledgeTools knowledgeTools;
     private final FederationProperties properties;
 
-    public FlowRunner(AskService askService, KnowledgeTools knowledgeTools, FederationProperties properties) {
+    public FlowRunner(AskService askService, FederationProperties properties) {
         this.askService = askService;
-        this.knowledgeTools = knowledgeTools;
         this.properties = properties;
     }
 
@@ -228,12 +225,7 @@ public class FlowRunner {
             llmWindow = number.intValue();
         }
         AskRequest forLlm = llmWindow >= 0 ? trimHistory(withQuery, llmWindow) : withQuery;
-        return askService.runLlmChat(
-                forLlm,
-                listener,
-                system,
-                AskSkillIds.normalize(skillsRaw, AskSkillIds.DEFAULT_LLM_CHAT),
-                knowledgeTools);
+        return askService.runLlmChat(forLlm, listener, system, AskSkillIds.forLlmChat(skillsRaw));
     }
 
     private static AskRequest trimHistory(AskRequest request, int window) {

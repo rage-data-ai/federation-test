@@ -100,7 +100,7 @@ start → knowledge → ontology → metadata → insight → end
 1. `AskService` 暴露 `runKnowledge` / `runOntology` / `runMetadata` / `runInsight`，返回 outcome；`AskFlowState` 在节点间传递。
 2. `FlowRunner` 对阶段图白盒拆跑：单次 `beginRun`/`finishRun`，按 outcome 选边。
 3. 节点 `config.skills` 绑定工具技能：`ontology` / `preference` / `knowledge` / `sql`（见 `AskSkillIds`）。
-4. `llm_chat` 可勾选本体/知识/偏好工具（Agent 模式）；`insight` 必选 `sql`。
+4. `llm_chat` 可勾选本体/偏好工具（Agent 模式）；知识走知识库节点，SQL 走洞察节点；`insight` 必选 `sql`。
 5. `insight` 仍唯一执行 SQL 的节点，继续走 `InsightSession` + `SqlGuard`；SSE 事件名不变。
 
 ### 明确不要做的

@@ -20,6 +20,11 @@ public final class AskSkillIds {
     public static final List<String> DEFAULT_INSIGHT = List.of(SQL, PREFERENCE);
     public static final List<String> DEFAULT_LLM_CHAT = List.of();
 
+    /**
+     * 通用 {@code llm_chat} 可绑技能：知识走知识库节点，SQL 走洞察节点，避免重复勾选。
+     */
+    public static final Set<String> LLM_CHAT_ALLOWED = Set.of(ONTOLOGY, PREFERENCE);
+
     private AskSkillIds() {
     }
 
@@ -49,5 +54,17 @@ public final class AskSkillIds {
             return out;
         }
         return new LinkedHashSet<>(defaults == null ? List.of() : defaults);
+    }
+
+    /** 过滤到 {@link #LLM_CHAT_ALLOWED}（忽略知识库 / SQL 等应由专用节点承载的技能）。 */
+    public static Set<String> forLlmChat(Object raw) {
+        Set<String> normalized = normalize(raw, DEFAULT_LLM_CHAT);
+        Set<String> out = new LinkedHashSet<>();
+        for (String id : normalized) {
+            if (LLM_CHAT_ALLOWED.contains(id)) {
+                out.add(id);
+            }
+        }
+        return out;
     }
 }

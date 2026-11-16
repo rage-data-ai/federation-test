@@ -685,9 +685,6 @@ const selectedData = computed(() => nodeData(selectedNode.value))
                   <code>{{ tool.name }}</code> {{ tool.label }}
                 </li>
               </ul>
-              <small v-if="selectedData.flowType === 'llm_chat' && skill.id === 'sql'" class="hint">
-                llm_chat 勾选后会提示改用 insight 节点执行 SQL。
-              </small>
             </span>
           </label>
           <p class="hint">已有工具按技能包展示；勾选即绑定到本节点运行时。</p>

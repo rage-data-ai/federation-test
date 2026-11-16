@@ -53,7 +53,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
   {
     type: 'llm_chat',
     title: '大模型对话',
-    description: '可配记忆轮数；自由绑定工具技能',
+    description: '可配记忆轮数；可绑本体/偏好（知识用知识库节点，SQL 用洞察节点）',
     addable: true,
     color: '#75b798'
   },
