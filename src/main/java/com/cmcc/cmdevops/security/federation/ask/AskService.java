@@ -508,6 +508,15 @@ public class AskService {
         llmStage.put("message", "大模型对话");
         llmStage.put("skills", List.copyOf(skillSet));
         listener.emit("stage", llmStage);
+        if (skillSet.contains(AskSkillIds.SQL)) {
+            listener.emit(
+                    "stage",
+                    Map.of(
+                            "name",
+                            "llm",
+                            "message",
+                            "已勾选 sql 技能：llm_chat 暂不挂载 InsightSession（请用 insight 节点执行 SQL）"));
+        }
         String system = systemPromptText == null || systemPromptText.isBlank() ? "你是有帮助的中文助手。" : systemPromptText;
         String user = dialogue(request);
         List<Object> tools = new ArrayList<>();

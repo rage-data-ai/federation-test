@@ -4,6 +4,7 @@ export type FlowNodeKind =
   | 'end'
   | 'builtin_ask'
   | 'llm_chat'
+  | 'answer'
   | 'knowledge'
   | 'ontology'
   | 'metadata'
@@ -52,9 +53,16 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
   {
     type: 'llm_chat',
     title: '大模型对话',
-    description: '可勾选工具技能（本体/知识/偏好）',
+    description: '可配记忆轮数；自由绑定工具技能',
     addable: true,
     color: '#75b798'
+  },
+  {
+    type: 'answer',
+    title: '直接回答',
+    description: '模板输出最终回答（支持变量插值）',
+    addable: true,
+    color: '#9ec5fe'
   },
   { type: 'end', title: '结束', description: '流程出口', addable: true, color: '#adb5bd' }
 ]

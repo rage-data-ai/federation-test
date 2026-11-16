@@ -239,6 +239,16 @@ function startNewConversation() {
               <pre class="sql">{{ item.sql }}</pre>
               <p v-if="item.message" class="line warn">{{ item.message }}</p>
             </section>
+
+            <section v-if="turn.vars?.length" class="step">
+              <h4><span class="tag">变量</span>节点出参（ChatFlow）</h4>
+              <div v-for="(snap, vidx) in turn.vars" :key="`${snap.nodeId}-${vidx}`" class="line">
+                <strong>{{ snap.nodeId }}</strong>
+                <code v-for="(value, key) in snap.outputs" :key="key" class="chip">
+                  {{ key }}={{ typeof value === 'object' ? JSON.stringify(value) : value }}
+                </code>
+              </div>
+            </section>
           </div>
 
           <p v-if="turn.error" class="err banner" role="alert">{{ turn.error }}</p>

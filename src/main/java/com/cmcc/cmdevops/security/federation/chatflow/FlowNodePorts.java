@@ -77,7 +77,8 @@ public final class FlowNodePorts {
                         List.of(
                                 new Port("query", "用户消息", "默认绑定 sys.query"),
                                 new Port("systemPrompt", "系统提示词", "支持 {{#var#}} 插值"),
-                                new Port("skills", "工具技能", "ontology / knowledge / preference")),
+                                new Port("memoryWindowTurns", "记忆轮数", "覆盖开始节点；0=无历史"),
+                                new Port("skills", "工具技能", "可自由勾选已有工具包")),
                         List.of(
                                 new Port("outcome", "结果条件", "default"),
                                 new Port("answer", "回复文本", "")),
@@ -86,8 +87,18 @@ public final class FlowNodePorts {
                                 "{{#sys.query#}}",
                                 "systemPrompt",
                                 "你是有帮助的中文助手。",
+                                "memoryWindowTurns",
+                                12,
                                 "skills",
                                 List.of())));
+        SPECS.put(
+                "answer",
+                new Spec(
+                        List.of(new Port("text", "回答模板", "支持 {{#var#}}；直接输出为最终回答")),
+                        List.of(
+                                new Port("outcome", "结果条件", "default"),
+                                new Port("answer", "回复文本", "")),
+                        Map.of("text", "{{#sys.query#}}")));
         SPECS.put(
                 "builtin_ask",
                 new Spec(

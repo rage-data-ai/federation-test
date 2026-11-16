@@ -475,10 +475,14 @@ export function deleteAskKnowledge(id: number) {
   return request<Json>(`/api/v1/ask/knowledge/${id}`, { method: 'DELETE' })
 }
 
-export function searchAskKnowledge(question: string, topK?: number) {
+export function searchAskKnowledge(
+  question: string,
+  topK?: number,
+  kind?: string
+) {
   return request<AskKnowledgeMatch[]>('/api/v1/ask/knowledge/search', {
     method: 'POST',
-    body: JSON.stringify({ question, topK })
+    body: JSON.stringify({ question, topK, kind: kind || undefined })
   })
 }
 
