@@ -181,6 +181,6 @@ start → knowledge → ontology → metadata → insight → end
 
 ## 10. 推荐实施顺序
 
-1. **方案 A**：Runner 折叠 + 新默认图 + catalog `addable` + 测试/文档；内置 app 显式 re-publish 或启动迁移。
-2. 观测：用户是否要「跳过知识库 / 仅本体+SQL」等编排。
+1. **方案 A（已落地）**：Runner 折叠 + 新默认图 + catalog `addable` + 测试/文档；`BuiltinAskGraphMigrator` 启动迁移内置 app。
+2. 观测：用户是否要「跳过知识库 / 仅本体+SQL」等编排（边条件真正按 outcome 生效需方案 B）。
 3. **方案 B**：抽 pipeline、真实 outcome、状态在节点间传递；再考虑应用级提示词/知识范围（`docs/chatflow.md` 阶段 3）。

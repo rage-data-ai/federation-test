@@ -42,7 +42,7 @@ public class MemoryChatflowStore implements ChatflowStore {
         App app = new App(
                 DefaultFlows.DEFAULT_APP_ID,
                 "智能问数",
-                "默认问数应用：知识库 → 本体 → 元数据 → SQL",
+                "默认问数应用：知识库 → 本体 → 元数据 → SQL 洞察",
                 flow.id(),
                 "system",
                 App.PUBLISHED,

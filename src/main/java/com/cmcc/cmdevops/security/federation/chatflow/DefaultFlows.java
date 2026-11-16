@@ -2,6 +2,7 @@ package com.cmcc.cmdevops.security.federation.chatflow;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowEdge;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowNode;
@@ -15,10 +16,51 @@ public final class DefaultFlows {
     public static final String DEFAULT_APP_ID = "app-builtin-ask";
     public static final String DEFAULT_FLOW_ID = "flow-builtin-ask";
 
+    /** 问数阶段节点（画布展开；运行时可由 FlowRunner 折叠为一次 AskService.ask）。 */
+    public static final Set<String> ASK_STAGE_TYPES = Set.of("knowledge", "ontology", "metadata", "insight");
+
     private DefaultFlows() {
     }
 
+    /**
+     * 智能问数：Dify 式四阶段展开。
+     *
+     * <pre>
+     * start → knowledge ─answered→ end
+     *            └continue→ ontology ─clarify→ end
+     *                          └continue→ metadata ─error→ end
+     *                                        └continue→ insight → end
+     * </pre>
+     */
     public static FlowGraph builtinAsk() {
+        return FlowGraph.of(
+                "start",
+                List.of(
+                        new FlowNode("start", "start", "开始", Map.of("x", 40, "y", 140)),
+                        new FlowNode("knowledge", "knowledge", "知识库", Map.of("x", 240, "y", 140)),
+                        new FlowNode("ontology", "ontology", "本体", Map.of("x", 460, "y", 140)),
+                        new FlowNode("metadata", "metadata", "元数据", Map.of("x", 680, "y", 140)),
+                        new FlowNode("insight", "insight", "SQL 洞察", Map.of("x", 900, "y", 140)),
+                        new FlowNode("end", "end", "结束", Map.of("x", 1120, "y", 140))),
+                List.of(
+                        new FlowEdge("start", "knowledge", "default"),
+                        new FlowEdge("knowledge", "end", "answered"),
+                        new FlowEdge("knowledge", "ontology", "continue"),
+                        new FlowEdge("knowledge", "ontology", "default"),
+                        new FlowEdge("ontology", "end", "clarify"),
+                        new FlowEdge("ontology", "metadata", "continue"),
+                        new FlowEdge("ontology", "metadata", "default"),
+                        new FlowEdge("metadata", "end", "error"),
+                        new FlowEdge("metadata", "insight", "continue"),
+                        new FlowEdge("metadata", "insight", "default"),
+                        new FlowEdge("insight", "end", "answered"),
+                        new FlowEdge("insight", "end", "clarify"),
+                        new FlowEdge("insight", "end", "error"),
+                        new FlowEdge("insight", "end", "default")));
+    }
+
+    /** 旧版单节点智能问数（兼容已发布 Release）。 */
+    public static FlowGraph legacyBuiltinAsk() {
         return FlowGraph.of(
                 "start",
                 List.of(
@@ -60,5 +102,19 @@ public final class DefaultFlows {
             return llmChat();
         }
         throw new IllegalArgumentException("未知流程模板：" + name + "（可用：builtin_ask、llm_chat）");
+    }
+
+    public static boolean isAskStageType(String type) {
+        return type != null && ASK_STAGE_TYPES.contains(type);
+    }
+
+    /** 仍是一期「单节点 builtin_ask」图，需要迁移到四阶段。 */
+    public static boolean isLegacyBuiltinAskGraph(FlowGraph graph) {
+        if (graph == null || graph.nodes().isEmpty()) {
+            return false;
+        }
+        boolean hasBuiltin = graph.nodes().stream().anyMatch(node -> "builtin_ask".equals(node.type()));
+        boolean hasStage = graph.nodes().stream().anyMatch(node -> isAskStageType(node.type()));
+        return hasBuiltin && !hasStage;
     }
 }

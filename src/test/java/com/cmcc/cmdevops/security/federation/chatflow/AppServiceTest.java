@@ -41,7 +41,8 @@ class AppServiceTest {
     void defaultAppIsPublished() {
         PublishedApp published = apps.resolvePublished(null);
         assertEquals(DefaultFlows.DEFAULT_APP_ID, published.appId());
-        assertEquals("builtin_ask", published.graph().node("ask").type());
+        assertEquals("knowledge", published.graph().node("knowledge").type());
+        assertEquals("insight", published.graph().node("insight").type());
     }
 
     @Test
@@ -64,8 +65,8 @@ class AppServiceTest {
         FlowGraph graph = DefaultFlows.builtinAsk();
         flows.update(flow.id(), "改成问数", graph);
         AppRelease release = apps.publish(draft.id(), null);
-        assertNotNull(release.graph().node("ask"));
-        assertEquals("builtin_ask", apps.resolvePublished(draft.id()).graph().node("ask").type());
+        assertNotNull(release.graph().node("knowledge"));
+        assertEquals("insight", apps.resolvePublished(draft.id()).graph().node("insight").type());
     }
 
     @Test

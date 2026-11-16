@@ -36,27 +36,28 @@ public class JdbcChatflowStore implements ChatflowStore {
     void seedBuiltinIfEmpty() {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM fed_app WHERE id = ?", Integer.class,
                 DefaultFlows.DEFAULT_APP_ID);
-        if (count != null && count > 0) {
+        if (count == null || count == 0) {
+            long now = System.currentTimeMillis();
+            FlowGraph graph = DefaultFlows.builtinAsk();
+            saveFlow(new FlowDraft(
+                    DefaultFlows.DEFAULT_FLOW_ID, "智能问数", "system", graph, FlowDraft.DRAFT, now, now));
+            FlowVersion version = saveFlowVersion(
+                    new FlowVersion("fv-builtin-ask-1", DefaultFlows.DEFAULT_FLOW_ID, 1, graph, "system", now));
+            AppRelease release = saveAppRelease(new AppRelease(
+                    0L, DefaultFlows.DEFAULT_APP_ID, version.id(), graph, "system", now));
+            saveApp(new App(
+                    DefaultFlows.DEFAULT_APP_ID,
+                    "智能问数",
+                    "默认问数应用：知识库 → 本体 → 元数据 → SQL 洞察",
+                    DefaultFlows.DEFAULT_FLOW_ID,
+                    "system",
+                    App.PUBLISHED,
+                    release.id(),
+                    now,
+                    now));
             return;
         }
-        long now = System.currentTimeMillis();
-        FlowGraph graph = DefaultFlows.builtinAsk();
-        saveFlow(new FlowDraft(
-                DefaultFlows.DEFAULT_FLOW_ID, "智能问数", "system", graph, FlowDraft.DRAFT, now, now));
-        FlowVersion version = saveFlowVersion(
-                new FlowVersion("fv-builtin-ask-1", DefaultFlows.DEFAULT_FLOW_ID, 1, graph, "system", now));
-        AppRelease release = saveAppRelease(new AppRelease(
-                0L, DefaultFlows.DEFAULT_APP_ID, version.id(), graph, "system", now));
-        saveApp(new App(
-                DefaultFlows.DEFAULT_APP_ID,
-                "智能问数",
-                "默认问数应用：知识库 → 本体 → 元数据 → SQL",
-                DefaultFlows.DEFAULT_FLOW_ID,
-                "system",
-                App.PUBLISHED,
-                release.id(),
-                now,
-                now));
+        BuiltinAskGraphMigrator.migrateIfNeeded(this);
     }
 
     @Override
