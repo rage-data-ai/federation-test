@@ -374,6 +374,11 @@ export function updateApp(id: string, body: { name?: string; description?: strin
   })
 }
 
+/** 软删除（归档）；内置「智能问数」会 400。 */
+export function deleteApp(id: string) {
+  return request<ChatApp>(`/api/v1/apps/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 export function publishApp(id: string, flowVersionId?: string) {
   return request<{ id: number; appId: string; flowVersionId: string; publishedAt: number }>(
     `/api/v1/apps/${encodeURIComponent(id)}/publish`,

@@ -48,9 +48,10 @@ PUT    /api/v1/flows/{id}            { name, graph }
 POST   /api/v1/flows/{id}/publish    → FlowVersion
 
 GET    /api/v1/apps
-POST   /api/v1/apps                  { name, flowId, description? }
+POST   /api/v1/apps                  { name, flowId?, description?, template? }
 GET    /api/v1/apps/{id}
-PUT    /api/v1/apps/{id}
+PUT    /api/v1/apps/{id}             { name?, description?, flowId? }
+DELETE /api/v1/apps/{id}             软删除（归档）；内置「智能问数」不可删
 POST   /api/v1/apps/{id}/publish     → AppRelease（钉当前 flow 最新版本或指定 versionId）
 GET    /api/v1/apps/published        运行入口列表
 

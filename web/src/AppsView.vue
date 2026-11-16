@@ -1,9 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, toRaw } from 'vue'
-import { createApp, getFlow, listApps, listFlowTemplates, publishApp, updateFlow } from './api'
+import {
+  createApp,
+  deleteApp,
+  getFlow,
+  listApps,
+  listFlowTemplates,
+  publishApp,
+  updateApp,
+  updateFlow
+} from './api'
 import FlowDagEditor from './components/flow/FlowDagEditor.vue'
 import type { ChatApp, FlowDraft, FlowGraph, FlowTemplate } from './types'
 import { errMessage } from './types'
+
+const BUILTIN_APP_ID = 'app-builtin-ask'
 
 const apps = ref<ChatApp[]>([])
 const templates = ref<FlowTemplate[]>([])
@@ -11,10 +22,13 @@ const selected = ref<ChatApp | null>(null)
 const flow = ref<FlowDraft | null>(null)
 const draftGraph = ref<FlowGraph | null>(null)
 const dirty = ref(false)
+const metaDirty = ref(false)
 const showJson = ref(false)
 const graphText = ref('')
 const name = ref('')
 const description = ref('')
+const editName = ref('')
+const editDescription = ref('')
 const template = ref('llm_chat')
 const busy = ref('')
 const error = ref('')
@@ -23,6 +37,9 @@ const message = ref('')
 const emit = defineEmits<{ 'open-app': [appId: string] }>()
 
 const readonly = computed(() => false)
+const canDeleteSelected = computed(
+  () => !!selected.value && selected.value.id !== BUILTIN_APP_ID
+)
 
 onMounted(async () => {
   try {
@@ -35,6 +52,12 @@ onMounted(async () => {
 
 async function refresh() {
   apps.value = await listApps()
+}
+
+function syncMetaForm(app: ChatApp) {
+  editName.value = app.name
+  editDescription.value = app.description || ''
+  metaDirty.value = false
 }
 
 async function create() {
@@ -61,6 +84,7 @@ async function create() {
 
 async function open(app: ChatApp) {
   selected.value = app
+  syncMetaForm(app)
   error.value = ''
   message.value = ''
   dirty.value = false
@@ -81,6 +105,10 @@ function onGraphChange(graph: FlowGraph) {
   dirty.value = true
 }
 
+function onMetaInput() {
+  metaDirty.value = true
+}
+
 function applyJson() {
   try {
     const graph = JSON.parse(graphText.value) as FlowGraph
@@ -90,6 +118,34 @@ function applyJson() {
     message.value = '已从 JSON 载入到画布，记得保存'
   } catch (e) {
     error.value = errMessage(e, '流程图 JSON 无效')
+  }
+}
+
+async function saveMeta() {
+  if (!selected.value) {
+    return
+  }
+  const nextName = editName.value.trim()
+  if (!nextName) {
+    error.value = '应用名称不能为空'
+    return
+  }
+  busy.value = 'meta'
+  error.value = ''
+  message.value = ''
+  try {
+    const updated = await updateApp(selected.value.id, {
+      name: nextName,
+      description: editDescription.value.trim()
+    })
+    selected.value = updated
+    syncMetaForm(updated)
+    await refresh()
+    message.value = '应用信息已保存'
+  } catch (e) {
+    error.value = errMessage(e, '保存应用信息失败')
+  } finally {
+    busy.value = ''
   }
 }
 
@@ -118,6 +174,12 @@ async function publish() {
   if (!selected.value) {
     return
   }
+  if (metaDirty.value) {
+    await saveMeta()
+    if (error.value) {
+      return
+    }
+  }
   if (dirty.value) {
     await saveGraph()
     if (error.value) {
@@ -132,8 +194,38 @@ async function publish() {
     message.value = '已发布，可在问数页选择该应用'
     await refresh()
     selected.value = apps.value.find((item) => item.id === selected.value?.id) || selected.value
+    if (selected.value) {
+      syncMetaForm(selected.value)
+    }
   } catch (e) {
     error.value = errMessage(e)
+  } finally {
+    busy.value = ''
+  }
+}
+
+async function removeSelected() {
+  if (!selected.value || !canDeleteSelected.value) {
+    return
+  }
+  if (!confirm(`删除应用「${selected.value.name}」？发布入口也会失效（可恢复需重新创建）。`)) {
+    return
+  }
+  busy.value = 'delete'
+  error.value = ''
+  message.value = ''
+  try {
+    const id = selected.value.id
+    await deleteApp(id)
+    selected.value = null
+    flow.value = null
+    draftGraph.value = null
+    dirty.value = false
+    metaDirty.value = false
+    await refresh()
+    message.value = '应用已删除'
+  } catch (e) {
+    error.value = errMessage(e, '删除失败')
   } finally {
     busy.value = ''
   }
@@ -146,6 +238,9 @@ function statusLabel(status: string) {
   if (status === 'draft') {
     return '草稿'
   }
+  if (status === 'archived') {
+    return '已归档'
+  }
   return status
 }
 </script>
@@ -155,7 +250,7 @@ function statusLabel(status: string) {
     <header class="module-head">
       <div class="head-main">
         <h1 id="apps-title">问数应用</h1>
-        <p class="hint">拖拽编排流程图，发布后在「智能问数」里选用。</p>
+        <p class="hint">创建、编辑、发布与删除应用；拖拽编排流程后可在「智能问数」里选用。</p>
       </div>
     </header>
 
@@ -165,6 +260,7 @@ function statusLabel(status: string) {
     <div class="layout">
       <aside class="side" aria-label="应用列表">
         <form class="create" @submit.prevent="create">
+          <h3>新建</h3>
           <label>
             名称
             <input v-model="name" type="text" maxlength="64" placeholder="例如：值班助手" />
@@ -202,11 +298,14 @@ function statusLabel(status: string) {
       <main v-if="selected && flow && draftGraph" class="detail" aria-label="应用详情">
         <header class="detail-head">
           <div>
-            <h2>{{ selected.name }} <span v-if="dirty" class="dirty">未保存</span></h2>
-            <p class="hint">{{ selected.description || '无说明' }}</p>
+            <h2>
+              {{ selected.name }}
+              <span v-if="dirty || metaDirty" class="dirty">未保存</span>
+            </h2>
             <p class="meta">流程 {{ flow.id }} · 状态 {{ statusLabel(selected.status) }}</p>
           </div>
           <div class="actions">
+            <button type="button" :disabled="!!busy || !metaDirty" @click="saveMeta">保存信息</button>
             <button type="button" :disabled="!!busy || !dirty" @click="saveGraph">保存草稿</button>
             <button class="primary" type="button" :disabled="!!busy" @click="publish">发布应用</button>
             <button
@@ -217,11 +316,44 @@ function statusLabel(status: string) {
             >
               在问数中打开
             </button>
+            <button
+              v-if="canDeleteSelected"
+              type="button"
+              class="danger"
+              :disabled="!!busy"
+              @click="removeSelected"
+            >
+              删除应用
+            </button>
             <button type="button" class="ghost" @click="showJson = !showJson">
               {{ showJson ? '收起 JSON' : '高级 JSON' }}
             </button>
           </div>
         </header>
+
+        <form class="meta-form" aria-label="应用信息" @submit.prevent="saveMeta">
+          <label>
+            名称
+            <input
+              v-model="editName"
+              type="text"
+              maxlength="64"
+              required
+              :disabled="!!busy"
+              @input="onMetaInput"
+            />
+          </label>
+          <label>
+            说明
+            <input
+              v-model="editDescription"
+              type="text"
+              maxlength="200"
+              :disabled="!!busy"
+              @input="onMetaInput"
+            />
+          </label>
+        </form>
 
         <FlowDagEditor
           :key="flow.id"
@@ -239,7 +371,7 @@ function statusLabel(status: string) {
         </div>
       </main>
       <main v-else class="detail empty">
-        <p class="hint">选择左侧应用，或从模板新建。</p>
+        <p class="hint">选择左侧应用查看与编辑，或从模板新建。</p>
       </main>
     </div>
   </section>
@@ -295,6 +427,21 @@ function statusLabel(status: string) {
   gap: 8px;
 }
 
+.create h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.meta-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
 label {
   display: flex;
   flex-direction: column;
@@ -312,6 +459,10 @@ textarea {
   background: var(--panel-2);
   color: var(--text);
   font: inherit;
+}
+
+.meta-form input {
+  background: var(--panel);
 }
 
 .list {
@@ -349,6 +500,10 @@ textarea {
 .meta {
   font-size: 11px;
   color: var(--muted);
+}
+
+.detail-head .meta {
+  margin: 4px 0 0;
 }
 
 .detail {
@@ -418,11 +573,23 @@ button.ghost {
   background: transparent;
 }
 
+button.danger {
+  color: #f2b8b5;
+  border-color: #5c2222;
+  background: transparent;
+}
+
 button {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 14px;
   background: var(--panel-2);
   color: var(--text);
+}
+
+@media (max-width: 900px) {
+  .meta-form {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

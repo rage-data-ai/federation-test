@@ -482,7 +482,8 @@ public class FederationProperties {
     }
 
     public static class Cors {
-        private String allowedOrigins = "http://localhost:5173,http://localhost:18080";
+        private String allowedOrigins =
+                "http://localhost:5173,http://127.0.0.1:5173,http://localhost:18080,http://127.0.0.1:18080";
 
         public String getAllowedOrigins() {
             return allowedOrigins;
