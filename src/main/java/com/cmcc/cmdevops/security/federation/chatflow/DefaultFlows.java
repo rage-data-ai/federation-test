@@ -22,9 +22,9 @@ public final class DefaultFlows {
         return FlowGraph.of(
                 "start",
                 List.of(
-                        new FlowNode("start", "start", "开始", Map.of()),
-                        new FlowNode("ask", "builtin_ask", "智能问数", Map.of()),
-                        new FlowNode("end", "end", "结束", Map.of())),
+                        new FlowNode("start", "start", "开始", Map.of("x", 40, "y", 120)),
+                        new FlowNode("ask", "builtin_ask", "智能问数", Map.of("x", 260, "y", 120)),
+                        new FlowNode("end", "end", "结束", Map.of("x", 500, "y", 120))),
                 List.of(
                         new FlowEdge("start", "ask", "default"),
                         new FlowEdge("ask", "end", "default")));
@@ -34,15 +34,19 @@ public final class DefaultFlows {
         return FlowGraph.of(
                 "start",
                 List.of(
-                        new FlowNode("start", "start", "开始", Map.of()),
+                        new FlowNode("start", "start", "开始", Map.of("x", 40, "y", 120)),
                         new FlowNode(
                                 "chat",
                                 "llm_chat",
                                 "大模型对话",
                                 Map.of(
+                                        "x",
+                                        260,
+                                        "y",
+                                        120,
                                         "systemPrompt",
                                         "你是跨源联邦查询控制台里的对话助手。用简洁中文回答；不确定时说明假设。")),
-                        new FlowNode("end", "end", "结束", Map.of())),
+                        new FlowNode("end", "end", "结束", Map.of("x", 500, "y", 120))),
                 List.of(
                         new FlowEdge("start", "chat", "default"),
                         new FlowEdge("chat", "end", "default")));
