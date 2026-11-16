@@ -316,6 +316,7 @@ export type AskSuggestionPatch = {
 }
 
 export type AskKnowledgeStatus = 'pending' | 'approved' | 'rejected'
+export type AskKnowledgeKind = 'smart_ask' | 'general'
 
 export type AskAnswerPair = {
   answer: string
@@ -323,13 +324,14 @@ export type AskAnswerPair = {
   caliber: Array<Record<string, unknown>>
 }
 
-/** 问数共享知识正本；检索只对 question，答案对与证据从这里取。 */
+/** 共享知识正本；检索只对 question，答案对与证据从这里取。 */
 export type AskKnowledge = {
   id: number
   question: string
   answerPair: AskAnswerPair
   evidence: Record<string, unknown>
   sourceRunId: string | null
+  kind: AskKnowledgeKind
   status: AskKnowledgeStatus
   createdBy: string
   reviewedBy: string | null
@@ -345,6 +347,7 @@ export type AskKnowledgePatch = {
   sql?: string | null
   caliber?: Array<Record<string, unknown>>
   evidence?: Record<string, unknown>
+  kind?: AskKnowledgeKind
   status?: AskKnowledgeStatus
   reviewNote?: string | null
 }

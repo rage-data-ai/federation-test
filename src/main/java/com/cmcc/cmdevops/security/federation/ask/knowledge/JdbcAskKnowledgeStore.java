@@ -38,11 +38,12 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
 
     @Override
     public AskKnowledge save(AskKnowledge item) {
+        String kind = item.kindOrDefault();
         if (item.id() > 0) {
             jdbc.update("""
                     UPDATE fed_ask_knowledge
                     SET question = ?, answer = ?, sql_text = ?, caliber = ?, evidence = ?, source_run_id = ?,
-                        status = ?, created_by = ?, reviewed_by = ?, review_note = ?, updated_at = ?
+                        kind = ?, status = ?, created_by = ?, reviewed_by = ?, review_note = ?, updated_at = ?
                     WHERE id = ?
                     """,
                     item.question(),
@@ -51,6 +52,7 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
                     write(item.answerPair().caliber() == null ? List.of() : item.answerPair().caliber()),
                     write(item.evidence() == null ? Map.of() : item.evidence()),
                     item.sourceRunId(),
+                    kind,
                     item.status(),
                     item.createdBy(),
                     item.reviewedBy(),
@@ -63,9 +65,9 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
         jdbc.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO fed_ask_knowledge
-                      (question, answer, sql_text, caliber, evidence, source_run_id, status,
+                      (question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
                        created_by, reviewed_by, review_note, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
             statement.setString(1, item.question());
             statement.setString(2, item.answerPair().answer());
@@ -73,12 +75,13 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
             statement.setString(4, write(item.answerPair().caliber() == null ? List.of() : item.answerPair().caliber()));
             statement.setString(5, write(item.evidence() == null ? Map.of() : item.evidence()));
             statement.setString(6, item.sourceRunId());
-            statement.setString(7, item.status());
-            statement.setString(8, item.createdBy());
-            statement.setString(9, item.reviewedBy());
-            statement.setString(10, item.reviewNote());
-            statement.setLong(11, item.createdAt());
-            statement.setLong(12, item.updatedAt());
+            statement.setString(7, kind);
+            statement.setString(8, item.status());
+            statement.setString(9, item.createdBy());
+            statement.setString(10, item.reviewedBy());
+            statement.setString(11, item.reviewNote());
+            statement.setLong(12, item.createdAt());
+            statement.setLong(13, item.updatedAt());
             return statement;
         }, keys);
         Number key = keys.getKey();
@@ -91,7 +94,7 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
     @Override
     public Optional<AskKnowledge> find(long id) {
         List<AskKnowledge> rows = jdbc.query("""
-                SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, status,
+                SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
                        created_by, reviewed_by, review_note, created_at, updated_at
                 FROM fed_ask_knowledge WHERE id = ?
                 """, mapper(), id);
@@ -102,13 +105,13 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
     public List<AskKnowledge> list(String status) {
         if (status == null || status.isBlank()) {
             return jdbc.query("""
-                    SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, status,
+                    SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
                            created_by, reviewed_by, review_note, created_at, updated_at
                     FROM fed_ask_knowledge ORDER BY updated_at DESC
                     """, mapper());
         }
         return jdbc.query("""
-                SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, status,
+                SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
                        created_by, reviewed_by, review_note, created_at, updated_at
                 FROM fed_ask_knowledge WHERE status = ? ORDER BY updated_at DESC
                 """, mapper(), status);
@@ -121,7 +124,7 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
         }
         String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
         List<AskKnowledge> rows = jdbc.query("""
-                SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, status,
+                SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
                        created_by, reviewed_by, review_note, created_at, updated_at
                 FROM fed_ask_knowledge WHERE id IN (%s)
                 """.formatted(placeholders), mapper(), ids.toArray());
@@ -145,21 +148,25 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
     }
 
     private RowMapper<AskKnowledge> mapper() {
-        return (rs, rowNum) -> new AskKnowledge(
-                rs.getLong("id"),
-                rs.getString("question"),
-                new AnswerPair(
-                        rs.getString("answer"),
-                        rs.getString("sql_text"),
-                        readList(rs.getString("caliber"))),
-                readMap(rs.getString("evidence")),
-                rs.getString("source_run_id"),
-                rs.getString("status"),
-                rs.getString("created_by"),
-                rs.getString("reviewed_by"),
-                rs.getString("review_note"),
-                rs.getLong("created_at"),
-                rs.getLong("updated_at"));
+        return (rs, rowNum) -> {
+            String kind = rs.getString("kind");
+            return new AskKnowledge(
+                    rs.getLong("id"),
+                    rs.getString("question"),
+                    new AnswerPair(
+                            rs.getString("answer"),
+                            rs.getString("sql_text"),
+                            readList(rs.getString("caliber"))),
+                    readMap(rs.getString("evidence")),
+                    rs.getString("source_run_id"),
+                    kind == null || kind.isBlank() ? AskKnowledge.KIND_SMART_ASK : kind,
+                    rs.getString("status"),
+                    rs.getString("created_by"),
+                    rs.getString("reviewed_by"),
+                    rs.getString("review_note"),
+                    rs.getLong("created_at"),
+                    rs.getLong("updated_at"));
+        };
     }
 
     private String write(Object value) {

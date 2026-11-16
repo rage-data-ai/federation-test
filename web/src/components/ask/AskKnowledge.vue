@@ -7,7 +7,7 @@ import {
   updateAskKnowledge
 } from '../../api'
 import { formatTime } from '../../composables/useAskSuggestions'
-import type { AskKnowledge, AskKnowledgeStatus, AuthMe } from '../../types'
+import type { AskKnowledge, AskKnowledgeKind, AskKnowledgeStatus, AuthMe } from '../../types'
 import { errMessage } from '../../types'
 
 const STATUS_LABEL: Record<AskKnowledgeStatus, string> = {
@@ -16,17 +16,23 @@ const STATUS_LABEL: Record<AskKnowledgeStatus, string> = {
   rejected: '已驳回'
 }
 
+const KIND_LABEL: Record<AskKnowledgeKind, string> = {
+  smart_ask: '智能问数',
+  general: '通用'
+}
+
 const authUser = inject<Ref<AuthMe | null>>('authUser', ref(null))
 const admin = computed(() => !!authUser.value?.roles?.includes('ADMIN'))
 
 const items = ref<AskKnowledge[]>([])
 const status = ref<AskKnowledgeStatus | ''>('')
+const kind = ref<AskKnowledgeKind | ''>('')
 const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
 let latest = 0
 
-const draft = reactive({ question: '', answer: '', sql: '' })
+const draft = reactive({ question: '', answer: '', sql: '', kind: 'smart_ask' as AskKnowledgeKind })
 const reviewing = reactive<{ id: number; status: AskKnowledgeStatus; note: string }>({
   id: 0,
   status: 'approved',
@@ -34,14 +40,14 @@ const reviewing = reactive<{ id: number; status: AskKnowledgeStatus; note: strin
 })
 
 onMounted(load)
-watch(status, load)
+watch([status, kind], load)
 watch(authUser, load)
 
 async function load() {
   const ticket = ++latest
   loading.value = true
   try {
-    const list = await listAskKnowledge(status.value)
+    const list = await listAskKnowledge(status.value, kind.value || undefined)
     if (ticket === latest) {
       items.value = list
       error.value = ''
@@ -69,7 +75,8 @@ async function submitDraft() {
     await createAskKnowledge({
       question,
       answer,
-      sql: draft.sql.trim() || null
+      sql: draft.sql.trim() || null,
+      kind: draft.kind
     })
     draft.question = ''
     draft.answer = ''
@@ -144,6 +151,12 @@ async function removeItem(item: AskKnowledge) {
         <textarea v-model="draft.answer" rows="2" maxlength="8000" placeholder="自然语言结论" />
       </label>
       <label>
+        类型
+        <select v-model="draft.kind">
+          <option v-for="(label, key) in KIND_LABEL" :key="key" :value="key">{{ label }}</option>
+        </select>
+      </label>
+      <label>
         SQL（可选）
         <textarea v-model="draft.sql" rows="2" maxlength="8000" placeholder="对应查询 SQL" />
       </label>
@@ -160,6 +173,13 @@ async function removeItem(item: AskKnowledge) {
           <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">{{ label }}</option>
         </select>
       </label>
+      <label class="inline">
+        类型
+        <select v-model="kind">
+          <option value="">全部</option>
+          <option v-for="(label, key) in KIND_LABEL" :key="key" :value="key">{{ label }}</option>
+        </select>
+      </label>
       <button type="button" :disabled="loading" @click="load">刷新</button>
       <span class="hint" role="status">{{ loading ? '加载中…' : `${items.length} 条` }}</span>
     </div>
@@ -174,6 +194,7 @@ async function removeItem(item: AskKnowledge) {
       <li v-for="item in items" :key="item.id" class="item">
         <div class="meta">
           <span class="state" :class="item.status">{{ STATUS_LABEL[item.status] }}</span>
+          <span class="hint">{{ KIND_LABEL[item.kind || 'smart_ask'] }}</span>
           <span class="hint">{{ item.createdBy }} · {{ formatTime(item.createdAt) }}</span>
           <span v-if="item.sourceRunId" class="hint">来源问数 {{ item.sourceRunId }}</span>
         </div>

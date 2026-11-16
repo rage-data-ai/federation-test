@@ -50,6 +50,7 @@ public class AskKnowledgeService {
             String sql,
             List<Map<String, Object>> caliber,
             Map<String, Object> evidence,
+            String kind,
             String status,
             String reviewNote) {
     }
@@ -79,6 +80,7 @@ public class AskKnowledgeService {
                 new AnswerPair(answer, run == null ? null : run.sql(), List.of()),
                 evidence,
                 run == null ? null : run.id(),
+                AskKnowledge.KIND_SMART_ASK,
                 AskKnowledge.PENDING,
                 GatewayUser.current().name(),
                 null,
@@ -119,6 +121,7 @@ public class AskKnowledgeService {
                         caliber),
                 evidence,
                 run.id(),
+                AskKnowledge.KIND_SMART_ASK,
                 AskKnowledge.PENDING,
                 GatewayUser.current().name(),
                 null,
@@ -127,8 +130,22 @@ public class AskKnowledgeService {
                 now));
     }
 
-    public AskKnowledge create(String question, String answer, String sql, List<Map<String, Object>> caliber,
+    public AskKnowledge create(
+            String question,
+            String answer,
+            String sql,
+            List<Map<String, Object>> caliber,
             Map<String, Object> evidence) {
+        return create(question, answer, sql, caliber, evidence, AskKnowledge.KIND_SMART_ASK);
+    }
+
+    public AskKnowledge create(
+            String question,
+            String answer,
+            String sql,
+            List<Map<String, Object>> caliber,
+            Map<String, Object> evidence,
+            String kind) {
         long now = clock.getAsLong();
         boolean admin = GatewayUser.current().hasRole(GatewayRole.ADMIN);
         AskKnowledge saved = store.save(new AskKnowledge(
@@ -140,6 +157,7 @@ public class AskKnowledgeService {
                         caliber == null ? List.of() : caliber),
                 evidence == null ? Map.of() : evidence,
                 null,
+                normalizeKind(kind),
                 admin ? AskKnowledge.APPROVED : AskKnowledge.PENDING,
                 GatewayUser.current().name(),
                 admin ? GatewayUser.current().name() : null,
@@ -155,17 +173,21 @@ public class AskKnowledgeService {
     }
 
     public List<AskKnowledge> list(String status) {
+        return list(status, null);
+    }
+
+    public List<AskKnowledge> list(String status, String kind) {
         if (status != null && !status.isBlank() && !AskKnowledge.STATUSES.contains(status)) {
             throw new IllegalArgumentException("未知的知识状态：" + status);
         }
+        String kindFilter = kind == null || kind.isBlank() ? null : normalizeKind(kind);
         GatewayUser user = GatewayUser.current();
         boolean admin = user.hasRole(GatewayRole.ADMIN);
         List<AskKnowledge> items = store.list(status == null || status.isBlank() ? null : status);
-        if (admin) {
-            return items;
-        }
         return items.stream()
-                .filter(item -> AskKnowledge.APPROVED.equals(item.status())
+                .filter(item -> kindFilter == null || kindFilter.equals(item.kindOrDefault()))
+                .filter(item -> admin
+                        || AskKnowledge.APPROVED.equals(item.status())
                         || user.name().equals(item.createdBy()))
                 .toList();
     }
@@ -203,6 +225,10 @@ public class AskKnowledgeService {
             evidence = patch.evidence();
         }
 
+        String kind = current.kindOrDefault();
+        if (patch.kind() != null) {
+            kind = normalizeKind(patch.kind());
+        }
         String status = current.status();
         String reviewedBy = current.reviewedBy();
         String reviewNote = current.reviewNote();
@@ -230,6 +256,7 @@ public class AskKnowledgeService {
                 new AnswerPair(answer, sql, caliber == null ? List.of() : caliber),
                 evidence == null ? Map.of() : evidence,
                 current.sourceRunId(),
+                kind,
                 status,
                 current.createdBy(),
                 reviewedBy,
@@ -255,10 +282,15 @@ public class AskKnowledgeService {
         vectors.delete(id);
     }
 
-    /** 问数路径用：按问题召回已通过的知识，按相似度降序。 */
+    /** 问数路径用：按问题召回已通过的智能问数知识，按相似度降序。 */
     public List<Match> search(String question, int topK) {
+        return search(question, topK, AskKnowledge.KIND_SMART_ASK);
+    }
+
+    public List<Match> search(String question, int topK, String kind) {
         String text = requireText(question, "问题", MAX_QUESTION);
-        List<KnowledgeVectorIndex.Hit> hits = vectors.search(text, Math.max(1, topK));
+        String kindFilter = normalizeKind(kind);
+        List<KnowledgeVectorIndex.Hit> hits = vectors.search(text, Math.max(1, topK * 3));
         if (hits.isEmpty()) {
             return List.of();
         }
@@ -269,19 +301,36 @@ public class AskKnowledgeService {
         List<AskKnowledge> items = store.findByIds(new ArrayList<>(scores.keySet()));
         List<Match> matches = new ArrayList<>();
         for (AskKnowledge item : items) {
-            if (AskKnowledge.APPROVED.equals(item.status())) {
+            if (AskKnowledge.APPROVED.equals(item.status()) && kindFilter.equals(item.kindOrDefault())) {
                 matches.add(new Match(item, scores.getOrDefault(item.id(), 0.0)));
+                if (matches.size() >= Math.max(1, topK)) {
+                    break;
+                }
             }
         }
         return matches;
     }
 
-    /** 审核通过后把问题向量写入索引；驳回或待审则从索引去掉。 */
+    private static String normalizeKind(String kind) {
+        String value = kind == null || kind.isBlank() ? AskKnowledge.KIND_SMART_ASK : kind.strip();
+        if (!AskKnowledge.KINDS.contains(value)) {
+            throw new IllegalArgumentException("未知的知识类型：" + kind + "（可用：smart_ask、general）");
+        }
+        return value;
+    }
+
+    /** 审核通过后把问题向量写入索引；驳回或待审则从索引去掉。向量同步失败不阻断业务。 */
     void syncVector(AskKnowledge item) {
-        if (AskKnowledge.APPROVED.equals(item.status())) {
-            vectors.upsert(item.id(), item.question());
-        } else {
-            vectors.delete(item.id());
+        try {
+            if (AskKnowledge.APPROVED.equals(item.status())) {
+                vectors.upsert(item.id(), item.question());
+            } else {
+                vectors.delete(item.id());
+            }
+        } catch (RuntimeException e) {
+            // KnowledgeVectorIndex 已尽量吞掉 Milvus 错误；这里再兜底一次。
+            org.slf4j.LoggerFactory.getLogger(AskKnowledgeService.class)
+                    .warn("知识向量同步失败 id={}: {}", item.id(), e.toString());
         }
     }
 
@@ -296,6 +345,7 @@ public class AskKnowledgeService {
 
     private static boolean same(AskKnowledge a, AskKnowledge b) {
         return Objects.equals(a.question(), b.question())
+                && Objects.equals(a.kindOrDefault(), b.kindOrDefault())
                 && Objects.equals(a.answerPair(), b.answerPair())
                 && Objects.equals(a.evidence(), b.evidence())
                 && Objects.equals(a.status(), b.status())

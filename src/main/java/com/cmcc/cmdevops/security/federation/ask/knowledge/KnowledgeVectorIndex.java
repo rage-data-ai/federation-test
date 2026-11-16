@@ -70,13 +70,18 @@ public class KnowledgeVectorIndex {
         if (milvus == null) {
             return;
         }
-        ensureCollection();
-        post("/v2/vectordb/entities/upsert", Map.of(
-                "collectionName", COLLECTION,
-                "data", List.of(Map.of(
-                        "id", id,
-                        "vector", toList(vector),
-                        "question", question == null ? "" : question))));
+        try {
+            ensureCollection();
+            post("/v2/vectordb/entities/upsert", Map.of(
+                    "collectionName", COLLECTION,
+                    "data", List.of(Map.of(
+                            "id", id,
+                            "vector", toList(vector),
+                            "question", question == null ? "" : question))));
+        } catch (RuntimeException e) {
+            // Milvus 不是知识库必选；本机内存索引仍可用，避免审核/创建被拖垮。
+            log.warn("Milvus 写入知识向量失败，已保留内存索引 id={}: {}", id, e.toString());
+        }
     }
 
     public void delete(long id) {
@@ -99,19 +104,24 @@ public class KnowledgeVectorIndex {
         if (milvus == null) {
             return memorySearch(query, limit);
         }
-        ensureCollection();
         try {
-            post("/v2/vectordb/collections/load", Map.of("collectionName", COLLECTION));
-        } catch (RuntimeException ignored) {
-            // 已加载时可能报错，忽略
+            ensureCollection();
+            try {
+                post("/v2/vectordb/collections/load", Map.of("collectionName", COLLECTION));
+            } catch (RuntimeException ignored) {
+                // 已加载时可能报错，忽略
+            }
+            String response = post("/v2/vectordb/entities/search", Map.of(
+                    "collectionName", COLLECTION,
+                    "data", List.of(toList(query)),
+                    "annsField", "vector",
+                    "limit", Math.max(1, limit),
+                    "outputFields", List.of("id", "question")));
+            return parseHits(response);
+        } catch (RuntimeException e) {
+            log.warn("Milvus 检索失败，回退内存索引: {}", e.toString());
+            return memorySearch(query, limit);
         }
-        String response = post("/v2/vectordb/entities/search", Map.of(
-                "collectionName", COLLECTION,
-                "data", List.of(toList(query)),
-                "annsField", "vector",
-                "limit", Math.max(1, limit),
-                "outputFields", List.of("id", "question")));
-        return parseHits(response);
     }
 
     private List<Hit> memorySearch(float[] query, int limit) {

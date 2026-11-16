@@ -501,6 +501,11 @@ public class FederationProperties {
         private int sampleRows = 3;
         private int resultPreviewRows = 50;
         /**
+         * 对话记忆窗口：带入模型的最近 history 条数（user+assistant 消息合计）。
+         * 0 表示不截断。应用开始节点 config.memoryWindowTurns 可覆盖。
+         */
+        private int historyWindowTurns = 12;
+        /**
          * OpenAI 兼容 embeddings 端点（NIM / 自建）。空则使用本地哈希嵌入。
          * 例：{@code https://integrate.api.nvidia.com/v1} 或完整 {@code .../v1/embeddings}
          */
@@ -562,6 +567,14 @@ public class FederationProperties {
 
         public void setResultPreviewRows(int resultPreviewRows) {
             this.resultPreviewRows = resultPreviewRows;
+        }
+
+        public int getHistoryWindowTurns() {
+            return historyWindowTurns;
+        }
+
+        public void setHistoryWindowTurns(int historyWindowTurns) {
+            this.historyWindowTurns = Math.max(0, historyWindowTurns);
         }
 
         public String getEmbedEndpoint() {

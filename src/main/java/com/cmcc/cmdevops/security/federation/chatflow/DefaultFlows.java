@@ -16,7 +16,7 @@ public final class DefaultFlows {
     public static final String DEFAULT_APP_ID = "app-builtin-ask";
     public static final String DEFAULT_FLOW_ID = "flow-builtin-ask";
 
-    /** 问数阶段节点（画布展开；运行时可由 FlowRunner 折叠为一次 AskService.ask）。 */
+    /** 问数阶段节点（白盒拆跑；按 outcome 选边）。 */
     public static final Set<String> ASK_STAGE_TYPES = Set.of("knowledge", "ontology", "metadata", "insight");
 
     private DefaultFlows() {
@@ -36,11 +36,73 @@ public final class DefaultFlows {
         return FlowGraph.of(
                 "start",
                 List.of(
-                        new FlowNode("start", "start", "开始", Map.of("x", 40, "y", 140)),
-                        new FlowNode("knowledge", "knowledge", "知识库", Map.of("x", 240, "y", 140)),
-                        new FlowNode("ontology", "ontology", "本体", Map.of("x", 460, "y", 140)),
-                        new FlowNode("metadata", "metadata", "元数据", Map.of("x", 680, "y", 140)),
-                        new FlowNode("insight", "insight", "SQL 洞察", Map.of("x", 900, "y", 140)),
+                        new FlowNode(
+                                "start",
+                                "start",
+                                "开始",
+                                Map.of("x", 40, "y", 140, "memoryWindowTurns", 12)),
+                        new FlowNode(
+                                "knowledge",
+                                "knowledge",
+                                "知识库",
+                                Map.of(
+                                        "x",
+                                        240,
+                                        "y",
+                                        140,
+                                        "topK",
+                                        5,
+                                        "skills",
+                                        List.of("knowledge"),
+                                        "inputs",
+                                        Map.of("query", "{{#sys.query#}}", "topK", 5))),
+                        new FlowNode(
+                                "ontology",
+                                "ontology",
+                                "本体",
+                                Map.of(
+                                        "x",
+                                        460,
+                                        "y",
+                                        140,
+                                        "skills",
+                                        List.of("ontology"),
+                                        "inputs",
+                                        Map.of(
+                                                "query",
+                                                "{{#sys.query#}}",
+                                                "skills",
+                                                List.of("ontology")))),
+                        new FlowNode(
+                                "metadata",
+                                "metadata",
+                                "元数据",
+                                Map.of(
+                                        "x",
+                                        680,
+                                        "y",
+                                        140,
+                                        "recover",
+                                        true,
+                                        "inputs",
+                                        Map.of("recover", true))),
+                        new FlowNode(
+                                "insight",
+                                "insight",
+                                "SQL 洞察",
+                                Map.of(
+                                        "x",
+                                        900,
+                                        "y",
+                                        140,
+                                        "skills",
+                                        List.of("sql", "preference"),
+                                        "inputs",
+                                        Map.of(
+                                                "query",
+                                                "{{#sys.query#}}",
+                                                "skills",
+                                                List.of("sql", "preference")))),
                         new FlowNode("end", "end", "结束", Map.of("x", 1120, "y", 140))),
                 List.of(
                         new FlowEdge("start", "knowledge", "default"),
@@ -64,7 +126,11 @@ public final class DefaultFlows {
         return FlowGraph.of(
                 "start",
                 List.of(
-                        new FlowNode("start", "start", "开始", Map.of("x", 40, "y", 120)),
+                        new FlowNode(
+                                "start",
+                                "start",
+                                "开始",
+                                Map.of("x", 40, "y", 120, "memoryWindowTurns", 12)),
                         new FlowNode("ask", "builtin_ask", "智能问数", Map.of("x", 260, "y", 120)),
                         new FlowNode("end", "end", "结束", Map.of("x", 500, "y", 120))),
                 List.of(
@@ -76,7 +142,11 @@ public final class DefaultFlows {
         return FlowGraph.of(
                 "start",
                 List.of(
-                        new FlowNode("start", "start", "开始", Map.of("x", 40, "y", 120)),
+                        new FlowNode(
+                                "start",
+                                "start",
+                                "开始",
+                                Map.of("x", 40, "y", 120, "memoryWindowTurns", 12)),
                         new FlowNode(
                                 "chat",
                                 "llm_chat",
@@ -87,7 +157,15 @@ public final class DefaultFlows {
                                         "y",
                                         120,
                                         "systemPrompt",
-                                        "你是跨源联邦查询控制台里的对话助手。用简洁中文回答；不确定时说明假设。")),
+                                        "你是跨源联邦查询控制台里的对话助手。用简洁中文回答；不确定时说明假设。",
+                                        "inputs",
+                                        Map.of(
+                                                "query",
+                                                "{{#sys.query#}}",
+                                                "systemPrompt",
+                                                "你是跨源联邦查询控制台里的对话助手。用简洁中文回答；不确定时说明假设。",
+                                                "skills",
+                                                List.of()))),
                         new FlowNode("end", "end", "结束", Map.of("x", 500, "y", 120))),
                 List.of(
                         new FlowEdge("start", "chat", "default"),

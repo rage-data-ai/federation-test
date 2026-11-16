@@ -20,10 +20,28 @@ export type NodeCatalogItem = {
 
 export const NODE_CATALOG: NodeCatalogItem[] = [
   { type: 'start', title: '开始', description: '流程入口', addable: false, color: '#3d8bfd' },
-  { type: 'knowledge', title: '知识库', description: '知识召回，命中可短路作答', addable: true, color: '#a98bff' },
-  { type: 'ontology', title: '本体', description: '业务语义检索与澄清', addable: true, color: '#ffc107' },
-  { type: 'metadata', title: '元数据', description: '核对映射表与列', addable: true, color: '#fd7e14' },
-  { type: 'insight', title: 'SQL 洞察', description: '规划并执行联邦 SQL', addable: true, color: '#20c997' },
+  {
+    type: 'knowledge',
+    title: '知识库',
+    description: '白盒：知识召回 + 判定；answered 可短路',
+    addable: true,
+    color: '#a98bff'
+  },
+  {
+    type: 'ontology',
+    title: '本体',
+    description: '白盒：确定性检索；可挂本体工具探索',
+    addable: true,
+    color: '#ffc107'
+  },
+  { type: 'metadata', title: '元数据', description: '白盒：核对映射表与列', addable: true, color: '#fd7e14' },
+  {
+    type: 'insight',
+    title: 'SQL 洞察',
+    description: '白盒：Analyst + SQL/偏好工具',
+    addable: true,
+    color: '#20c997'
+  },
   {
     type: 'builtin_ask',
     title: '智能问数（整段）',
@@ -31,7 +49,13 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
     addable: true,
     color: '#6ea8fe'
   },
-  { type: 'llm_chat', title: '大模型对话', description: '不跑联邦 SQL 的通用回复', addable: true, color: '#75b798' },
+  {
+    type: 'llm_chat',
+    title: '大模型对话',
+    description: '可勾选工具技能（本体/知识/偏好）',
+    addable: true,
+    color: '#75b798'
+  },
   { type: 'end', title: '结束', description: '流程出口', addable: true, color: '#adb5bd' }
 ]
 

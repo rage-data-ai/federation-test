@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledge;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
+// AskKnowledge.KIND_* used by search default
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService.KnowledgePatch;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService.Match;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
@@ -36,15 +37,20 @@ public class AskKnowledgeController {
             String answer,
             String sql,
             List<Map<String, Object>> caliber,
-            Map<String, Object> evidence) {
+            Map<String, Object> evidence,
+            String kind) {
     }
 
-    public record SearchBody(String question, Integer topK) {
+    public record SearchBody(String question, Integer topK, String kind) {
     }
 
     @GetMapping
-    public List<AskKnowledge> list(@RequestParam(name = "status", required = false) String status) {
-        return service.list(status == null || status.isBlank() ? null : status);
+    public List<AskKnowledge> list(
+            @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "kind", required = false) String kind) {
+        return service.list(
+                status == null || status.isBlank() ? null : status,
+                kind == null || kind.isBlank() ? null : kind);
     }
 
     @GetMapping("/{id}")
@@ -59,7 +65,8 @@ public class AskKnowledgeController {
                 body == null ? null : body.answer(),
                 body == null ? null : body.sql(),
                 body == null ? null : body.caliber(),
-                body == null ? null : body.evidence());
+                body == null ? null : body.evidence(),
+                body == null ? null : body.kind());
     }
 
     @PutMapping("/{id}")
@@ -77,6 +84,9 @@ public class AskKnowledgeController {
     @PostMapping("/search")
     public List<Match> search(@RequestBody SearchBody body) {
         int topK = body != null && body.topK() != null ? body.topK() : AskKnowledgeService.DEFAULT_TOP_K;
-        return service.search(body == null ? null : body.question(), topK);
+        String kind = body != null && body.kind() != null && !body.kind().isBlank()
+                ? body.kind()
+                : AskKnowledge.KIND_SMART_ASK;
+        return service.search(body == null ? null : body.question(), topK, kind);
     }
 }

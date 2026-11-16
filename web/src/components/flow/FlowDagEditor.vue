@@ -16,6 +16,8 @@ import {
   type DagNodeData
 } from '../../flow/graphAdapter'
 import { EDGE_WHEN_OPTIONS, NODE_CATALOG, catalogItem } from '../../flow/nodeCatalog'
+import { asRef, parseRef, portsFor, SYS_VARS } from '../../flow/nodePorts'
+import { SKILL_CATALOG, skillsForNode, type AskSkillId } from '../../flow/skillCatalog'
 import FlowNodeCard from './FlowNodeCard.vue'
 
 import '@vue-flow/core/dist/style.css'
@@ -147,7 +149,37 @@ function onNodeDragStop() {
   }
 }
 
-function addNode(type: string) {
+function defaultConfig(type: string): Record<string, unknown> {
+  const ports = portsFor(type)
+  const base: Record<string, unknown> = {
+    inputs: { ...ports.defaultInputs }
+  }
+  if (type === 'llm_chat') {
+    return {
+      ...base,
+      systemPrompt: String(ports.defaultInputs.systemPrompt || '你是有帮助的中文助手。'),
+      skills: [] as string[]
+    }
+  }
+  if (type === 'start') {
+    return { memoryWindowTurns: 12 }
+  }
+  if (type === 'knowledge') {
+    return { ...base, topK: 5, skills: ['knowledge'] }
+  }
+  if (type === 'ontology') {
+    return { ...base, skills: ['ontology'] }
+  }
+  if (type === 'metadata') {
+    return { ...base, recover: true }
+  }
+  if (type === 'insight') {
+    return { ...base, skills: ['sql', 'preference'] }
+  }
+  return base
+}
+
+function addNode(type: string, position?: { x: number; y: number }) {
   if (props.readonly) {
     return
   }
@@ -165,11 +197,11 @@ function addNode(type: string) {
     {
       id,
       type: 'flow',
-      position: { x: maxX + 220, y: avgY || 120 },
+      position: position || { x: maxX + 220, y: avgY || 120 },
       data: {
         flowType: type,
         title: meta.title,
-        config: type === 'llm_chat' ? { systemPrompt: '你是有帮助的中文助手。' } : {}
+        config: defaultConfig(type)
       },
       sourcePosition: 'right',
       targetPosition: 'left'
@@ -177,6 +209,134 @@ function addNode(type: string) {
   ]
   selectedNodeId.value = id
   selectedEdgeId.value = ''
+  commit()
+}
+
+function onPaletteDragStart(event: DragEvent, type: string) {
+  if (props.readonly || !event.dataTransfer) {
+    return
+  }
+  event.dataTransfer.setData('application/federation-node', type)
+  event.dataTransfer.effectAllowed = 'copy'
+}
+
+function onCanvasDragOver(event: DragEvent) {
+  if (props.readonly) {
+    return
+  }
+  event.preventDefault()
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function onCanvasDrop(event: DragEvent) {
+  if (props.readonly) {
+    return
+  }
+  event.preventDefault()
+  const type = event.dataTransfer?.getData('application/federation-node')
+  if (!type) {
+    return
+  }
+  const target = event.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  addNode(type, {
+    x: Math.max(0, event.clientX - rect.left - 80),
+    y: Math.max(0, event.clientY - rect.top - 24)
+  })
+}
+
+function toggleSkill(skillId: AskSkillId, enabled: boolean) {
+  if (!selectedNode.value) {
+    return
+  }
+  const data = nodeData(selectedNode.value)
+  const current = new Set(skillsForNode(data.flowType, data.config))
+  if (enabled) {
+    current.add(skillId)
+  } else {
+    current.delete(skillId)
+  }
+  const next = [...current]
+  updateNodeConfig('skills', next)
+  updateInputValue('skills', next)
+}
+
+function inputValue(config: Record<string, unknown>, name: string, fallback: unknown): unknown {
+  const inputs = (config.inputs || {}) as Record<string, unknown>
+  if (name in inputs) {
+    return inputs[name]
+  }
+  if (name in config) {
+    return config[name]
+  }
+  return fallback
+}
+
+function updateInputValue(name: string, value: unknown) {
+  if (!selectedNode.value) {
+    return
+  }
+  const data = nodeData(selectedNode.value)
+  const inputs = { ...((data.config.inputs || {}) as Record<string, unknown>), [name]: value }
+  updateNodeConfig('inputs', inputs)
+  if (name === 'topK' || name === 'systemPrompt' || name === 'recover' || name === 'skills') {
+    updateNodeConfig(name, value)
+  }
+}
+
+function availableVarPaths(currentNodeId: string): Array<{ path: string; label: string }> {
+  const paths: Array<{ path: string; label: string }> = SYS_VARS.map((item) => ({
+    path: item.path,
+    label: item.label
+  }))
+  for (const node of nodes.value) {
+    const data = nodeData(node)
+    if (node.id === currentNodeId) {
+      continue
+    }
+    for (const port of portsFor(data.flowType).outputs) {
+      paths.push({
+        path: `${String(node.id)}.${port.name}`,
+        label: `${data.title || node.id}.${port.label}`
+      })
+    }
+  }
+  return paths
+}
+
+function skillAllowed(flowType: string, skillId: AskSkillId): boolean {
+  if (flowType === 'llm_chat') {
+    return skillId === 'ontology' || skillId === 'preference' || skillId === 'knowledge'
+  }
+  if (flowType === 'ontology') {
+    return skillId === 'ontology'
+  }
+  if (flowType === 'insight') {
+    return skillId === 'sql' || skillId === 'preference'
+  }
+  if (flowType === 'knowledge') {
+    return skillId === 'knowledge'
+  }
+  return false
+}
+
+function updateNodeConfig(key: string, value: unknown) {
+  if (!selectedNode.value) {
+    return
+  }
+  const id = selectedNode.value.id
+  nodes.value = nodes.value.map((node) => {
+    if (node.id !== id) {
+      return node
+    }
+    const data = nodeData(node)
+    return {
+      ...node,
+      data: { ...data, config: { ...data.config, [key]: value } }
+    }
+  })
   commit()
 }
 
@@ -267,7 +427,9 @@ const selectedData = computed(() => nodeData(selectedNode.value))
         type="button"
         class="palette-item"
         :disabled="readonly"
+        draggable="true"
         :style="{ '--swatch': item.color }"
+        @dragstart="onPaletteDragStart($event, item.type)"
         @click="addNode(item.type)"
       >
         <span class="swatch" aria-hidden="true" />
@@ -276,10 +438,16 @@ const selectedData = computed(() => nodeData(selectedNode.value))
           <small>{{ item.description }}</small>
         </span>
       </button>
-      <p class="hint">从节点右侧把手拖到另一节点左侧可连线；点选边可改分支条件。</p>
+      <p class="hint">从左侧拖到画布添加节点（也可点击）；节点右侧把手连线；点选边改分支条件。</p>
     </aside>
 
-    <div class="canvas" role="application" aria-label="流程画布">
+    <div
+      class="canvas"
+      role="application"
+      aria-label="流程画布"
+      @dragover="onCanvasDragOver"
+      @drop="onCanvasDrop"
+    >
       <VueFlow
         v-model:nodes="nodes"
         v-model:edges="edges"
@@ -319,15 +487,147 @@ const selectedData = computed(() => nodeData(selectedNode.value))
             @change="updateNodeTitle(($event.target as HTMLInputElement).value)"
           />
         </label>
-        <label v-if="selectedData.flowType === 'llm_chat'">
-          系统提示词
-          <textarea
-            :value="String(selectedData.config.systemPrompt || '')"
-            rows="5"
+        <label v-if="selectedData.flowType === 'start'">
+          对话记忆（最近 N 条消息）
+          <input
+            :value="Number(selectedData.config.memoryWindowTurns ?? 12)"
+            type="number"
+            min="0"
+            max="100"
             :disabled="readonly"
-            @change="updateNodePrompt(($event.target as HTMLTextAreaElement).value)"
+            @change="
+              updateNodeConfig(
+                'memoryWindowTurns',
+                Number(($event.target as HTMLInputElement).value) || 0
+              )
+            "
           />
         </label>
+        <fieldset
+          v-if="portsFor(selectedData.flowType).inputs.length"
+          class="skills"
+          :disabled="readonly"
+        >
+          <legend>输入</legend>
+          <label
+            v-for="port in portsFor(selectedData.flowType).inputs"
+            :key="port.name"
+            class="io-field"
+          >
+            <span>
+              <strong>{{ port.label }}</strong>
+              <small>{{ port.description }}</small>
+            </span>
+            <template v-if="port.name === 'topK'">
+              <input
+                type="number"
+                min="1"
+                max="20"
+                :value="Number(inputValue(selectedData.config, 'topK', 5))"
+                :disabled="readonly"
+                @change="
+                  updateInputValue('topK', Number(($event.target as HTMLInputElement).value) || 5)
+                "
+              />
+            </template>
+            <template v-else-if="port.name === 'recover'">
+              <label class="check">
+                <input
+                  type="checkbox"
+                  :checked="inputValue(selectedData.config, 'recover', true) !== false"
+                  :disabled="readonly"
+                  @change="updateInputValue('recover', ($event.target as HTMLInputElement).checked)"
+                />
+                启用
+              </label>
+            </template>
+            <template v-else-if="port.name === 'skills'">
+              <span class="hint">见下方「工具技能」</span>
+            </template>
+            <template v-else-if="port.name === 'systemPrompt'">
+              <textarea
+                rows="4"
+                :value="String(inputValue(selectedData.config, 'systemPrompt', selectedData.config.systemPrompt || ''))"
+                :disabled="readonly"
+                @change="
+                  updateInputValue('systemPrompt', ($event.target as HTMLTextAreaElement).value)
+                "
+              />
+            </template>
+            <template v-else>
+              <select
+                :value="parseRef(inputValue(selectedData.config, port.name, portsFor(selectedData.flowType).defaultInputs[port.name])) || ''"
+                :disabled="readonly"
+                @change="
+                  updateInputValue(
+                    port.name,
+                    ($event.target as HTMLSelectElement).value
+                      ? asRef(($event.target as HTMLSelectElement).value)
+                      : ''
+                  )
+                "
+              >
+                <option value="">（字面量 / 空）</option>
+                <option
+                  v-for="item in availableVarPaths(selectedNode.id)"
+                  :key="item.path"
+                  :value="item.path"
+                >
+                  {{ item.path }} — {{ item.label }}
+                </option>
+              </select>
+              <input
+                v-if="!parseRef(inputValue(selectedData.config, port.name, ''))"
+                type="text"
+                :value="String(inputValue(selectedData.config, port.name, '') ?? '')"
+                :disabled="readonly"
+                placeholder="字面量或 {{#sys.query#}}"
+                @change="updateInputValue(port.name, ($event.target as HTMLInputElement).value)"
+              />
+            </template>
+          </label>
+        </fieldset>
+
+        <fieldset
+          v-if="portsFor(selectedData.flowType).outputs.length"
+          class="skills"
+        >
+          <legend>输出</legend>
+          <ul class="io-out">
+            <li v-for="port in portsFor(selectedData.flowType).outputs" :key="port.name">
+              <code>{{ selectedNode.id }}.{{ port.name }}</code>
+              <small>{{ port.label }} — {{ port.description }}</small>
+            </li>
+          </ul>
+          <p class="hint">下游可用双花括号 #节点ID.字段# 语法引用（与 Dify 相同）。</p>
+        </fieldset>
+
+        <fieldset
+          v-if="['llm_chat', 'ontology', 'insight', 'knowledge'].includes(selectedData.flowType)"
+          class="skills"
+          :disabled="readonly"
+        >
+          <legend>工具技能</legend>
+          <label
+            v-for="skill in SKILL_CATALOG.filter((item) => skillAllowed(selectedData.flowType, item.id))"
+            :key="skill.id"
+            class="check"
+          >
+            <input
+              type="checkbox"
+              :checked="skillsForNode(selectedData.flowType, selectedData.config).includes(skill.id)"
+              :disabled="readonly || (selectedData.flowType === 'insight' && skill.id === 'sql')"
+              @change="toggleSkill(skill.id, ($event.target as HTMLInputElement).checked)"
+            />
+            <span>
+              <strong>{{ skill.label }}</strong>
+              <small>{{ skill.description }}</small>
+            </span>
+          </label>
+          <p class="hint">
+            运行时按节点真实执行；入参/出参走变量池（Dify 式）。
+          </p>
+        </fieldset>
         <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除节点</button>
       </template>
       <template v-else-if="selectedEdge">
@@ -375,6 +675,64 @@ const selectedData = computed(() => nodeData(selectedNode.value))
   padding: 12px;
   background: var(--panel-2);
   overflow: auto;
+}
+
+.skills {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skills legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.check small {
+  display: block;
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.io-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.io-field small {
+  color: var(--muted);
+}
+
+.io-out {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.io-out code {
+  font-size: 11px;
+}
+
+.io-out small {
+  display: block;
+  color: var(--muted);
 }
 
 .palette {

@@ -223,7 +223,7 @@ public class FederalDataSource {
                 """);
     }
 
-    /** 问数知识正本：问题、问题–答案对、证据；向量在 Milvus，不进这张表。 */
+    /** 问数知识正本：问题、问题–答案对、证据；向量可选进 Milvus，不进这张表。 */
     private void ensureAskKnowledgeSchema() {
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS fed_ask_knowledge (
@@ -234,6 +234,7 @@ public class FederalDataSource {
                   caliber MEDIUMTEXT NOT NULL,
                   evidence MEDIUMTEXT NOT NULL,
                   source_run_id VARCHAR(36) NULL,
+                  kind VARCHAR(32) NOT NULL DEFAULT 'smart_ask',
                   status VARCHAR(16) NOT NULL,
                   created_by VARCHAR(255) NOT NULL,
                   reviewed_by VARCHAR(255) NULL,
@@ -241,11 +242,21 @@ public class FederalDataSource {
                   created_at BIGINT NOT NULL,
                   updated_at BIGINT NOT NULL,
                   KEY idx_fed_ask_knowledge_status (status, updated_at),
+                  KEY idx_fed_ask_knowledge_kind (kind, status, updated_at),
                   KEY idx_fed_ask_knowledge_run (source_run_id),
                   CONSTRAINT fk_fed_ask_knowledge_run FOREIGN KEY (source_run_id)
                     REFERENCES fed_ask_run (id) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        if (!columnExists("fed_ask_knowledge", "kind")) {
+            jdbc.execute("""
+                    ALTER TABLE fed_ask_knowledge
+                      ADD COLUMN kind VARCHAR(32) NOT NULL DEFAULT 'smart_ask' AFTER source_run_id
+                    """);
+            jdbc.execute("""
+                    CREATE INDEX idx_fed_ask_knowledge_kind ON fed_ask_knowledge (kind, status, updated_at)
+                    """);
+        }
     }
 
     /** 问数补充提示词：全局 / 个人，版本追加，生效态单独标记。 */

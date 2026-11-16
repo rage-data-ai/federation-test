@@ -10,11 +10,16 @@
 - 问数流程画布：Vue Flow 可拖拽 DAG（节点/连线/分支条件）
 - 问数应用增删改查入口：编辑名称/说明、删除（归档）；`DELETE /api/v1/apps/{id}`
 - 智能问数 DAG 展开为知识库 / 本体 / 元数据 / SQL 洞察四阶段（运行仍折叠为一次 AskService）
+- 知识库独立主菜单；类型 `smart_ask` / `general`；对话记忆窗口（开始节点 / 全局配置）
+- DAG 调色板支持拖到画布添加节点
+- ChatFlow 白盒拆跑：knowledge/ontology/metadata/insight 真实执行并按 outcome 选边；节点可配 `skills`（本体/知识/偏好/SQL）；`llm_chat` 可勾选工具技能
+- ChatFlow 节点入参/出参（Dify 变量）：`sys.*`、`{{#nodeId.field#}}`、`config.inputs`、运行时变量池与 `vars` 事件；画布 Inputs/Outputs 面板
 
 ### Changed
 
 - 默认 CORS 放行 `127.0.0.1:5173` / `:18080`（原先仅 localhost，本机 IP 访问会改删失败）
 - 内置「智能问数」启动时若仍为单节点 `builtin_ask` 图，自动迁移并重新发布
+- 知识向量：Milvus 可选；写入/检索失败回退进程内索引，不阻断审核与问数
 - 问数补充提示词文案对齐 Hermes：`global`≈`MEMORY.md`，`personal`≈`USER.md`
 
 ### Added
