@@ -392,10 +392,14 @@ button:disabled {
   padding: 28px 28px 24px;
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
   border-radius: 16px;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
   box-shadow: var(--shadow);
   backdrop-filter: blur(10px);
   animation: auth-gate-in 280ms ease-out both;
+}
+
+.auth-gate__panel label {
+  color: color-mix(in srgb, var(--text) 78%, var(--muted));
 }
 
 .auth-gate__brand {
