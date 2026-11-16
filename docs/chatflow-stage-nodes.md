@@ -91,25 +91,17 @@ start → knowledge → ontology → metadata → insight → end
 
 ## 5. 最小后端改动路径
 
-### 方案 A — 扩图但保持单 Runner 路径（推荐一期）
+### 方案 A — 扩图但保持单 Runner 路径（一期，已落地后被 B 取代）
 
-**目标：** 画布与默认模板展示四阶段；行为仍等于今日 `AskService.ask`；不双轨 SQL。
+画布四阶段 + Runner 折叠为一次 `AskService.ask`（边条件当时未生效）。
 
-1. `DefaultFlows.builtinAsk()` 改为阶段图（建议节点 id：`knowledge` / `ontology` / `metadata` / `insight`）。
-2. `FlowRunner`：识别「规范问数子图」或任一阶段类型时，**折叠为一次** `askService.ask(...)`，然后跳到子图汇合后的后继（通常 `end`），`lastOutcome` 仍可先用 `default`。
-3. 若图同时含 `builtin_ask` 与阶段节点：拒绝保存/发布或运行时报清晰错误。
-4. 保留 `builtin_ask` 类型与模板别名，兼容已发布 Release JSON。
-5. **不**改 `POST /api/v1/ask` 契约与 SSE 事件序。
+### 方案 B — 阶段真正可运行（已落地）
 
-成本低；阶段边条件仍不可单独编排（跳过 knowledge 等需方案 B）。
-
-### 方案 B — 阶段真正可运行（二期）
-
-1. 从 `AskService` 抽出 `AskPipeline`（或 package-private stage runners），每阶段返回 `{ outcome, state }`。
-2. `FlowRunner` 持有 run-scoped `AskFlowState`：`BusinessContext`、`MetadataReport`、`metadataRecovered`、共享 `AskRunRecorder` / listener。
-3. 按节点类型调用对应 stage；用真实 outcome 选边。
-4. **单次** `run` 事件与落库：Recorder 提到 Runner（或 pipeline 外壳），避免 `builtin_ask`/`llm_chat` 与阶段各发一次 `run`。
-5. `insight` 仍唯一执行 SQL 的节点，继续走 `InsightSession` + `SqlGuard`。
+1. `AskService` 暴露 `runKnowledge` / `runOntology` / `runMetadata` / `runInsight`，返回 outcome；`AskFlowState` 在节点间传递。
+2. `FlowRunner` 对阶段图白盒拆跑：单次 `beginRun`/`finishRun`，按 outcome 选边。
+3. 节点 `config.skills` 绑定工具技能：`ontology` / `preference` / `knowledge` / `sql`（见 `AskSkillIds`）。
+4. `llm_chat` 可勾选本体/知识/偏好工具（Agent 模式）；`insight` 必选 `sql`。
+5. `insight` 仍唯一执行 SQL 的节点，继续走 `InsightSession` + `SqlGuard`；SSE 事件名不变。
 
 ### 明确不要做的
 

@@ -16,6 +16,7 @@ import {
   type DagNodeData
 } from '../../flow/graphAdapter'
 import { EDGE_WHEN_OPTIONS, NODE_CATALOG, catalogItem } from '../../flow/nodeCatalog'
+import { SKILL_CATALOG, skillsForNode, type AskSkillId } from '../../flow/skillCatalog'
 import FlowNodeCard from './FlowNodeCard.vue'
 
 import '@vue-flow/core/dist/style.css'
@@ -149,13 +150,22 @@ function onNodeDragStop() {
 
 function defaultConfig(type: string): Record<string, unknown> {
   if (type === 'llm_chat') {
-    return { systemPrompt: '你是有帮助的中文助手。' }
+    return { systemPrompt: '你是有帮助的中文助手。', skills: [] as string[] }
   }
   if (type === 'start') {
     return { memoryWindowTurns: 12 }
   }
   if (type === 'knowledge') {
-    return { enabled: true, topK: 5 }
+    return { topK: 5, skills: ['knowledge'] }
+  }
+  if (type === 'ontology') {
+    return { skills: ['ontology'] }
+  }
+  if (type === 'metadata') {
+    return { recover: true }
+  }
+  if (type === 'insight') {
+    return { skills: ['sql', 'preference'] }
   }
   return {}
 }
@@ -226,6 +236,36 @@ function onCanvasDrop(event: DragEvent) {
     x: Math.max(0, event.clientX - rect.left - 80),
     y: Math.max(0, event.clientY - rect.top - 24)
   })
+}
+
+function toggleSkill(skillId: AskSkillId, enabled: boolean) {
+  if (!selectedNode.value) {
+    return
+  }
+  const data = nodeData(selectedNode.value)
+  const current = new Set(skillsForNode(data.flowType, data.config))
+  if (enabled) {
+    current.add(skillId)
+  } else {
+    current.delete(skillId)
+  }
+  updateNodeConfig('skills', [...current])
+}
+
+function skillAllowed(flowType: string, skillId: AskSkillId): boolean {
+  if (flowType === 'llm_chat') {
+    return skillId === 'ontology' || skillId === 'preference' || skillId === 'knowledge'
+  }
+  if (flowType === 'ontology') {
+    return skillId === 'ontology'
+  }
+  if (flowType === 'insight') {
+    return skillId === 'sql' || skillId === 'preference'
+  }
+  if (flowType === 'knowledge') {
+    return skillId === 'knowledge'
+  }
+  return false
 }
 
 function updateNodeConfig(key: string, value: unknown) {
@@ -429,12 +469,41 @@ const selectedData = computed(() => nodeData(selectedNode.value))
             @change="updateNodeConfig('topK', Number(($event.target as HTMLInputElement).value) || 5)"
           />
         </label>
-        <p
-          v-if="['knowledge', 'ontology', 'metadata', 'insight'].includes(selectedData.flowType)"
-          class="hint"
+        <label v-if="selectedData.flowType === 'metadata'" class="check">
+          <input
+            type="checkbox"
+            :checked="selectedData.config.recover !== false"
+            :disabled="readonly"
+            @change="updateNodeConfig('recover', ($event.target as HTMLInputElement).checked)"
+          />
+          缺表时自动恢复元数据
+        </label>
+        <fieldset
+          v-if="['llm_chat', 'ontology', 'insight', 'knowledge'].includes(selectedData.flowType)"
+          class="skills"
+          :disabled="readonly"
         >
-          当前运行仍整段折叠为一次问数；边条件（answered / continue 等）待拆跑后生效。画布用于编排与配置。
-        </p>
+          <legend>工具技能</legend>
+          <label
+            v-for="skill in SKILL_CATALOG.filter((item) => skillAllowed(selectedData.flowType, item.id))"
+            :key="skill.id"
+            class="check"
+          >
+            <input
+              type="checkbox"
+              :checked="skillsForNode(selectedData.flowType, selectedData.config).includes(skill.id)"
+              :disabled="readonly || (selectedData.flowType === 'insight' && skill.id === 'sql')"
+              @change="toggleSkill(skill.id, ($event.target as HTMLInputElement).checked)"
+            />
+            <span>
+              <strong>{{ skill.label }}</strong>
+              <small>{{ skill.description }}</small>
+            </span>
+          </label>
+          <p class="hint">
+            运行时按节点真实执行，边条件 answered / clarify / continue / error 生效（Dify 式白盒）。
+          </p>
+        </fieldset>
         <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除节点</button>
       </template>
       <template v-else-if="selectedEdge">
@@ -482,6 +551,35 @@ const selectedData = computed(() => nodeData(selectedNode.value))
   padding: 12px;
   background: var(--panel-2);
   overflow: auto;
+}
+
+.skills {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skills legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.check small {
+  display: block;
+  color: var(--muted);
+  font-weight: normal;
 }
 
 .palette {

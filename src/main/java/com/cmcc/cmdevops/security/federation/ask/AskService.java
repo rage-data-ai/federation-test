@@ -26,6 +26,7 @@ import com.cmcc.cmdevops.security.federation.ask.feedback.MemoryAskFeedbackStore
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledge;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService.Match;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeTools;
 import com.cmcc.cmdevops.security.federation.ask.prompt.AskPromptService;
 import com.cmcc.cmdevops.security.federation.ask.prompt.PreferenceTools;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
@@ -270,17 +271,54 @@ public class AskService {
             throw new IllegalArgumentException("问题不能为空");
         }
         llm.model();
-        AskRunRecorder recorder = new AskRunRecorder(
-                request, GatewayUser.current().name(), listener, System.currentTimeMillis());
-        listener.emit("run", Map.of("runId", recorder.id(), "conversationId", recorder.conversationId()));
+        AskRunRecorder recorder = beginRun(request, listener);
+        AskFlowState state = new AskFlowState();
         try {
-            answer(request, recorder);
+            if ("answered".equals(runKnowledge(request, recorder, state, AskKnowledgeService.DEFAULT_TOP_K))) {
+                return;
+            }
+            String ontology = runOntology(request, recorder, state, AskSkillIds.DEFAULT_ONTOLOGY);
+            if ("clarify".equals(ontology)) {
+                return;
+            }
+            String metadata = runMetadata(request, recorder, state, true);
+            if ("error".equals(metadata)) {
+                return;
+            }
+            runInsight(request, recorder, state, AskSkillIds.DEFAULT_INSIGHT);
         } catch (RuntimeException e) {
             recorder.failed(e);
             throw e;
         } finally {
-            saveRun(recorder);
+            finishRun(recorder);
         }
+    }
+
+    /** ChatFlow 白盒：打开一次 run 信封（只发一次 run 事件）。 */
+    public AskRunRecorder beginRun(AskRequest request, AskListener listener) {
+        if (request == null || request.question() == null || request.question().isBlank()) {
+            throw new IllegalArgumentException("问题不能为空");
+        }
+        llm.model();
+        AskRunRecorder recorder = new AskRunRecorder(
+                request, GatewayUser.current().name(), listener, System.currentTimeMillis());
+        Map<String, Object> run = new LinkedHashMap<>();
+        run.put("runId", recorder.id());
+        run.put("conversationId", recorder.conversationId());
+        if (request.appId() != null && !request.appId().isBlank()) {
+            run.put("appId", request.appId());
+        }
+        listener.emit("run", run);
+        return recorder;
+    }
+
+    public void finishRun(AskRunRecorder recorder) {
+        saveRun(recorder);
+    }
+
+    public void failAndFinish(AskRunRecorder recorder, RuntimeException error) {
+        recorder.failed(error);
+        saveRun(recorder);
     }
 
     /** 记录失败不影响已经给出的回答。 */
@@ -292,14 +330,23 @@ public class AskService {
         }
     }
 
-    private void answer(AskRequest request, AskListener listener) {
-        String question = request.question().strip();
-        String dialogue = dialogue(request);
-
-        if (tryAnswerFromKnowledge(request, listener)) {
-            return;
+    /**
+     * 知识库阶段。outcome：{@code answered} 短路 / {@code continue} 未命中或不可直接答。
+     */
+    public String runKnowledge(AskRequest request, AskListener listener, AskFlowState state, int topK) {
+        if (tryAnswerFromKnowledge(request, listener, Math.max(1, topK))) {
+            return "answered";
         }
+        return "continue";
+    }
 
+    /**
+     * 本体阶段。outcome：{@code continue} / {@code clarify}。
+     * {@code skills} 含 {@link AskSkillIds#ONTOLOGY} 时才启用多轮工具探索。
+     */
+    public String runOntology(
+            AskRequest request, AskListener listener, AskFlowState state, Iterable<String> skills) {
+        Set<String> skillSet = AskSkillIds.normalize(skills, AskSkillIds.DEFAULT_ONTOLOGY);
         listener.emit("stage", stage("ontology", "Ontology 智能体：检索业务语义"));
         BusinessContext context = ontologyTools.businessContext(userText(request), Set.of());
         AnswerabilityChecker.Answerability answerability =
@@ -307,48 +354,95 @@ public class AskService {
         listener.emit("answerability", answerability);
 
         boolean escalated = false;
-        if (!OntologyTools.STATUS_OK.equals(context.status()) || context.confidence() < config.getMinConfidence()) {
+        boolean allowExplore = skillSet.contains(AskSkillIds.ONTOLOGY);
+        if (allowExplore
+                && (!OntologyTools.STATUS_OK.equals(context.status())
+                        || context.confidence() < config.getMinConfidence())) {
             listener.emit("ontology", Map.of("mode", "deterministic", "context", context));
             listener.emit("stage", stage("ontology", "置信度 " + context.confidence() + "，转入多轮工具探索"));
-            ExplorerReply reply = explore(dialogue, context);
+            ExplorerReply reply = explore(dialogue(request), context);
             if (reply.clarify() != null) {
                 listener.emit("clarify", reply.clarify());
-                return;
+                state.setContext(context);
+                return "clarify";
             }
             context = ontologyTools.contextOf(new LinkedHashSet<>(reply.entities() == null ? List.of() : reply.entities()));
             escalated = true;
             answerability = AnswerabilityChecker.check(context, ontologyTools.listConcepts(), config.getMinConfidence());
             listener.emit("answerability", answerability);
         }
-        listener.emit("ontology", Map.of("mode", escalated ? "explored" : "deterministic", "context", context));
+        Map<String, Object> ontologyPayload = new LinkedHashMap<>();
+        ontologyPayload.put("mode", escalated ? "explored" : "deterministic");
+        ontologyPayload.put("context", context);
+        ontologyPayload.put("skills", List.copyOf(skillSet));
+        listener.emit("ontology", ontologyPayload);
+        state.setContext(context);
         if (context.concepts().isEmpty()) {
             String clarifyQuestion = answerability.suggestion() == null || answerability.suggestion().isBlank()
                     ? "没有在本体中找到问题涉及的业务对象，你想分析的是哪一类？"
                     : "本体覆盖不足：" + answerability.suggestion();
             listener.emit("clarify", new Clarify(clarifyQuestion,
                     ontologyTools.listConcepts().stream().map(ConceptSummary::labelZh).limit(6).toList()));
-            return;
+            return "clarify";
         }
+        return "continue";
+    }
 
+    /**
+     * 元数据阶段。outcome：{@code continue} / {@code error}。
+     */
+    public String runMetadata(AskRequest request, AskListener listener, AskFlowState state, boolean recover) {
+        BusinessContext context = state.context();
+        if (context == null) {
+            listener.emit("error", Map.of("message", "元数据阶段缺少本体上下文，请先连接 ontology 节点"));
+            return "error";
+        }
         listener.emit("stage", stage("metadata", "Metadata 智能体：核对映射表和列"));
         MetadataReport report = verifier.verify(context, false);
         boolean metadataRecovered = false;
-        if (report.issues().stream().anyMatch(issue -> issue.startsWith("元数据中没有表"))) {
+        if (recover && report.issues().stream().anyMatch(issue -> issue.startsWith("元数据中没有表"))) {
             report = verifier.verify(context, true);
             metadataRecovered = true;
         }
         listener.emit("metadata", Map.of("recovery", metadataRecovered, "report", report));
+        state.setReport(report);
+        state.setMetadataRecovered(metadataRecovered);
         if (report.tables().isEmpty()) {
             listener.emit("error", Map.of("message", "本体映射的表在元数据中都不存在：" + String.join("；", report.issues())));
-            return;
+            return "error";
         }
+        return "continue";
+    }
 
+    /**
+     * SQL 洞察阶段。outcome：{@code answered} / {@code clarify} / {@code error}。
+     * {@code skills} 控制是否挂 Preference 工具；SQL 工具始终由 InsightSession 提供。
+     */
+    public String runInsight(
+            AskRequest request, AskListener listener, AskFlowState state, Iterable<String> skills) {
+        Set<String> skillSet = AskSkillIds.normalize(skills, AskSkillIds.DEFAULT_INSIGHT);
+        BusinessContext context = state.context();
+        MetadataReport report = state.report();
+        if (context == null || report == null) {
+            listener.emit("error", Map.of("message", "SQL 洞察缺少本体/元数据上下文"));
+            return "error";
+        }
+        if (!skillSet.contains(AskSkillIds.SQL)) {
+            listener.emit("error", Map.of("message", "insight 节点未启用 sql 技能，无法执行联邦查询"));
+            return "error";
+        }
+        String question = request.question().strip();
         listener.emit("stage", stage("insight", "DataInsight 智能体：规划并执行 SQL"));
-        InsightSession session = new InsightSession(question, ontologyTools, verifier, context, report, metadataRecovered,
-                runner, validator, listener, objectMapper, config.getResultPreviewRows());
+        InsightSession session = new InsightSession(question, ontologyTools, verifier, context, report,
+                state.metadataRecovered(), runner, validator, listener, objectMapper, config.getResultPreviewRows());
+        List<Object> tools = new ArrayList<>();
+        tools.add(session);
+        if (skillSet.contains(AskSkillIds.PREFERENCE) && preferenceTools != null) {
+            tools.add(preferenceTools);
+        }
         Analyst analyst = AiServices.builder(Analyst.class)
                 .chatModel(llm.model())
-                .tools(preferenceTools == null ? List.of(session) : List.of(session, preferenceTools))
+                .tools(tools)
                 .systemMessageProvider(memoryId -> systemPrompt(INSIGHT_PROMPT))
                 .maxSequentialToolsInvocations(InsightSession.MAX_SQL_ATTEMPTS + 8)
                 .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.sendExceptionMessageToLlm())
@@ -358,7 +452,7 @@ public class AskService {
         AnalystReply reply = parseAnalyst(raw);
         if ("clarify".equals(reply.status())) {
             listener.emit("clarify", new Clarify(reply.question(), reply.options() == null ? List.of() : reply.options()));
-            return;
+            return "clarify";
         }
         QueryResponse result = session.resultFor(reply.sql());
         Map<String, Object> answer = new LinkedHashMap<>();
@@ -366,12 +460,67 @@ public class AskService {
         answer.put("sql", reply.sql());
         answer.put("caliber", reply.caliber() == null ? List.of() : reply.caliber());
         answer.put("steps", provenanceSteps(context, report, session, reply));
+        answer.put("skills", List.copyOf(skillSet));
         if (result != null) {
             answer.put("columns", result.columns());
             answer.put("rows", session.preview(result.rows()));
             answer.put("rowCount", result.rowCount());
         }
         listener.emit("answer", answer);
+        return "answered";
+    }
+
+    /**
+     * 大模型对话节点：按 skills 绑定 ontology / preference / knowledge 工具（Agent 模式）。
+     */
+    public void runLlmChat(
+            AskRequest request,
+            AskListener listener,
+            String systemPromptText,
+            Iterable<String> skills,
+            KnowledgeTools knowledgeTools) {
+        Set<String> skillSet = AskSkillIds.normalize(skills, AskSkillIds.DEFAULT_LLM_CHAT);
+        Map<String, Object> llmStage = new LinkedHashMap<>();
+        llmStage.put("name", "llm");
+        llmStage.put("message", "大模型对话");
+        llmStage.put("skills", List.copyOf(skillSet));
+        listener.emit("stage", llmStage);
+        String system = systemPromptText == null || systemPromptText.isBlank() ? "你是有帮助的中文助手。" : systemPromptText;
+        String user = dialogue(request);
+        List<Object> tools = new ArrayList<>();
+        if (skillSet.contains(AskSkillIds.ONTOLOGY)) {
+            tools.add(ontologyTools);
+        }
+        if (skillSet.contains(AskSkillIds.PREFERENCE) && preferenceTools != null) {
+            tools.add(preferenceTools);
+        }
+        if (skillSet.contains(AskSkillIds.KNOWLEDGE) && knowledgeTools != null) {
+            tools.add(knowledgeTools);
+        }
+        String answerText;
+        if (tools.isEmpty()) {
+            answerText = llm.complete(system, user);
+        } else {
+            AgentChat agent = AiServices.builder(AgentChat.class)
+                    .chatModel(llm.model())
+                    .tools(tools)
+                    .systemMessageProvider(memoryId -> systemPrompt(system))
+                    .maxSequentialToolsInvocations(12)
+                    .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.sendExceptionMessageToLlm())
+                    .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
+                    .build();
+            answerText = agent.chat(user);
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("answer", answerText == null ? "" : answerText.strip());
+        payload.put("sql", null);
+        payload.put("caliber", List.of());
+        payload.put("steps", List.of(Map.of("agent", "llm_chat", "skills", List.copyOf(skillSet))));
+        listener.emit("answer", payload);
+    }
+
+    interface AgentChat {
+        String chat(String prompt);
     }
 
     /** 回答步骤溯源（对齐 Auto Ontology Chat steps：Resolved / Joined / Validated）。 */
@@ -425,13 +574,13 @@ public class AskService {
     /**
      * 先按问题检索共享知识；命中后由模型判断能否直接答。能则发 answer 并返回 true；否则发 knowledge 事件后继续本体路径。
      */
-    private boolean tryAnswerFromKnowledge(AskRequest request, AskListener listener) {
+    private boolean tryAnswerFromKnowledge(AskRequest request, AskListener listener, int topK) {
         if (knowledge == null) {
             return false;
         }
         List<Match> matches;
         try {
-            matches = knowledge.search(request.question().strip(), AskKnowledgeService.DEFAULT_TOP_K);
+            matches = knowledge.search(request.question().strip(), topK);
         } catch (RuntimeException e) {
             log.warn("知识检索失败，继续本体路径: {}", e.toString());
             return false;
