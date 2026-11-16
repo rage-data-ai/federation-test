@@ -82,10 +82,11 @@ public class FlowRunner {
                     lastOutcome = "default";
                     pool.putNode(node.id(), Map.of("outcome", lastOutcome));
                 }
-                case "llm_chat" -> {
+                case "llm_chat", "insight" -> {
                     AskRunRecorder recorder = askService.beginRun(scoped, listener);
                     try {
-                        AskStageResult result = runResolvedLlm(node, scoped, recorder, inputs, pool);
+                        AskStageResult result =
+                                runResolvedLlm(node, scoped, recorder, inputs, pool, new AskFlowState());
                         lastOutcome = result.outcome();
                         pool.putNode(node.id(), result.outputs());
                     } catch (RuntimeException e) {
@@ -144,23 +145,23 @@ public class FlowRunner {
                         int topK = FlowVarRefs.asInt(inputs, "topK", AskKnowledgeService.DEFAULT_TOP_K);
                         result = askService.runKnowledge(nodeRequest, recorder, state, topK);
                     }
-                    case "ontology" -> result = askService.runOntology(
-                            nodeRequest,
-                            recorder,
-                            state,
-                            AskSkillIds.normalize(
-                                    FlowVarRefs.asSkills(inputs, "skills", AskSkillIds.DEFAULT_ONTOLOGY),
-                                    AskSkillIds.DEFAULT_ONTOLOGY));
-                    case "metadata" -> result = askService.runMetadata(
-                            nodeRequest, recorder, state, FlowVarRefs.asBool(inputs, "recover", true));
-                    case "insight" -> result = askService.runInsight(
-                            nodeRequest,
-                            recorder,
-                            state,
-                            AskSkillIds.normalize(
-                                    FlowVarRefs.asSkills(inputs, "skills", AskSkillIds.DEFAULT_INSIGHT),
-                                    AskSkillIds.DEFAULT_INSIGHT));
-                    case "llm_chat" -> result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool);
+                    case "ontology" -> {
+                        result = askService.runOntology(
+                                nodeRequest,
+                                recorder,
+                                state,
+                                AskSkillIds.normalize(
+                                        FlowVarRefs.asSkills(inputs, "skills", AskSkillIds.DEFAULT_ONTOLOGY),
+                                        AskSkillIds.DEFAULT_ONTOLOGY));
+                        state.markOntologyPrepared();
+                    }
+                    case "metadata" -> {
+                        result = askService.runMetadata(
+                                nodeRequest, recorder, state, FlowVarRefs.asBool(inputs, "recover", true));
+                        state.markMetadataPrepared();
+                    }
+                    case "insight", "llm_chat" ->
+                            result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool, state);
                     case "answer" -> result = runAnswerNode(inputs, pool, recorder);
                     case "builtin_ask" -> throw new IllegalArgumentException("白盒阶段图不应包含 builtin_ask");
                     default -> throw new IllegalArgumentException("暂不支持的节点类型：" + node.type());
@@ -207,12 +208,17 @@ public class FlowRunner {
         return AskStageResult.of("default", Map.of("answer", text));
     }
 
+    /**
+     * 统一大模型节点：勾选 {@code sql} 时走 InsightSession（原 SQL 洞察）；否则为通用对话 Agent。
+     * 旧图 {@code insight} 类型视为已勾选 sql/preference。
+     */
     private AskStageResult runResolvedLlm(
             FlowNode node,
             AskRequest scoped,
             AskListener listener,
             Map<String, Object> inputs,
-            FlowVariablePool pool) {
+            FlowVariablePool pool,
+            AskFlowState state) {
         String system = FlowVarRefs.asString(
                 inputs,
                 "systemPrompt",
@@ -221,19 +227,36 @@ public class FlowRunner {
         Object skillsRaw = inputs.containsKey("skills")
                 ? inputs.get("skills")
                 : node.config().get("skills");
+        boolean insightAlias = "insight".equals(node.type());
+        var skillSet = AskSkillIds.normalize(
+                skillsRaw, insightAlias ? AskSkillIds.DEFAULT_INSIGHT : AskSkillIds.DEFAULT_LLM_CHAT);
         AskRequest withQuery = requestWithQuery(scoped, inputs);
-        // llm_chat 可单独覆盖记忆窗口（优先于开始节点已截断的 history）
         int llmWindow = FlowVarRefs.asInt(inputs, "memoryWindowTurns", -1);
         if (llmWindow < 0 && node.config().get("memoryWindowTurns") instanceof Number number) {
             llmWindow = number.intValue();
         }
         AskRequest forLlm = llmWindow >= 0 ? trimHistory(withQuery, llmWindow) : withQuery;
-        return askService.runLlmChat(
-                forLlm,
-                listener,
-                system,
-                AskSkillIds.normalize(skillsRaw, AskSkillIds.DEFAULT_LLM_CHAT),
-                knowledgeTools);
+        if (skillSet.contains(AskSkillIds.SQL) || insightAlias) {
+            ensureInsightContext(forLlm, listener, state);
+            return askService.runInsight(
+                    forLlm,
+                    listener,
+                    state,
+                    insightAlias && skillSet.isEmpty() ? AskSkillIds.DEFAULT_INSIGHT : skillSet);
+        }
+        return askService.runLlmChat(forLlm, listener, system, skillSet, knowledgeTools);
+    }
+
+    /** 缺本体/元数据且上游未跑过对应节点时补跑，使单独的「大模型+SQL」也能执行。 */
+    private void ensureInsightContext(AskRequest request, AskListener listener, AskFlowState state) {
+        if (!state.ontologyPrepared() && state.context() == null) {
+            askService.runOntology(request, listener, state, AskSkillIds.DEFAULT_ONTOLOGY);
+            state.markOntologyPrepared();
+        }
+        if (!state.metadataPrepared() && state.report() == null) {
+            askService.runMetadata(request, listener, state, true);
+            state.markMetadataPrepared();
+        }
     }
 
     private static AskRequest trimHistory(AskRequest request, int window) {

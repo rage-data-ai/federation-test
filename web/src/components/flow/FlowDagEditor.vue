@@ -686,7 +686,7 @@ const selectedData = computed(() => nodeData(selectedNode.value))
                 </li>
               </ul>
               <small v-if="selectedData.flowType === 'llm_chat' && skill.id === 'sql'" class="hint">
-                llm_chat 勾选后会提示改用 insight 节点执行 SQL。
+                勾选后走联邦 SQL（原「SQL 洞察」节点能力）。
               </small>
             </span>
           </label>

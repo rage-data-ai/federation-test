@@ -79,13 +79,15 @@ export const NODE_PORTS: Record<string, NodePortSpec> = {
   llm_chat: {
     inputs: [
       { name: 'query', label: '用户消息', description: '默认绑定 sys.query' },
-      { name: 'systemPrompt', label: '系统提示词', description: '支持 {{#var#}}' },
+      { name: 'systemPrompt', label: '系统提示词', description: '支持 {{#var#}}；勾选 SQL 时由洞察 Analyst 提示词主导' },
       { name: 'memoryWindowTurns', label: '记忆轮数', description: '覆盖开始节点；0=无历史' },
-      { name: 'skills', label: '工具技能', description: '可自由勾选已有工具包' }
+      { name: 'skills', label: '工具技能', description: '勾选 sql 即联邦查询（原 SQL 洞察）' }
     ],
     outputs: [
-      { name: 'outcome', label: '结果条件', description: 'default' },
-      { name: 'answer', label: '回复文本', description: '' }
+      { name: 'outcome', label: '结果条件', description: 'default；勾选 sql 时为 answered/clarify/error' },
+      { name: 'answer', label: '回复文本', description: '' },
+      { name: 'sql', label: 'SQL', description: '勾选 sql 时写出' },
+      { name: 'rowCount', label: '行数', description: '勾选 sql 时写出' }
     ],
     defaultInputs: {
       query: '{{#sys.query#}}',

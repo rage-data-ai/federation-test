@@ -32,7 +32,8 @@
 | `knowledge` | `query`（默认 `{{#sys.query#}}`）, `topK` | `outcome`, `answered`, `answer`, `matches` |
 | `ontology` | `query`, `skills` | `outcome`, `context`, `answerability` |
 | `metadata` | `recover` | `outcome`, `report`, `tables` |
-| `insight` | `query`, `skills` | `outcome`, `answer`, `sql`, `rowCount` |
+| `insight`（旧） | `query`, `skills` | `outcome`, `answer`, `sql`, `rowCount` |
+| `llm_chat` | `query`, `systemPrompt`, `memoryWindowTurns`, `skills` | `outcome`, `answer`；（勾选 sql 时另有 `sql`/`rowCount`） |
 | `llm_chat` | `query`, `systemPrompt`, `skills` | `outcome`, `answer` |
 | `builtin_ask` | `query` | `outcome`（整段，输出有限） |
 | `end` | — | — |

@@ -495,6 +495,7 @@ public class AskService {
 
     /**
      * 大模型对话节点：按 skills 绑定 ontology / preference / knowledge 工具（Agent 模式）。
+     * SQL 由 {@link #runInsight} 承接（FlowRunner 在勾选 sql 或旧 insight 节点时分流）。
      */
     public AskStageResult runLlmChat(
             AskRequest request,
@@ -508,15 +509,6 @@ public class AskService {
         llmStage.put("message", "大模型对话");
         llmStage.put("skills", List.copyOf(skillSet));
         listener.emit("stage", llmStage);
-        if (skillSet.contains(AskSkillIds.SQL)) {
-            listener.emit(
-                    "stage",
-                    Map.of(
-                            "name",
-                            "llm",
-                            "message",
-                            "已勾选 sql 技能：llm_chat 暂不挂载 InsightSession（请用 insight 节点执行 SQL）"));
-        }
         String system = systemPromptText == null || systemPromptText.isBlank() ? "你是有帮助的中文助手。" : systemPromptText;
         String user = dialogue(request);
         List<Object> tools = new ArrayList<>();

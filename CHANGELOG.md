@@ -18,7 +18,11 @@
 
 ### Changed
 
+<<<<<<< HEAD
 - 鉴权始终开启（`FEDERATION_SECURITY_ENABLED=false` 已忽略）；无本地账号时控制台引导首次配置管理员（`/api/v1/auth/setup`）
+=======
+- SQL 洞察与大模型对话合并：调色板不再新增 insight；`llm_chat` 勾选 sql 即走 InsightSession；默认智能问数末级改为 llm_chat；旧 insight 节点仍兼容
+>>>>>>> 0241fa9 (合并 SQL 洞察到大模型对话：勾选 sql 即走 InsightSession。)
 - 默认 CORS 放行 `127.0.0.1:5173` / `:18080`（原先仅 localhost，本机 IP 访问会改删失败）
 - 内置「智能问数」启动时若仍为单节点 `builtin_ask` 图，自动迁移并重新发布
 - 知识向量：默认接本机 Milvus，且必须配置 HTTP 嵌入模型（禁止哈希回退/内存假命中）；`MILVUS_URI=` 才退回进程内索引供单测

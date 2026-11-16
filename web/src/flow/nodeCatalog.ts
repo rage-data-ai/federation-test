@@ -38,9 +38,9 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
   { type: 'metadata', title: '元数据', description: '白盒：核对映射表与列', addable: true, color: '#fd7e14' },
   {
     type: 'insight',
-    title: 'SQL 洞察',
-    description: '白盒：Analyst + SQL/偏好工具',
-    addable: true,
+    title: 'SQL 洞察（旧）',
+    description: '已合并进「大模型对话」+ SQL 技能；仅兼容旧图',
+    addable: false,
     color: '#20c997'
   },
   {
@@ -53,7 +53,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
   {
     type: 'llm_chat',
     title: '大模型对话',
-    description: '可配记忆轮数；自由绑定工具技能',
+    description: '可配记忆轮数；勾选 SQL 即原洞察能力',
     addable: true,
     color: '#75b798'
   },

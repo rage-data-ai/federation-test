@@ -42,7 +42,7 @@ class AppServiceTest {
         PublishedApp published = apps.resolvePublished(null);
         assertEquals(DefaultFlows.DEFAULT_APP_ID, published.appId());
         assertEquals("knowledge", published.graph().node("knowledge").type());
-        assertEquals("insight", published.graph().node("insight").type());
+        assertEquals("llm_chat", published.graph().node("llm").type());
     }
 
     @Test
@@ -66,7 +66,7 @@ class AppServiceTest {
         flows.update(flow.id(), "改成问数", graph);
         AppRelease release = apps.publish(draft.id(), null);
         assertNotNull(release.graph().node("knowledge"));
-        assertEquals("insight", apps.resolvePublished(draft.id()).graph().node("insight").type());
+        assertEquals("llm_chat", apps.resolvePublished(draft.id()).graph().node("llm").type());
     }
 
     @Test
