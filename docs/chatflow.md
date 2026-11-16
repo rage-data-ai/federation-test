@@ -25,11 +25,11 @@
 - 控制台：「应用」模块：选模板创建、编辑节点配置、发布、打开对话（复用 Ask 流）
 - 测试：服务单测 + API WebTest；前端类型与 e2e 冒烟
 
-### 阶段 2 — 拆分问数阶段节点
+### 阶段 2 — 可拖拽 DAG 画布（进行中）
 
-- 将 `builtin_ask` 拆为 `knowledge` / `ontology` / `metadata` / `insight`
-- 默认流程图改为四段串联；边条件表达短路（知识命中 → end）
-- 可视化简易画布（节点调序、开关某段）
+- 控制台用 Vue Flow 画布拖拽节点、连线、编辑分支条件（`when`）
+- 节点坐标写入 `config.x` / `config.y`，与一期 JSON 兼容
+- 后续：将 `builtin_ask` 拆为 `knowledge` / `ontology` / `metadata` / `insight` 并可运行
 
 ### 阶段 3 — 应用能力加深
 

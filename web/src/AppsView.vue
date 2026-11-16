@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, toRaw } from 'vue'
 import { createApp, getFlow, listApps, listFlowTemplates, publishApp, updateFlow } from './api'
-import type { ChatApp, FlowDraft, FlowTemplate } from './types'
+import FlowDagEditor from './components/flow/FlowDagEditor.vue'
+import type { ChatApp, FlowDraft, FlowGraph, FlowTemplate } from './types'
 import { errMessage } from './types'
 
 const apps = ref<ChatApp[]>([])
 const templates = ref<FlowTemplate[]>([])
 const selected = ref<ChatApp | null>(null)
 const flow = ref<FlowDraft | null>(null)
+const draftGraph = ref<FlowGraph | null>(null)
+const dirty = ref(false)
+const showJson = ref(false)
 const graphText = ref('')
 const name = ref('')
 const description = ref('')
@@ -17,6 +21,8 @@ const error = ref('')
 const message = ref('')
 
 const emit = defineEmits<{ 'open-app': [appId: string] }>()
+
+const readonly = computed(() => false)
 
 onMounted(async () => {
   try {
@@ -43,7 +49,7 @@ async function create() {
     })
     name.value = ''
     description.value = ''
-    message.value = `已创建草稿「${app.name}」，发布后可在问数里选用`
+    message.value = `已创建草稿「${app.name}」，编辑画布后发布即可在问数里选用`
     await refresh()
     await open(app)
   } catch (e) {
@@ -57,28 +63,52 @@ async function open(app: ChatApp) {
   selected.value = app
   error.value = ''
   message.value = ''
+  dirty.value = false
   try {
-    flow.value = await getFlow(app.flowId)
-    graphText.value = JSON.stringify(flow.value.graph, null, 2)
+    const draft = await getFlow(app.flowId)
+    // Clone before assigning into refs — structuredClone cannot clone Vue proxies.
+    draftGraph.value = structuredClone(draft.graph)
+    graphText.value = JSON.stringify(draft.graph, null, 2)
+    flow.value = draft
   } catch (e) {
     error.value = errMessage(e)
   }
 }
 
+function onGraphChange(graph: FlowGraph) {
+  draftGraph.value = graph
+  graphText.value = JSON.stringify(graph, null, 2)
+  dirty.value = true
+}
+
+function applyJson() {
+  try {
+    const graph = JSON.parse(graphText.value) as FlowGraph
+    draftGraph.value = graph
+    dirty.value = true
+    error.value = ''
+    message.value = '已从 JSON 载入到画布，记得保存'
+  } catch (e) {
+    error.value = errMessage(e, '流程图 JSON 无效')
+  }
+}
+
 async function saveGraph() {
-  if (!selected.value || !flow.value) {
+  if (!selected.value || !flow.value || !draftGraph.value) {
     return
   }
   busy.value = 'save'
   error.value = ''
   message.value = ''
   try {
-    const graph = JSON.parse(graphText.value)
-    flow.value = await updateFlow(flow.value.id, { graph })
-    graphText.value = JSON.stringify(flow.value.graph, null, 2)
+    const saved = await updateFlow(flow.value.id, { graph: toRaw(draftGraph.value) })
+    draftGraph.value = structuredClone(saved.graph)
+    graphText.value = JSON.stringify(saved.graph, null, 2)
+    flow.value = saved
+    dirty.value = false
     message.value = '流程草稿已保存'
   } catch (e) {
-    error.value = errMessage(e, '流程图 JSON 无效')
+    error.value = errMessage(e, '保存失败')
   } finally {
     busy.value = ''
   }
@@ -87,6 +117,12 @@ async function saveGraph() {
 async function publish() {
   if (!selected.value) {
     return
+  }
+  if (dirty.value) {
+    await saveGraph()
+    if (error.value) {
+      return
+    }
   }
   busy.value = 'publish'
   error.value = ''
@@ -119,7 +155,7 @@ function statusLabel(status: string) {
     <header class="module-head">
       <div class="head-main">
         <h1 id="apps-title">问数应用</h1>
-        <p class="hint">用模板创建流程，编辑节点图并发布；发布后在「智能问数」里选用。</p>
+        <p class="hint">拖拽编排流程图，发布后在「智能问数」里选用。</p>
       </div>
     </header>
 
@@ -163,27 +199,43 @@ function statusLabel(status: string) {
         </ul>
       </aside>
 
-      <main v-if="selected && flow" class="detail" aria-label="应用详情">
-        <header>
-          <h2>{{ selected.name }}</h2>
-          <p class="hint">{{ selected.description || '无说明' }}</p>
-          <p class="meta">流程 {{ flow.id }} · 状态 {{ statusLabel(selected.status) }}</p>
+      <main v-if="selected && flow && draftGraph" class="detail" aria-label="应用详情">
+        <header class="detail-head">
+          <div>
+            <h2>{{ selected.name }} <span v-if="dirty" class="dirty">未保存</span></h2>
+            <p class="hint">{{ selected.description || '无说明' }}</p>
+            <p class="meta">流程 {{ flow.id }} · 状态 {{ statusLabel(selected.status) }}</p>
+          </div>
+          <div class="actions">
+            <button type="button" :disabled="!!busy || !dirty" @click="saveGraph">保存草稿</button>
+            <button class="primary" type="button" :disabled="!!busy" @click="publish">发布应用</button>
+            <button
+              v-if="selected.status === 'published'"
+              type="button"
+              :disabled="!!busy"
+              @click="emit('open-app', selected.id)"
+            >
+              在问数中打开
+            </button>
+            <button type="button" class="ghost" @click="showJson = !showJson">
+              {{ showJson ? '收起 JSON' : '高级 JSON' }}
+            </button>
+          </div>
         </header>
-        <label class="graph">
-          流程图（JSON）
-          <textarea v-model="graphText" rows="18" spellcheck="false" aria-label="流程图 JSON" />
-        </label>
-        <div class="actions">
-          <button type="button" :disabled="!!busy" @click="saveGraph">保存草稿</button>
-          <button class="primary" type="button" :disabled="!!busy" @click="publish">发布应用</button>
-          <button
-            v-if="selected.status === 'published'"
-            type="button"
-            :disabled="!!busy"
-            @click="emit('open-app', selected.id)"
-          >
-            在问数中打开
-          </button>
+
+        <FlowDagEditor
+          :key="flow.id"
+          v-model="draftGraph"
+          :readonly="readonly"
+          @change="onGraphChange"
+        />
+
+        <div v-if="showJson" class="json-panel">
+          <label class="graph">
+            流程图 JSON
+            <textarea v-model="graphText" rows="12" spellcheck="false" aria-label="流程图 JSON" />
+          </label>
+          <button type="button" :disabled="!!busy" @click="applyJson">应用到画布</button>
         </div>
       </main>
       <main v-else class="detail empty">
@@ -230,7 +282,7 @@ function statusLabel(status: string) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: 280px;
+  width: 260px;
   flex: none;
   padding: 12px;
   border-right: 1px solid var(--line);
@@ -305,7 +357,7 @@ textarea {
   gap: 12px;
   flex: 1;
   min-width: 0;
-  padding: 16px;
+  padding: 12px 16px 16px;
   overflow: auto;
 }
 
@@ -314,12 +366,24 @@ textarea {
   align-items: center;
 }
 
-.graph textarea {
-  width: 100%;
-  min-height: 280px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+.detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.detail-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dirty {
+  margin-left: 8px;
   font-size: 12px;
-  line-height: 1.45;
+  font-weight: 500;
+  color: var(--warn, #e6a23c);
 }
 
 .actions {
@@ -328,12 +392,30 @@ textarea {
   gap: 8px;
 }
 
+.json-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.graph textarea {
+  width: 100%;
+  min-height: 180px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 button.primary {
   background: var(--accent);
   color: #fff;
   border: 0;
   border-radius: 8px;
   padding: 8px 14px;
+}
+
+button.ghost {
+  background: transparent;
 }
 
 button {
