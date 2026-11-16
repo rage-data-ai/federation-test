@@ -3,6 +3,7 @@ package com.cmcc.cmdevops.security.federation.api;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -71,6 +72,11 @@ public class AppController {
                 body == null ? null : body.name(),
                 body == null ? null : body.description(),
                 body == null ? null : body.flowId());
+    }
+
+    @DeleteMapping("/{id}")
+    public App delete(@PathVariable("id") String id) {
+        return service.archive(id);
     }
 
     @PostMapping("/{id}/publish")

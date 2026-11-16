@@ -67,4 +67,24 @@ class AppServiceTest {
         assertNotNull(release.graph().node("ask"));
         assertEquals("builtin_ask", apps.resolvePublished(draft.id()).graph().node("ask").type());
     }
+
+    @Test
+    void updateMetadataAndArchiveRemovesFromList() {
+        App draft = apps.createFromTemplate("旧名", "旧说明", DefaultFlows.TEMPLATE_LLM_CHAT);
+        App renamed = apps.update(draft.id(), "新名", "新说明", null);
+        assertEquals("新名", renamed.name());
+        assertEquals("新说明", renamed.description());
+        assertTrue(apps.list().stream().anyMatch(app -> app.id().equals(draft.id())));
+
+        App archived = apps.archive(draft.id());
+        assertEquals(App.ARCHIVED, archived.status());
+        assertTrue(apps.list().stream().noneMatch(app -> app.id().equals(draft.id())));
+        assertThrows(ResponseStatusException.class, () -> apps.update(draft.id(), "再改", null, null));
+    }
+
+    @Test
+    void builtinAppCannotBeArchived() {
+        assertThrows(ResponseStatusException.class, () -> apps.archive(DefaultFlows.DEFAULT_APP_ID));
+        assertTrue(apps.list().stream().anyMatch(app -> DefaultFlows.DEFAULT_APP_ID.equals(app.id())));
+    }
 }

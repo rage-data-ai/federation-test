@@ -24,7 +24,9 @@ public class AppService {
     }
 
     public List<App> list() {
-        return store.listApps();
+        return store.listApps().stream()
+                .filter(app -> !App.ARCHIVED.equals(app.status()))
+                .toList();
     }
 
     public List<PublishedApp> listPublished() {
@@ -87,7 +89,13 @@ public class AppService {
 
     public App update(String id, String name, String description, String flowId) {
         App existing = get(id);
+        if (App.ARCHIVED.equals(existing.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "应用已归档，无法修改：" + id);
+        }
         if (flowId != null && !flowId.isBlank() && !flowId.equals(existing.flowId())) {
+            if (isBuiltin(existing)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "内置应用不能更换绑定流程");
+            }
             store.findFlow(flowId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "流程不存在：" + flowId));
         }
@@ -105,11 +113,41 @@ public class AppService {
         return updated;
     }
 
+    /** 软删除：归档后不再出现在列表 / 发布列表。内置「智能问数」不可删。 */
+    public App archive(String id) {
+        App existing = get(id);
+        if (isBuiltin(existing)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "内置应用不可删除");
+        }
+        if (App.ARCHIVED.equals(existing.status())) {
+            return existing;
+        }
+        App archived = new App(
+                existing.id(),
+                existing.name(),
+                existing.description(),
+                existing.flowId(),
+                existing.owner(),
+                App.ARCHIVED,
+                existing.currentReleaseId(),
+                existing.createdAt(),
+                System.currentTimeMillis());
+        store.saveApp(archived);
+        return archived;
+    }
+
+    private static boolean isBuiltin(App app) {
+        return DefaultFlows.DEFAULT_APP_ID.equals(app.id());
+    }
+
     /**
      * 发布应用：若未指定 flowVersionId，则把当前流程草稿打成新版本再钉上。
      */
     public AppRelease publish(String appId, String flowVersionId) {
         App app = get(appId);
+        if (App.ARCHIVED.equals(app.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "应用已归档，无法发布：" + appId);
+        }
         FlowVersion version;
         if (flowVersionId == null || flowVersionId.isBlank()) {
             FlowDraft flow = store.findFlow(app.flowId())
