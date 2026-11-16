@@ -63,7 +63,13 @@ public class FlowController {
     @GetMapping("/templates")
     public List<Map<String, String>> templates() {
         return List.of(
-                Map.of("id", "builtin_ask", "name", "智能问数", "description", "知识库 → 本体 → 元数据 → SQL"),
+                Map.of(
+                        "id",
+                        "builtin_ask",
+                        "name",
+                        "智能问数",
+                        "description",
+                        "知识库 → 本体 → 元数据 → SQL 洞察（四阶段 DAG）"),
                 Map.of("id", "llm_chat", "name", "简单对话", "description", "仅大模型回复，不跑联邦 SQL"));
     }
 }

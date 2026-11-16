@@ -9,10 +9,12 @@
 - 问数 ChatFlow 一期：可配置流程 / 发布应用（`docs/chatflow.md`）；`POST /api/v1/ask` 支持 `appId`
 - 问数流程画布：Vue Flow 可拖拽 DAG（节点/连线/分支条件）
 - 问数应用增删改查入口：编辑名称/说明、删除（归档）；`DELETE /api/v1/apps/{id}`
+- 智能问数 DAG 展开为知识库 / 本体 / 元数据 / SQL 洞察四阶段（运行仍折叠为一次 AskService）
 
 ### Changed
 
 - 默认 CORS 放行 `127.0.0.1:5173` / `:18080`（原先仅 localhost，本机 IP 访问会改删失败）
+- 内置「智能问数」启动时若仍为单节点 `builtin_ask` 图，自动迁移并重新发布
 - 问数补充提示词文案对齐 Hermes：`global`≈`MEMORY.md`，`personal`≈`USER.md`
 
 ### Added

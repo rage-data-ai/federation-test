@@ -25,11 +25,11 @@
 - 控制台：「应用」模块：选模板创建、编辑节点配置、发布、打开对话（复用 Ask 流）
 - 测试：服务单测 + API WebTest；前端类型与 e2e 冒烟
 
-### 阶段 2 — 可拖拽 DAG 画布（进行中）
+### 阶段 2 — 可拖拽 DAG 画布
 
 - 控制台用 Vue Flow 画布拖拽节点、连线、编辑分支条件（`when`）
 - 节点坐标写入 `config.x` / `config.y`，与一期 JSON 兼容
-- 后续：将 `builtin_ask` 拆为 `knowledge` / `ontology` / `metadata` / `insight` 并可运行
+- 「智能问数」默认图展开为 `knowledge → ontology → metadata → insight`（含短路/澄清边）；`FlowRunner` 仍折叠为一次 `AskService.ask`（真拆跑见阶段 2.5 / [`chatflow-stage-nodes.md`](chatflow-stage-nodes.md)）
 
 ### 阶段 3 — 应用能力加深
 
@@ -61,8 +61,15 @@ POST   /api/v1/ask                   { question, history, conversationId?, appId
 ## 默认图
 
 ```text
-智能问数:  start ──default──► builtin_ask ──default──► end
-简单对话:  start ──default──► llm_chat     ──default──► end
+智能问数:
+  start → knowledge ─answered→ end
+             └continue→ ontology ─clarify→ end
+                           └continue→ metadata ─error→ end
+                                         └continue→ insight → end
+
+简单对话:  start ──default──► llm_chat ──default──► end
+
+兼容: 旧 Release 仍可为 start → builtin_ask → end
 ```
 
 ## 验收（阶段 1）

@@ -21,7 +21,13 @@ import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 
 /**
- * 按发布图执行节点。{@code builtin_ask} 整段交给 {@link AskService}；{@code llm_chat} 走一次 LLM 补全。
+ * 按发布图执行节点。
+ * <ul>
+ *   <li>{@code builtin_ask}：整段交给 {@link AskService}</li>
+ *   <li>{@code knowledge}/{@code ontology}/{@code metadata}/{@code insight}：折叠为一次 {@link AskService#ask}
+ *       （画布展开展示；阶段边条件待真正拆跑时再生效）</li>
+ *   <li>{@code llm_chat}：一次 LLM 补全</li>
+ * </ul>
  */
 @Component
 public class FlowRunner {
@@ -42,6 +48,7 @@ public class FlowRunner {
     public void run(PublishedApp app, AskRequest request, AskListener listener) {
         FlowGraph graph = app.graph();
         graph.validate();
+        assertCompatibleAskNodes(graph);
         String nodeId = graph.startNodeId();
         String lastOutcome = "default";
         boolean pipelineHandled = false;
@@ -56,6 +63,14 @@ public class FlowRunner {
                     askService.ask(withAppMeta(request, app), listener);
                     pipelineHandled = true;
                     lastOutcome = "default";
+                }
+                case "knowledge", "ontology", "metadata", "insight" -> {
+                    if (!pipelineHandled) {
+                        askService.ask(withAppMeta(request, app), listener);
+                        pipelineHandled = true;
+                    }
+                    // 折叠执行后沿 continue/default 走完剩余阶段节点，避免重复调用 AskService。
+                    lastOutcome = "continue";
                 }
                 case "llm_chat" -> {
                     runLlmChat(node, withAppMeta(request, app), listener);
@@ -77,6 +92,15 @@ public class FlowRunner {
             nodeId = next;
         }
         log.warn("流程跳转超过 {} 次，已停止 appId={}", MAX_HOPS, app.appId());
+    }
+
+    /** 禁止在同一张图里混用整段 builtin_ask 与拆分阶段节点。 */
+    static void assertCompatibleAskNodes(FlowGraph graph) {
+        boolean hasBuiltin = graph.nodes().stream().anyMatch(node -> "builtin_ask".equals(node.type()));
+        boolean hasStages = graph.nodes().stream().anyMatch(node -> DefaultFlows.isAskStageType(node.type()));
+        if (hasBuiltin && hasStages) {
+            throw new IllegalArgumentException("流程不能同时包含 builtin_ask 与 knowledge/ontology/metadata/insight 阶段节点");
+        }
     }
 
     private void runLlmChat(FlowNode node, AskRequest request, AskListener listener) {
