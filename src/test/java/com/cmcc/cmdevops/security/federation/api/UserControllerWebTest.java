@@ -46,9 +46,13 @@ class UserControllerWebTest {
     @TestConfiguration
     static class Accounts {
         @Bean
-        UserService userService(FederationProperties properties) {
-            return new UserService(
-                    new MemoryUserStore(), properties, new BCryptPasswordEncoder(4), System::currentTimeMillis);
+        MemoryUserStore memoryUserStore() {
+            return new MemoryUserStore();
+        }
+
+        @Bean
+        UserService userService(MemoryUserStore store, FederationProperties properties) {
+            return new UserService(store, properties, new BCryptPasswordEncoder(4), System::currentTimeMillis);
         }
     }
 
@@ -61,16 +65,20 @@ class UserControllerWebTest {
     @Autowired
     private UserService users;
 
+    @Autowired
+    private MemoryUserStore userStore;
+
     @BeforeEach
     void setUp() {
+        userStore.clear();
         properties.getSecurity().setEnabled(true);
+        users.bootstrapAdmin("root", "root-pass-11", "管理员");
         GatewayUser.set(new GatewayUser("root", Set.of(GatewayRole.QUERY, GatewayRole.ADMIN)));
     }
 
     @AfterEach
     void tearDown() {
         GatewayUser.clear();
-        properties.getSecurity().setEnabled(false);
     }
 
     @Test
