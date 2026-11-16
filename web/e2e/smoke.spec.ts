@@ -229,8 +229,6 @@ test.describe('console smoke', () => {
     await expect(item).toContainText('去向：本体')
     await expect(item).toContainText('root 答复：已改派生概念')
 
-    await views.getByRole('button', { name: '知识库' }).click()
-    await expect(page.getByRole('form', { name: '新增知识' })).toBeVisible()
     await views.getByRole('button', { name: '提示词' }).click()
     await expect(page.getByRole('form', { name: '新增提示词' })).toBeVisible()
 
@@ -238,6 +236,10 @@ test.describe('console smoke', () => {
     const blocking = results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')
     expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
 
+    await page.getByRole('navigation', { name: '模块' }).getByRole('button', { name: '知识库' }).click()
+    await expect(page.getByRole('form', { name: '新增知识' })).toBeVisible()
+
+    await page.getByRole('navigation', { name: '模块' }).getByRole('button', { name: '智能问数' }).click()
     await views.getByRole('button', { name: '对话' }).click()
     await expect(page.getByText('web-01 最多，5 条')).toBeVisible()
     await page.getByRole('textbox', { name: '问题输入' }).fill('只看生产环境')

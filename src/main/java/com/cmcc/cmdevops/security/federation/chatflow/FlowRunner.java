@@ -1,5 +1,6 @@
 package com.cmcc.cmdevops.security.federation.chatflow;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +18,7 @@ import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackStore;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskRunRecorder;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowNode;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowModels.PublishedApp;
+import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 
@@ -38,17 +40,21 @@ public class FlowRunner {
     private final AskService askService;
     private final LlmClient llm;
     private final AskFeedbackStore feedbackStore;
+    private final FederationProperties properties;
 
-    public FlowRunner(AskService askService, LlmClient llm, AskFeedbackStore feedbackStore) {
+    public FlowRunner(
+            AskService askService, LlmClient llm, AskFeedbackStore feedbackStore, FederationProperties properties) {
         this.askService = askService;
         this.llm = llm;
         this.feedbackStore = feedbackStore;
+        this.properties = properties;
     }
 
     public void run(PublishedApp app, AskRequest request, AskListener listener) {
         FlowGraph graph = app.graph();
         graph.validate();
         assertCompatibleAskNodes(graph);
+        AskRequest scoped = withHistoryWindow(graph, withAppMeta(request, app));
         String nodeId = graph.startNodeId();
         String lastOutcome = "default";
         boolean pipelineHandled = false;
@@ -60,20 +66,20 @@ public class FlowRunner {
                     return;
                 }
                 case "builtin_ask" -> {
-                    askService.ask(withAppMeta(request, app), listener);
+                    askService.ask(scoped, listener);
                     pipelineHandled = true;
                     lastOutcome = "default";
                 }
                 case "knowledge", "ontology", "metadata", "insight" -> {
                     if (!pipelineHandled) {
-                        askService.ask(withAppMeta(request, app), listener);
+                        askService.ask(scoped, listener);
                         pipelineHandled = true;
                     }
                     // 折叠执行后沿 continue/default 走完剩余阶段节点，避免重复调用 AskService。
                     lastOutcome = "continue";
                 }
                 case "llm_chat" -> {
-                    runLlmChat(node, withAppMeta(request, app), listener);
+                    runLlmChat(node, scoped, listener);
                     pipelineHandled = true;
                     lastOutcome = "default";
                 }
@@ -136,6 +142,28 @@ public class FlowRunner {
 
     private static AskRequest withAppMeta(AskRequest request, PublishedApp app) {
         return new AskRequest(request.question(), request.history(), request.conversationId(), app.appId());
+    }
+
+    /** 截断对话历史；优先读开始节点 config.memoryWindowTurns。 */
+    AskRequest withHistoryWindow(FlowGraph graph, AskRequest request) {
+        int window = properties.getAsk().getHistoryWindowTurns();
+        try {
+            FlowNode start = graph.node(graph.startNodeId());
+            Object raw = start.config().get("memoryWindowTurns");
+            if (raw instanceof Number number) {
+                window = Math.max(0, number.intValue());
+            } else if (raw instanceof String text && !text.isBlank()) {
+                window = Math.max(0, Integer.parseInt(text.strip()));
+            }
+        } catch (RuntimeException ignored) {
+            // 保持全局默认
+        }
+        List<Turn> history = request.history() == null ? List.of() : request.history();
+        if (window <= 0 || history.size() <= window) {
+            return request;
+        }
+        List<Turn> trimmed = new ArrayList<>(history.subList(history.size() - window, history.size()));
+        return new AskRequest(request.question(), trimmed, request.conversationId(), request.appId());
     }
 
     private static String stringConfig(FlowNode node, String key, String fallback) {

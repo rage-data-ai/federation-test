@@ -52,12 +52,13 @@ class AskKnowledgeServiceTest {
                 "共 12 条",
                 "SELECT count(*) FROM ck81.pangu.alert WHERE level >= 3",
                 List.of(Map.of("item", "高危", "source", "ontology")),
-                Map.of("sourceRunId", "run-1"));
+                Map.of("sourceRunId", "run-1"),
+                AskKnowledge.KIND_SMART_ASK);
         assertEquals(AskKnowledge.APPROVED, created.status());
         assertEquals(1, service.search("最近一天高危告警有多少？", 3).size());
 
         AskKnowledge rejected = service.update(created.id(),
-                new KnowledgePatch(null, null, null, null, null, AskKnowledge.REJECTED, "口径过时"));
+                new KnowledgePatch(null, null, null, null, null, null, AskKnowledge.REJECTED, "口径过时"));
         assertEquals(AskKnowledge.REJECTED, rejected.status());
         assertTrue(service.search("最近一天高危告警有多少？", 3).isEmpty());
     }
@@ -71,6 +72,7 @@ class AskKnowledgeServiceTest {
                 new AnswerPair("答案", null, List.of()),
                 Map.of(),
                 null,
+                AskKnowledge.KIND_SMART_ASK,
                 AskKnowledge.PENDING,
                 "alice",
                 null,
@@ -79,7 +81,7 @@ class AskKnowledgeServiceTest {
                 1));
         vectors.upsert(pending.id(), pending.question());
 
-        AskKnowledge approved = service.create("已通过问题", "答案", null, List.of(), Map.of());
+        AskKnowledge approved = service.create("已通过问题", "答案", null, List.of(), Map.of(), AskKnowledge.KIND_SMART_ASK);
         assertEquals(1, service.search("已通过问题", 5).size());
         assertEquals(approved.id(), service.search("已通过问题", 5).get(0).knowledge().id());
     }

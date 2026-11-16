@@ -132,7 +132,10 @@ export function turnFromRunView(view: AskRunView): AskTurn {
   return turn
 }
 
-function buildHistory(turns: AskTurn[]): ChatHistoryItem[] {
+/** 与网关 federation.ask.history-window-turns 对齐的默认窗口（消息条数）。 */
+export const DEFAULT_HISTORY_WINDOW = 12
+
+function buildHistory(turns: AskTurn[], window = DEFAULT_HISTORY_WINDOW): ChatHistoryItem[] {
   const items: ChatHistoryItem[] = []
   for (const turn of turns) {
     items.push({ role: 'user', content: turn.question })
@@ -143,7 +146,10 @@ function buildHistory(turns: AskTurn[]): ChatHistoryItem[] {
       items.push({ role: 'assistant', content: reply })
     }
   }
-  return items
+  if (window <= 0 || items.length <= window) {
+    return items
+  }
+  return items.slice(items.length - window)
 }
 
 function asRecord(data: unknown): Record<string, unknown> {

@@ -147,7 +147,20 @@ function onNodeDragStop() {
   }
 }
 
-function addNode(type: string) {
+function defaultConfig(type: string): Record<string, unknown> {
+  if (type === 'llm_chat') {
+    return { systemPrompt: '你是有帮助的中文助手。' }
+  }
+  if (type === 'start') {
+    return { memoryWindowTurns: 12 }
+  }
+  if (type === 'knowledge') {
+    return { enabled: true, topK: 5 }
+  }
+  return {}
+}
+
+function addNode(type: string, position?: { x: number; y: number }) {
   if (props.readonly) {
     return
   }
@@ -165,11 +178,11 @@ function addNode(type: string) {
     {
       id,
       type: 'flow',
-      position: { x: maxX + 220, y: avgY || 120 },
+      position: position || { x: maxX + 220, y: avgY || 120 },
       data: {
         flowType: type,
         title: meta.title,
-        config: type === 'llm_chat' ? { systemPrompt: '你是有帮助的中文助手。' } : {}
+        config: defaultConfig(type)
       },
       sourcePosition: 'right',
       targetPosition: 'left'
@@ -177,6 +190,59 @@ function addNode(type: string) {
   ]
   selectedNodeId.value = id
   selectedEdgeId.value = ''
+  commit()
+}
+
+function onPaletteDragStart(event: DragEvent, type: string) {
+  if (props.readonly || !event.dataTransfer) {
+    return
+  }
+  event.dataTransfer.setData('application/federation-node', type)
+  event.dataTransfer.effectAllowed = 'copy'
+}
+
+function onCanvasDragOver(event: DragEvent) {
+  if (props.readonly) {
+    return
+  }
+  event.preventDefault()
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function onCanvasDrop(event: DragEvent) {
+  if (props.readonly) {
+    return
+  }
+  event.preventDefault()
+  const type = event.dataTransfer?.getData('application/federation-node')
+  if (!type) {
+    return
+  }
+  const target = event.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  addNode(type, {
+    x: Math.max(0, event.clientX - rect.left - 80),
+    y: Math.max(0, event.clientY - rect.top - 24)
+  })
+}
+
+function updateNodeConfig(key: string, value: unknown) {
+  if (!selectedNode.value) {
+    return
+  }
+  const id = selectedNode.value.id
+  nodes.value = nodes.value.map((node) => {
+    if (node.id !== id) {
+      return node
+    }
+    const data = nodeData(node)
+    return {
+      ...node,
+      data: { ...data, config: { ...data.config, [key]: value } }
+    }
+  })
   commit()
 }
 
@@ -267,7 +333,9 @@ const selectedData = computed(() => nodeData(selectedNode.value))
         type="button"
         class="palette-item"
         :disabled="readonly"
+        draggable="true"
         :style="{ '--swatch': item.color }"
+        @dragstart="onPaletteDragStart($event, item.type)"
         @click="addNode(item.type)"
       >
         <span class="swatch" aria-hidden="true" />
@@ -276,10 +344,16 @@ const selectedData = computed(() => nodeData(selectedNode.value))
           <small>{{ item.description }}</small>
         </span>
       </button>
-      <p class="hint">从节点右侧把手拖到另一节点左侧可连线；点选边可改分支条件。</p>
+      <p class="hint">从左侧拖到画布添加节点（也可点击）；节点右侧把手连线；点选边改分支条件。</p>
     </aside>
 
-    <div class="canvas" role="application" aria-label="流程画布">
+    <div
+      class="canvas"
+      role="application"
+      aria-label="流程画布"
+      @dragover="onCanvasDragOver"
+      @drop="onCanvasDrop"
+    >
       <VueFlow
         v-model:nodes="nodes"
         v-model:edges="edges"
@@ -319,6 +393,22 @@ const selectedData = computed(() => nodeData(selectedNode.value))
             @change="updateNodeTitle(($event.target as HTMLInputElement).value)"
           />
         </label>
+        <label v-if="selectedData.flowType === 'start'">
+          对话记忆（最近 N 条消息）
+          <input
+            :value="Number(selectedData.config.memoryWindowTurns ?? 12)"
+            type="number"
+            min="0"
+            max="100"
+            :disabled="readonly"
+            @change="
+              updateNodeConfig(
+                'memoryWindowTurns',
+                Number(($event.target as HTMLInputElement).value) || 0
+              )
+            "
+          />
+        </label>
         <label v-if="selectedData.flowType === 'llm_chat'">
           系统提示词
           <textarea
@@ -328,6 +418,23 @@ const selectedData = computed(() => nodeData(selectedNode.value))
             @change="updateNodePrompt(($event.target as HTMLTextAreaElement).value)"
           />
         </label>
+        <label v-if="selectedData.flowType === 'knowledge'">
+          TopK
+          <input
+            :value="Number(selectedData.config.topK ?? 5)"
+            type="number"
+            min="1"
+            max="20"
+            :disabled="readonly"
+            @change="updateNodeConfig('topK', Number(($event.target as HTMLInputElement).value) || 5)"
+          />
+        </label>
+        <p
+          v-if="['knowledge', 'ontology', 'metadata', 'insight'].includes(selectedData.flowType)"
+          class="hint"
+        >
+          当前运行仍整段折叠为一次问数；边条件（answered / continue 等）待拆跑后生效。画布用于编排与配置。
+        </p>
         <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除节点</button>
       </template>
       <template v-else-if="selectedEdge">

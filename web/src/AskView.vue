@@ -3,7 +3,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import AskAnswerClarify from './components/ask/AskAnswerClarify.vue'
 import AskFeedback from './components/ask/AskFeedback.vue'
 import AskHistory from './components/ask/AskHistory.vue'
-import AskKnowledge from './components/ask/AskKnowledge.vue'
 import AskPrompts from './components/ask/AskPrompts.vue'
 import AskSuggestions from './components/ask/AskSuggestions.vue'
 import { listPublishedApps } from './api'
@@ -56,7 +55,6 @@ onMounted(async () => {
 const VIEWS = [
   { key: 'chat', label: '对话' },
   { key: 'suggestions', label: '建议' },
-  { key: 'knowledge', label: '知识库' },
   { key: 'prompts', label: '提示词' }
 ] as const
 const view = ref<(typeof VIEWS)[number]['key']>('chat')
@@ -115,7 +113,6 @@ function startNewConversation() {
     </header>
     <p v-if="appError" class="err pad" role="alert">{{ appError }}</p>
     <AskSuggestions v-if="view === 'suggestions'" />
-    <AskKnowledge v-else-if="view === 'knowledge'" />
     <AskPrompts v-else-if="view === 'prompts'" />
     <div v-show="view === 'chat'" class="chat-layout">
       <AskHistory

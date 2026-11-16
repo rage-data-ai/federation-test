@@ -36,7 +36,11 @@ public final class DefaultFlows {
         return FlowGraph.of(
                 "start",
                 List.of(
-                        new FlowNode("start", "start", "开始", Map.of("x", 40, "y", 140)),
+                        new FlowNode(
+                                "start",
+                                "start",
+                                "开始",
+                                Map.of("x", 40, "y", 140, "memoryWindowTurns", 12)),
                         new FlowNode("knowledge", "knowledge", "知识库", Map.of("x", 240, "y", 140)),
                         new FlowNode("ontology", "ontology", "本体", Map.of("x", 460, "y", 140)),
                         new FlowNode("metadata", "metadata", "元数据", Map.of("x", 680, "y", 140)),
@@ -64,7 +68,11 @@ public final class DefaultFlows {
         return FlowGraph.of(
                 "start",
                 List.of(
-                        new FlowNode("start", "start", "开始", Map.of("x", 40, "y", 120)),
+                        new FlowNode(
+                                "start",
+                                "start",
+                                "开始",
+                                Map.of("x", 40, "y", 120, "memoryWindowTurns", 12)),
                         new FlowNode("ask", "builtin_ask", "智能问数", Map.of("x", 260, "y", 120)),
                         new FlowNode("end", "end", "结束", Map.of("x", 500, "y", 120))),
                 List.of(
@@ -76,7 +84,11 @@ public final class DefaultFlows {
         return FlowGraph.of(
                 "start",
                 List.of(
-                        new FlowNode("start", "start", "开始", Map.of("x", 40, "y", 120)),
+                        new FlowNode(
+                                "start",
+                                "start",
+                                "开始",
+                                Map.of("x", 40, "y", 120, "memoryWindowTurns", 12)),
                         new FlowNode(
                                 "chat",
                                 "llm_chat",

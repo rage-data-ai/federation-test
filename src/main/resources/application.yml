@@ -75,6 +75,8 @@ federation:
     max-path-depth: 4
     sample-rows: 3
     result-preview-rows: 50
+    # 对话记忆：最近 N 条 history（user+assistant）；开始节点可覆盖
+    history-window-turns: ${FEDERATION_ASK_HISTORY_WINDOW:12}
     # 可选：OpenAI 兼容 embeddings（NIM）。空则本地哈希嵌入。
     embed-endpoint: ${FEDERATION_ASK_EMBED_ENDPOINT:}
     embed-api-key: ${FEDERATION_ASK_EMBED_API_KEY:}

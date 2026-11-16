@@ -25,6 +25,7 @@ public final class MemoryAskKnowledgeStore implements AskKnowledgeStore {
                 item.answerPair(),
                 item.evidence() == null ? Map.of() : item.evidence(),
                 item.sourceRunId(),
+                item.kindOrDefault(),
                 item.status(),
                 item.createdBy(),
                 item.reviewedBy(),

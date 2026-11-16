@@ -434,10 +434,13 @@ export function deleteAskSuggestion(id: number) {
   return request<Json>(`/api/v1/ask/suggestions/${id}`, { method: 'DELETE' })
 }
 
-export function listAskKnowledge(status?: AskKnowledgeStatus | '') {
+export function listAskKnowledge(status?: AskKnowledgeStatus | '', kind?: string) {
   const query = new URLSearchParams()
   if (status) {
     query.set('status', status)
+  }
+  if (kind) {
+    query.set('kind', kind)
   }
   const suffix = query.toString()
   return request<AskKnowledge[]>(`/api/v1/ask/knowledge${suffix ? `?${suffix}` : ''}`)
@@ -453,6 +456,7 @@ export function createAskKnowledge(body: {
   sql?: string | null
   caliber?: Array<Record<string, unknown>>
   evidence?: Record<string, unknown>
+  kind?: string
 }) {
   return request<AskKnowledge>('/api/v1/ask/knowledge', {
     method: 'POST',

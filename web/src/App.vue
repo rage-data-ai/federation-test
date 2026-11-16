@@ -17,6 +17,7 @@ import {
 import AppsView from './AppsView.vue'
 import AskView from './AskView.vue'
 import DatasourceView from './DatasourceView.vue'
+import KnowledgeView from './KnowledgeView.vue'
 import LoginView from './LoginView.vue'
 import OntologyView from './OntologyView.vue'
 import UsersView from './UsersView.vue'
@@ -37,6 +38,7 @@ type ModuleDef = {
 const MODULES: ModuleDef[] = [
   { key: 'datasource', label: '数据源管理', short: '数据源', icon: '⛁', component: DatasourceView },
   { key: 'ontology', label: '本体建模', short: '本体', icon: '◈', component: OntologyView },
+  { key: 'knowledge', label: '知识库', short: '知识', icon: '▣', component: KnowledgeView },
   { key: 'ask', label: '智能问数', short: '问数', icon: '✦', component: AskView },
   { key: 'apps', label: '问数应用', short: '应用', icon: '◇', component: AppsView },
   { key: 'users', label: '用户管理', short: '用户', icon: '☺', component: UsersView, adminOnly: true }
