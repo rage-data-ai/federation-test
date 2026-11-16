@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeVectorIndex;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.PgvectorTermRetriever;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 
@@ -29,7 +30,12 @@ class HealthControllerWebTest {
         pgvector = mock(PgvectorTermRetriever.class);
         when(pgvector.enabled()).thenReturn(false);
         when(pgvector.activeIndex()).thenReturn("none");
-        mockMvc = MockMvcBuilders.standaloneSetup(new HealthController(properties, pgvector)).build();
+        KnowledgeVectorIndex knowledgeVectors = mock(KnowledgeVectorIndex.class);
+        when(knowledgeVectors.milvusEnabled()).thenReturn(false);
+        when(knowledgeVectors.embedderName()).thenReturn("hashing");
+        when(knowledgeVectors.dim()).thenReturn(256);
+        mockMvc = MockMvcBuilders.standaloneSetup(new HealthController(properties, pgvector, knowledgeVectors))
+                .build();
     }
 
     @Test
@@ -42,6 +48,9 @@ class HealthControllerWebTest {
                 .andExpect(jsonPath("$.ask.pgvectorConfigured").value(false))
                 .andExpect(jsonPath("$.ask.pgvectorEnabled").value(false))
                 .andExpect(jsonPath("$.ask.pgvectorIndexConfigured").value("hnsw"))
-                .andExpect(jsonPath("$.ask.pgvectorIndexActive").value("none"));
+                .andExpect(jsonPath("$.ask.pgvectorIndexActive").value("none"))
+                .andExpect(jsonPath("$.ask.knowledgeMilvus").value(false))
+                .andExpect(jsonPath("$.ask.knowledgeEmbedder").value("hashing"))
+                .andExpect(jsonPath("$.ask.knowledgeDim").value(256));
     }
 }

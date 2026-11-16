@@ -328,7 +328,7 @@ public class AskKnowledgeService {
                 vectors.delete(item.id());
             }
         } catch (RuntimeException e) {
-            // KnowledgeVectorIndex 已尽量吞掉 Milvus 错误；这里再兜底一次。
+            // 审核/CRUD 不因向量库短暂不可用而失败；有 Milvus 时无内存兜底，恢复后需重审或重建索引。
             org.slf4j.LoggerFactory.getLogger(AskKnowledgeService.class)
                     .warn("知识向量同步失败 id={}: {}", item.id(), e.toString());
         }

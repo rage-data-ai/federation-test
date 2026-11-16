@@ -1,6 +1,7 @@
 package com.cmcc.cmdevops.security.federation.ask.ontologytools;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -52,5 +53,12 @@ class HttpTermEmbedderTest {
         float[] vector = embedder.embed("高危告警");
         assertEquals(64, vector.length);
         assertTrue(HashingTermEmbedder.cosine(vector, vector) > 0.99);
+    }
+
+    @Test
+    void refusesSilentHashFallbackWhenDisabled() {
+        HttpTermEmbedder embedder = new HttpTermEmbedder(
+                "http://127.0.0.1:1/v1/embeddings", "", "x", false);
+        assertThrows(IllegalStateException.class, () -> embedder.embed("高危告警"));
     }
 }

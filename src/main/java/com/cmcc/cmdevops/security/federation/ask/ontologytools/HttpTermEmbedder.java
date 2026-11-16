@@ -33,7 +33,19 @@ public final class HttpTermEmbedder implements TermEmbedder {
     private final TermEmbedder fallback;
 
     public HttpTermEmbedder(String endpoint, String apiKey, String model) {
-        this(endpoint, apiKey, model, new HashingTermEmbedder(), new ObjectMapper(),
+        this(endpoint, apiKey, model, true);
+    }
+
+    /**
+     * @param allowFallback {@code false} 时 HTTP 失败直接抛错（知识库 + Milvus 场景，禁止静默哈希污染向量库）
+     */
+    public HttpTermEmbedder(String endpoint, String apiKey, String model, boolean allowFallback) {
+        this(
+                endpoint,
+                apiKey,
+                model,
+                allowFallback ? new HashingTermEmbedder() : null,
+                new ObjectMapper(),
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
     }
 
@@ -60,11 +72,17 @@ public final class HttpTermEmbedder implements TermEmbedder {
     @Override
     public float[] embed(String text) {
         if (text == null || text.isBlank()) {
+            if (fallback == null) {
+                throw new IllegalStateException("embeddings 拒绝空文本（无哈希回退）");
+            }
             return fallback.embed("");
         }
         try {
             return request(text);
         } catch (Exception e) {
+            if (fallback == null) {
+                throw new IllegalStateException("HTTP embedding 失败且禁止回退哈希: " + e, e);
+            }
             log.warn("HTTP embedding failed, fallback to {}: {}", fallback.name(), e.toString());
             return fallback.embed(text);
         }

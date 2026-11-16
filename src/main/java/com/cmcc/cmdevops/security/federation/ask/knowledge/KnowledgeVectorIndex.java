@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.HashingTermEmbedder;
+import com.cmcc.cmdevops.security.federation.ask.ontologytools.HttpTermEmbedder;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.TermEmbedder;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 
@@ -21,7 +22,11 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 只索引「问题」向量。有 {@code MILVUS_URI} 时写 Milvus；否则在进程内做余弦检索，方便单测与本地无 Milvus。
+ * 只索引「问题」向量。
+ * <ul>
+ *   <li>配置了 {@code MILVUS_URI}：只写/查 Milvus，必须配置 HTTP 嵌入模型，不再维护内存检索。</li>
+ *   <li>未配置 Milvus：进程内余弦检索（单测 / 本地无向量库）。</li>
+ * </ul>
  */
 @Component
 public class KnowledgeVectorIndex {
@@ -34,26 +39,37 @@ public class KnowledgeVectorIndex {
     private final int dim;
     private final RestClient milvus;
     private final ObjectMapper json;
-    private final Map<Long, float[]> memory = new ConcurrentHashMap<>();
+    /** 仅无 Milvus 时使用；有 Milvus 时保持为空。 */
+    private final Map<Long, float[]> memory;
     private volatile boolean collectionReady;
 
     @Autowired
     public KnowledgeVectorIndex(FederationProperties properties, ObjectMapper objectMapper) {
-        this.embedder = OntologyToolsEmbedder.embedder(properties);
-        this.dim = dimOf(embedder.embed("dimension-probe"));
         this.json = objectMapper;
         String uri = properties.getVector().getMilvusUri();
-        this.milvus = uri == null || uri.isBlank()
-                ? null
-                : RestClient.builder().baseUrl(uri.strip()).build();
+        boolean milvusEnabled = uri != null && !uri.isBlank();
+        this.milvus = milvusEnabled ? RestClient.builder().baseUrl(uri.strip()).build() : null;
+        this.embedder = knowledgeEmbedder(properties, milvusEnabled);
+        this.dim = dimOf(embedder.embed("dimension-probe"));
+        this.memory = milvusEnabled ? Map.of() : new ConcurrentHashMap<>();
+        if (milvusEnabled) {
+            log.info(
+                    "知识库向量：Milvus={} embedder={} dim={}（无内存回退）",
+                    uri.strip(),
+                    embedder.name(),
+                    dim);
+        } else {
+            log.info("知识库向量：未配置 Milvus，使用进程内索引 embedder={}", embedder.name());
+        }
     }
 
-    /** 单测与无 Spring 场景：可注入嵌入器；milvus 为 null 时走内存索引。 */
+    /** 单测：milvus 为 null 时走内存索引。 */
     public KnowledgeVectorIndex(TermEmbedder embedder, RestClient milvus, ObjectMapper objectMapper) {
         this.embedder = embedder;
         this.dim = dimOf(embedder.embed("dimension-probe"));
         this.milvus = milvus;
         this.json = objectMapper;
+        this.memory = milvus == null ? new ConcurrentHashMap<>() : Map.of();
     }
 
     public int dim() {
@@ -64,10 +80,14 @@ public class KnowledgeVectorIndex {
         return embedder.name();
     }
 
+    public boolean milvusEnabled() {
+        return milvus != null;
+    }
+
     public void upsert(long id, String question) {
         float[] vector = embedder.embed(question);
-        memory.put(id, vector);
         if (milvus == null) {
+            memory.put(id, vector);
             return;
         }
         try {
@@ -79,14 +99,15 @@ public class KnowledgeVectorIndex {
                             "vector", toList(vector),
                             "question", question == null ? "" : question))));
         } catch (RuntimeException e) {
-            // Milvus 不是知识库必选；本机内存索引仍可用，避免审核/创建被拖垮。
-            log.warn("Milvus 写入知识向量失败，已保留内存索引 id={}: {}", id, e.toString());
+            // 不写内存兜底：有 Milvus 时内存不是权威索引，避免多实例假命中。
+            log.warn("Milvus 写入知识向量失败 id={}: {}", id, e.toString());
+            throw e;
         }
     }
 
     public void delete(long id) {
-        memory.remove(id);
         if (milvus == null) {
+            memory.remove(id);
             return;
         }
         try {
@@ -96,6 +117,7 @@ public class KnowledgeVectorIndex {
                     "filter", "id in [" + id + "]"));
         } catch (RuntimeException e) {
             log.warn("Milvus 删除知识向量失败 id={}: {}", id, e.toString());
+            throw e;
         }
     }
 
@@ -119,8 +141,8 @@ public class KnowledgeVectorIndex {
                     "outputFields", List.of("id", "question")));
             return parseHits(response);
         } catch (RuntimeException e) {
-            log.warn("Milvus 检索失败，回退内存索引: {}", e.toString());
-            return memorySearch(query, limit);
+            log.warn("Milvus 检索失败（不回退内存）: {}", e.toString());
+            return List.of();
         }
     }
 
@@ -150,7 +172,6 @@ public class KnowledgeVectorIndex {
                         "idType", "Int64",
                         "autoID", false));
             } catch (RuntimeException e) {
-                // 已存在时 create 会失败，继续
                 log.info("Milvus 集合 {} 可能已存在: {}", COLLECTION, e.toString());
             }
             collectionReady = true;
@@ -207,16 +228,25 @@ public class KnowledgeVectorIndex {
         return vector == null ? HashingTermEmbedder.DEFAULT_DIM : vector.length;
     }
 
-    public record Hit(long id, double score) {
-    }
-
-    /** 与本体问数共用同一套嵌入配置，避免知识向量和术语向量各走各的。 */
-    static final class OntologyToolsEmbedder {
-        private OntologyToolsEmbedder() {
-        }
-
-        static TermEmbedder embedder(FederationProperties properties) {
+    /**
+     * 有 Milvus 时强制 HTTP 嵌入且禁止回退哈希，避免与集合维度/语义空间错乱。
+     */
+    static TermEmbedder knowledgeEmbedder(FederationProperties properties, boolean milvusEnabled) {
+        if (!milvusEnabled) {
             return com.cmcc.cmdevops.security.federation.ask.OntologyTools.termEmbedderOf(properties);
         }
+        String endpoint = properties.getAsk().getEmbedEndpoint();
+        if (endpoint == null || endpoint.isBlank()) {
+            throw new IllegalStateException(
+                    "已配置 MILVUS_URI，知识库必须设置 federation.ask.embed-endpoint（FEDERATION_ASK_EMBED_ENDPOINT）");
+        }
+        return new HttpTermEmbedder(
+                endpoint,
+                properties.getAsk().getEmbedApiKey(),
+                properties.getAsk().getEmbedModel(),
+                false);
+    }
+
+    public record Hit(long id, double score) {
     }
 }
