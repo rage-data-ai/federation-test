@@ -38,8 +38,12 @@ const emit = defineEmits<{
 /** any[] avoids Vue Flow Node generics (TS2589) while still driving the canvas. */
 const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
+/** 单击选中（高亮）；不直接打开配置，避免画布一点就乱。 */
 const selectedNodeId = ref('')
 const selectedEdgeId = ref('')
+/** 双击或点「配置」后才进入属性编辑。 */
+const editingNodeId = ref('')
+const editingEdgeId = ref('')
 const localError = ref('')
 const syncing = ref(false)
 const lastEmitted = ref('')
@@ -51,6 +55,12 @@ const selectedNode = computed(
 )
 const selectedEdge = computed(
   () => edges.value.find((edge) => edge.id === selectedEdgeId.value) || null
+)
+const editingNode = computed(
+  () => nodes.value.find((node) => node.id === editingNodeId.value) || null
+)
+const editingEdge = computed(
+  () => edges.value.find((edge) => edge.id === editingEdgeId.value) || null
 )
 const addable = computed(() => NODE_CATALOG.filter((item) => item.addable))
 
@@ -76,6 +86,8 @@ watch(
     edges.value = mapped.edges
     selectedNodeId.value = ''
     selectedEdgeId.value = ''
+    editingNodeId.value = ''
+    editingEdgeId.value = ''
     localError.value = ''
     lastEmitted.value = fingerprint
     nextTick(() => {
@@ -131,16 +143,54 @@ function onConnect(connection: Connection) {
 function onNodeClick(event: { node: { id: string } }) {
   selectedNodeId.value = event.node.id
   selectedEdgeId.value = ''
+  // 单击只选中，不打开配置面板
+  if (editingNodeId.value && editingNodeId.value !== event.node.id) {
+    editingNodeId.value = ''
+  }
+  editingEdgeId.value = ''
+}
+
+function onNodeDoubleClick(event: { node: { id: string } }) {
+  openNodeInspector(event.node.id)
 }
 
 function onEdgeClick(payload: { edge: { id: string } }) {
   selectedEdgeId.value = payload.edge.id
   selectedNodeId.value = ''
+  if (editingEdgeId.value && editingEdgeId.value !== payload.edge.id) {
+    editingEdgeId.value = ''
+  }
+  editingNodeId.value = ''
+}
+
+function onEdgeDoubleClick(payload: { edge: { id: string } }) {
+  openEdgeInspector(payload.edge.id)
 }
 
 function onPaneClick() {
   selectedNodeId.value = ''
   selectedEdgeId.value = ''
+  editingNodeId.value = ''
+  editingEdgeId.value = ''
+}
+
+function openNodeInspector(id: string) {
+  selectedNodeId.value = id
+  selectedEdgeId.value = ''
+  editingNodeId.value = id
+  editingEdgeId.value = ''
+}
+
+function openEdgeInspector(id: string) {
+  selectedEdgeId.value = id
+  selectedNodeId.value = ''
+  editingEdgeId.value = id
+  editingNodeId.value = ''
+}
+
+function closeInspector() {
+  editingNodeId.value = ''
+  editingEdgeId.value = ''
 }
 
 function onNodeDragStop() {
@@ -211,8 +261,7 @@ function addNode(type: string, position?: { x: number; y: number }) {
       targetPosition: 'left'
     }
   ]
-  selectedNodeId.value = id
-  selectedEdgeId.value = ''
+  openNodeInspector(id)
   commit()
 }
 
@@ -252,10 +301,10 @@ function onCanvasDrop(event: DragEvent) {
 }
 
 function toggleSkill(skillId: AskSkillId, enabled: boolean) {
-  if (!selectedNode.value) {
+  if (!editingNode.value) {
     return
   }
-  const data = nodeData(selectedNode.value)
+  const data = nodeData(editingNode.value)
   const current = new Set(skillsForNode(data.flowType, data.config))
   if (enabled) {
     current.add(skillId)
@@ -279,10 +328,10 @@ function inputValue(config: Record<string, unknown>, name: string, fallback: unk
 }
 
 function updateInputValue(name: string, value: unknown) {
-  if (!selectedNode.value) {
+  if (!editingNode.value) {
     return
   }
-  const data = nodeData(selectedNode.value)
+  const data = nodeData(editingNode.value)
   const inputs = { ...((data.config.inputs || {}) as Record<string, unknown>), [name]: value }
   updateNodeConfig('inputs', inputs)
   if (
@@ -322,10 +371,10 @@ function skillAllowed(flowType: string, skillId: AskSkillId): boolean {
 }
 
 function insertVarIntoPrompt(path: string) {
-  if (!selectedNode.value || !path) {
+  if (!editingNode.value || !path) {
     return
   }
-  const data = nodeData(selectedNode.value)
+  const data = nodeData(editingNode.value)
   const current = String(
     inputValue(data.config, 'systemPrompt', data.config.systemPrompt || '') ?? ''
   )
@@ -335,10 +384,10 @@ function insertVarIntoPrompt(path: string) {
 }
 
 function updateNodeConfig(key: string, value: unknown) {
-  if (!selectedNode.value) {
+  if (!editingNode.value) {
     return
   }
-  const id = selectedNode.value.id
+  const id = editingNode.value.id
   nodes.value = nodes.value.map((node) => {
     if (node.id !== id) {
       return node
@@ -365,6 +414,7 @@ function removeSelected() {
     nodes.value = nodes.value.filter((node) => node.id !== id)
     edges.value = edges.value.filter((edge) => edge.source !== id && edge.target !== id)
     selectedNodeId.value = ''
+    editingNodeId.value = ''
     commit()
     return
   }
@@ -372,15 +422,16 @@ function removeSelected() {
     const id = selectedEdge.value.id
     edges.value = edges.value.filter((edge) => edge.id !== id)
     selectedEdgeId.value = ''
+    editingEdgeId.value = ''
     commit()
   }
 }
 
 function updateNodeTitle(title: string) {
-  if (!selectedNode.value) {
+  if (!editingNode.value) {
     return
   }
-  const id = selectedNode.value.id
+  const id = editingNode.value.id
   nodes.value = nodes.value.map((node) => {
     if (node.id !== id) {
       return node
@@ -392,10 +443,10 @@ function updateNodeTitle(title: string) {
 }
 
 function updateNodePrompt(prompt: string) {
-  if (!selectedNode.value) {
+  if (!editingNode.value) {
     return
   }
-  const id = selectedNode.value.id
+  const id = editingNode.value.id
   nodes.value = nodes.value.map((node) => {
     if (node.id !== id) {
       return node
@@ -410,11 +461,12 @@ function updateNodePrompt(prompt: string) {
 }
 
 function updateEdgeWhen(when: string) {
-  if (!selectedEdge.value) {
+  if (!editingEdge.value) {
     return
   }
+  const id = editingEdge.value.id
   edges.value = edges.value.map((edge) =>
-    edge.id === selectedEdge.value!.id
+    edge.id === id
       ? {
           ...edge,
           data: { ...(edge.data || {}), when },
@@ -426,7 +478,8 @@ function updateEdgeWhen(when: string) {
   commit()
 }
 
-const selectedData = computed(() => nodeData(selectedNode.value))
+const selectedData = computed(() => nodeData(editingNode.value))
+const selectedSummary = computed(() => nodeData(selectedNode.value))
 </script>
 
 <template>
@@ -450,7 +503,7 @@ const selectedData = computed(() => nodeData(selectedNode.value))
           <small>{{ item.description }}</small>
         </span>
       </button>
-      <p class="hint">从左侧拖到画布添加节点（也可点击）；节点右侧把手连线；点选边改分支条件。</p>
+      <p class="hint">拖到画布添加节点；单击选中，双击或点「配置」打开属性（避免一点就改）。</p>
     </aside>
 
     <div
@@ -471,7 +524,9 @@ const selectedData = computed(() => nodeData(selectedNode.value))
         fit-view-on-init
         @connect="onConnect"
         @node-click="onNodeClick"
+        @node-double-click="onNodeDoubleClick"
         @edge-click="onEdgeClick"
+        @edge-double-click="onEdgeDoubleClick"
         @pane-click="onPaneClick"
         @node-drag-stop="onNodeDragStop"
       >
@@ -483,8 +538,11 @@ const selectedData = computed(() => nodeData(selectedNode.value))
     </div>
 
     <aside class="inspector" aria-label="节点属性">
-      <template v-if="selectedNode">
-        <h3>节点</h3>
+      <template v-if="editingNode">
+        <div class="inspector-head">
+          <h3>配置节点</h3>
+          <button type="button" class="ghost" @click="closeInspector">关闭</button>
+        </div>
         <label>
           类型
           <input :value="catalogItem(selectedData.flowType).title" type="text" readonly />
@@ -600,7 +658,7 @@ const selectedData = computed(() => nodeData(selectedNode.value))
                 >
                   <option value="">选择…</option>
                   <option
-                    v-for="item in availableVarPaths(selectedNode.id)"
+                    v-for="item in availableVarPaths(editingNode.id)"
                     :key="item.path"
                     :value="item.path"
                   >
@@ -627,7 +685,7 @@ const selectedData = computed(() => nodeData(selectedNode.value))
               >
                 <option value="">（字面量 / 空）</option>
                 <option
-                  v-for="item in availableVarPaths(selectedNode.id)"
+                  v-for="item in availableVarPaths(editingNode.id)"
                   :key="item.path"
                   :value="item.path"
                 >
@@ -653,7 +711,7 @@ const selectedData = computed(() => nodeData(selectedNode.value))
           <legend>输出</legend>
           <ul class="io-out">
             <li v-for="port in portsFor(selectedData.flowType).outputs" :key="port.name">
-              <code>{{ selectedNode.id }}.{{ port.name }}</code>
+              <code>{{ editingNode.id }}.{{ port.name }}</code>
               <small>{{ port.label }} — {{ port.description }}</small>
             </li>
           </ul>
@@ -694,12 +752,15 @@ const selectedData = computed(() => nodeData(selectedNode.value))
         </fieldset>
         <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除节点</button>
       </template>
-      <template v-else-if="selectedEdge">
-        <h3>连线 / 分支</h3>
+      <template v-else-if="editingEdge">
+        <div class="inspector-head">
+          <h3>配置连线</h3>
+          <button type="button" class="ghost" @click="closeInspector">关闭</button>
+        </div>
         <label>
           条件
           <select
-            :value="String(selectedEdge.data?.when || 'default')"
+            :value="String(editingEdge.data?.when || 'default')"
             :disabled="readonly"
             @change="updateEdgeWhen(($event.target as HTMLSelectElement).value)"
           >
@@ -708,12 +769,27 @@ const selectedData = computed(() => nodeData(selectedNode.value))
             </option>
           </select>
         </label>
-        <p class="hint">{{ selectedEdge.source }} → {{ selectedEdge.target }}</p>
+        <p class="hint">{{ editingEdge.source }} → {{ editingEdge.target }}</p>
         <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除连线</button>
+      </template>
+      <template v-else-if="selectedNode">
+        <h3>已选中</h3>
+        <p class="sel-title">{{ selectedSummary.title || selectedNode.id }}</p>
+        <p class="hint">{{ catalogItem(selectedSummary.flowType).title }} · 单击仅选中</p>
+        <button type="button" class="primary" @click="openNodeInspector(selectedNode.id)">配置</button>
+        <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除节点</button>
+        <p class="hint">也可双击节点打开配置。</p>
+      </template>
+      <template v-else-if="selectedEdge">
+        <h3>已选中连线</h3>
+        <p class="hint">{{ selectedEdge.source }} → {{ selectedEdge.target }}</p>
+        <button type="button" class="primary" @click="openEdgeInspector(selectedEdge.id)">配置</button>
+        <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除连线</button>
+        <p class="hint">也可双击连线打开配置。</p>
       </template>
       <template v-else>
         <h3>属性</h3>
-        <p class="hint">点选画布上的节点或连线进行编辑。</p>
+        <p class="hint">单击选中节点/连线；双击或点「配置」再编辑，避免误触改参。</p>
       </template>
     </aside>
   </div>
@@ -739,6 +815,50 @@ const selectedData = computed(() => nodeData(selectedNode.value))
   padding: 12px;
   background: var(--panel-2);
   overflow: auto;
+}
+
+.inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inspector-head h3 {
+  margin: 0;
+}
+
+.sel-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.inspector .primary,
+.inspector .ghost,
+.inspector .danger {
+  width: 100%;
+}
+
+.inspector .ghost {
+  width: auto;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.inspector .primary {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
 }
 
 .skills {
