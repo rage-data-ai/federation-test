@@ -29,7 +29,7 @@
 
 - 控制台用 Vue Flow 画布拖拽节点、连线、编辑分支条件（`when`）
 - 节点坐标写入 `config.x` / `config.y`，与一期 JSON 兼容
-- 后续：将 `builtin_ask` 拆为 `knowledge` / `ontology` / `metadata` / `insight` 并可运行
+- 后续：将 `builtin_ask` 拆为 `knowledge` / `ontology` / `metadata` / `insight` 并可运行；拆分方案与风险见 [`docs/chatflow-stage-nodes.md`](chatflow-stage-nodes.md)
 
 ### 阶段 3 — 应用能力加深
 
