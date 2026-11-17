@@ -39,6 +39,11 @@ build/
 ### Mac OS ###
 .DS_Store
 
+### Local secrets (never commit) ###
+.env
+.env.local
+web/.env.local
+
 ### Gateway local catalog store ###
 data/
 
