@@ -350,13 +350,68 @@ test.describe('console smoke', () => {
 
     await page.goto('/')
     await expect(page.getByRole('heading', { name: '创建管理员', level: 1 })).toBeVisible()
+    const submit = page.getByRole('button', { name: '创建并进入' })
+    // 未填完也可点；提交时给出明确错误，而不是一直灰掉。
+    await expect(submit).toBeEnabled()
+    await submit.click()
+    await expect(page.getByRole('alert')).toContainText('用户名至少 3 位')
+
     await page.getByLabel('用户名').fill('admin')
     await page.getByLabel('显示名（可选）').fill('管理员')
     await page.getByLabel('密码', { exact: true }).fill('admin-pass-1')
     await page.getByLabel('确认密码').fill('admin-pass-1')
-    await page.getByRole('button', { name: '创建并进入' }).click()
+    await expect(submit).toBeEnabled()
+    await submit.click()
     await expect(page.getByRole('navigation', { name: '模块' })).toBeVisible()
     await expect(page.getByRole('button', { name: '身份：admin' })).toContainText('管理员')
+  })
+
+  test('setup submit reads autofilled password fields', async ({ page }) => {
+    authStub.needsSetup = true
+    authStub.me = null
+    await page.route('**/api/v1/auth/setup', (route) => {
+      authStub.needsSetup = false
+      authStub.me = {
+        name: 'autofill',
+        displayName: 'autofill',
+        localAccount: true,
+        roles: ['ADMIN', 'QUERY'],
+        securityEnabled: true,
+        jwtEnabled: false,
+        catalogAcl: false,
+        catalogs: ['*']
+      }
+      return route.fulfill({
+        json: {
+          token: 'tok-auto',
+          expiresAt: 9,
+          user: {
+            id: 2,
+            username: 'autofill',
+            displayName: 'autofill',
+            roles: ['ADMIN', 'QUERY'],
+            status: 'active',
+            createdAt: 1,
+            lastLoginAt: 1
+          }
+        }
+      })
+    })
+
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: '创建管理员', level: 1 })).toBeVisible()
+    // 模拟浏览器自动填充：只改 DOM value，不派发 input，旧逻辑会让按钮一直 disabled。
+    await page.locator('input[name="username"]').evaluate((el) => {
+      ;(el as HTMLInputElement).value = 'autofill'
+    })
+    await page.locator('input[name="password"]').evaluate((el) => {
+      ;(el as HTMLInputElement).value = 'autofill-pass'
+    })
+    await page.locator('input[name="confirm"]').evaluate((el) => {
+      ;(el as HTMLInputElement).value = 'autofill-pass'
+    })
+    await page.getByRole('button', { name: '创建并进入' }).click()
+    await expect(page.getByRole('navigation', { name: '模块' })).toBeVisible()
   })
 
   test('gateway that requires login: sign in, manage users, sign out, and expire', async ({ page }) => {
