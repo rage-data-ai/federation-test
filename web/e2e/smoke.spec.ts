@@ -292,6 +292,30 @@ test.describe('console smoke', () => {
     expect(asked.map((body) => body.conversationId)).toEqual([undefined, 'conv-1'])
   })
 
+  test('without login cannot open the console shell', async ({ page }) => {
+    authStub.needsSetup = false
+    authStub.me = null
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: '登录控制台', level: 1 })).toBeVisible()
+    await expect(page.locator('#main-stage')).toHaveCount(0)
+    await expect(page.getByRole('navigation', { name: '模块' })).toHaveCount(0)
+  })
+
+  test('anonymous me response stays on login', async ({ page }) => {
+    authStub.needsSetup = false
+    authStub.me = {
+      name: 'anonymous',
+      roles: [],
+      securityEnabled: false,
+      jwtEnabled: false,
+      catalogAcl: false,
+      catalogs: []
+    }
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: '登录控制台', level: 1 })).toBeVisible()
+    await expect(page.locator('#main-stage')).toHaveCount(0)
+  })
+
   test('first-time setup creates the admin account', async ({ page }) => {
     authStub.needsSetup = true
     authStub.me = null
@@ -518,8 +542,8 @@ test.describe('console smoke', () => {
         json: {
           name: 'alice',
           roles: ['QUERY'],
-          securityEnabled: false,
-          jwtEnabled: false,
+          securityEnabled: true,
+          jwtEnabled: true,
           catalogAcl: false,
           catalogs: []
         }
@@ -559,7 +583,7 @@ test.describe('console smoke', () => {
   test('desktop shell visual baseline', async ({ page }) => {
     await page.route('**/api/v1/auth/me', (route) =>
       route.fulfill({
-        json: { name: 'root', roles: ['ADMIN', 'QUERY'], securityEnabled: false, jwtEnabled: false, catalogAcl: false, catalogs: [] }
+        json: { name: 'root', roles: ['ADMIN', 'QUERY'], securityEnabled: true, jwtEnabled: true, catalogAcl: false, catalogs: [] }
       })
     )
     await page.route('**/api/v1/llm/config', (route) =>
