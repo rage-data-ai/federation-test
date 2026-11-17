@@ -171,7 +171,7 @@ function applyModel(id: string) {
   llmForm.baseUrl = preset.baseUrl
 }
 
-/** 先看是否需要首次管理员，再走登录态。 */
+/** 先看是否需要首次管理员，再走登录态。鉴权始终开启，失败时进登录页而不是匿名控制台。 */
 async function bootstrapGate() {
   try {
     const status = await authSetupStatus()
@@ -182,19 +182,25 @@ async function bootstrapGate() {
       return
     }
   } catch (e) {
-    // 网关连不上时仍进控制台，由各模块自己提示。
-    gate.value = 'ready'
-    if (getAccessToken()) {
-      authError.value = errMessage(e)
+    // setup-status 404/500（旧网关）或网络错误：继续用 /me 探测，绝不匿名放行。
+    if (!(e instanceof ApiError)) {
+      loginNotice.value = errMessage(e)
     }
-    return
   }
   await refreshAuth()
 }
 
 async function refreshAuth() {
   try {
-    authUser.value = await authMe()
+    const me = await authMe()
+    // 旧网关在关闭鉴权时会返回 anonymous；新逻辑一律要求具名登录。
+    if (!me?.name || me.name === 'anonymous' || me.securityEnabled === false) {
+      clearAccessToken()
+      authUser.value = null
+      gate.value = 'login'
+      return
+    }
+    authUser.value = me
     authError.value = ''
     gate.value = 'ready'
   } catch (e) {
@@ -203,10 +209,9 @@ async function refreshAuth() {
       gate.value = 'login'
       return
     }
-    gate.value = 'ready'
-    if (getAccessToken()) {
-      authError.value = errMessage(e)
-    }
+    clearAccessToken()
+    gate.value = 'login'
+    loginNotice.value = errMessage(e)
   }
 }
 

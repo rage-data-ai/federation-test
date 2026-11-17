@@ -10,7 +10,7 @@
 
 ## 首次管理员
 
-库里还没有任何本地账号时，打开控制台会进入「首次配置管理员」页；也可调用：
+库里**还没有任何本地账号**时，打开控制台会进入「创建管理员」页。若 `fed_user` 里已有账号（包括以前手动建的），则只显示登录页，不会再出现首次配置。要重新走首次配置：清空 `fed_user` / `fed_user_session`，并确保未设置 `FEDERATION_ADMIN_USER` / `FEDERATION_ADMIN_PASSWORD`（否则启动时会直接补建管理员，跳过向导），然后重启网关。也可调用：
 
 ```bash
 curl -s localhost:18080/api/v1/auth/setup-status

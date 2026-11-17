@@ -518,8 +518,8 @@ test.describe('console smoke', () => {
         json: {
           name: 'alice',
           roles: ['QUERY'],
-          securityEnabled: false,
-          jwtEnabled: false,
+          securityEnabled: true,
+          jwtEnabled: true,
           catalogAcl: false,
           catalogs: []
         }
@@ -559,7 +559,7 @@ test.describe('console smoke', () => {
   test('desktop shell visual baseline', async ({ page }) => {
     await page.route('**/api/v1/auth/me', (route) =>
       route.fulfill({
-        json: { name: 'root', roles: ['ADMIN', 'QUERY'], securityEnabled: false, jwtEnabled: false, catalogAcl: false, catalogs: [] }
+        json: { name: 'root', roles: ['ADMIN', 'QUERY'], securityEnabled: true, jwtEnabled: true, catalogAcl: false, catalogs: [] }
       })
     )
     await page.route('**/api/v1/llm/config', (route) =>
