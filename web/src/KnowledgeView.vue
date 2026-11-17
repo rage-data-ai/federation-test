@@ -7,7 +7,7 @@ import AskKnowledge from './components/ask/AskKnowledge.vue'
     <header class="module-head">
       <div class="head-main">
         <h1 id="knowledge-title">知识库</h1>
-        <p class="hint">维护通用与智能问数知识；Milvus 可选，不可用时自动回退内存检索。</p>
+        <p class="hint">维护通用与智能问数知识；配置 Milvus + 嵌入模型做向量召回（无 Milvus 时仅本地开发用进程内索引）。</p>
       </div>
     </header>
     <AskKnowledge />

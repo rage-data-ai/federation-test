@@ -227,7 +227,7 @@ async function removeItem(item: AskKnowledge) {
     <section class="recall" aria-labelledby="recall-title">
       <header class="recall-head">
         <h2 id="recall-title">召回测试</h2>
-        <p class="hint">输入问题，直接查看向量/内存检索命中（不跑大模型判定）。仅检索「已通过」知识。</p>
+        <p class="hint">输入问题，直接查看向量召回命中与分数（不跑大模型判定）。仅检索「已通过」知识。</p>
       </header>
       <form class="recall-form" aria-label="知识召回测试" @submit.prevent="runRecallTest">
         <label>

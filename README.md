@@ -158,7 +158,8 @@ SQL 以 `EXPLAIN` 开头时，前缀会原样下发给引擎。`/explain` 只返
 | `FEDERATION_ADMIN_USER` / `PASSWORD` | 可选：启动时创建本地管理员（也可在控制台首次配置） |
 | `FEDERATION_SESSION_TTL_HOURS` | 本地账号会话有效期（小时，默认 24） |
 | `LLM_*` | 大模型初始值（也可在控制台写入 `fed_llm`） |
-| `MILVUS_URI` | 非空则用 Milvus REST，否则内存演示 |
+| `MILVUS_URI` | 默认 `http://127.0.0.1:19530`；知识库与 SQL `vector_search` 走 Milvus。设空可关（仅单测） |
+| `FEDERATION_ASK_EMBED_ENDPOINT` | 知识/术语嵌入（OpenAI 兼容）；默认启用 Milvus 时必填，失败不回退哈希 |
 
 - Trino catalog 文件目录：`federation.trino.catalog-dir`（默认 `docker/trino/catalog`）。
 - Doris 走 MySQL 协议直连（默认端口 `9030`）。
