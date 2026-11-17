@@ -62,6 +62,17 @@ export type LlmTestResult = {
   [key: string]: unknown
 }
 
+export type EmbedConfig = {
+  configured?: boolean
+  endpoint?: string
+  model?: string
+  apiKeySet?: boolean
+  embedder?: string
+  dim?: number
+  milvus?: boolean
+  [key: string]: unknown
+}
+
 export type QueryColumn = {
   name: string
   type?: string

@@ -62,6 +62,19 @@ test.describe('console smoke', () => {
         json: { configured: true, apiKeySet: true, protocol: 'openai', model: 'qwen', baseUrl: 'http://llm.local' }
       })
     )
+    await page.route('**/api/v1/ask/embed/config', (route) =>
+      route.fulfill({
+        json: {
+          configured: true,
+          apiKeySet: true,
+          endpoint: 'http://embed.local/v1',
+          model: 'embedding-3',
+          embedder: 'http',
+          dim: 32,
+          milvus: true
+        }
+      })
+    )
     await page.route('**/api/v1/catalogs', (route) => route.fulfill({ json: [] }))
     await page.route('**/api/v1/examples', (route) => route.fulfill({ json: [] }))
     await page.route('**/api/v1/metadata**', (route) => route.fulfill({ json: [] }))
@@ -148,13 +161,33 @@ test.describe('console smoke', () => {
     await page.getByRole('button', { name: '大模型配置' }).click()
     const dialog = page.getByRole('dialog', { name: '大模型' })
     await expect(dialog).toBeVisible()
-    const model = dialog.getByLabel('模型')
+    const model = dialog.getByRole('combobox', { name: '模型', exact: true })
     await expect(model).toHaveAttribute('list', 'llm-model-presets')
     await model.fill('my-local-qwen')
     await expect(model).toHaveValue('my-local-qwen')
     await dialog.getByRole('button', { name: 'GPT-4o' }).click()
     await expect(model).toHaveValue('gpt-4o')
-    await expect(dialog.getByLabel('接口地址')).toHaveValue('https://api.openai.com/v1')
+    await expect(dialog.getByRole('textbox', { name: '接口地址' })).toHaveValue('https://api.openai.com/v1')
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+  })
+
+  test('llm dialog embeds section loads and applies presets', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: '大模型配置' }).click()
+    const dialog = page.getByRole('dialog', { name: '大模型' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: '嵌入模型' })).toBeVisible()
+    const embedModel = dialog.getByRole('combobox', { name: '嵌入模型', exact: true })
+    await expect(embedModel).toHaveValue('embedding-3')
+    await expect(dialog.getByRole('textbox', { name: '嵌入接口' })).toHaveValue('http://embed.local/v1')
+    await dialog.getByRole('button', { name: '智谱 embedding-3' }).click()
+    await expect(embedModel).toHaveValue('embedding-3')
+    await expect(dialog.getByRole('textbox', { name: '嵌入接口' })).toHaveValue(
+      'https://open.bigmodel.cn/api/paas/v4/embeddings'
+    )
+    await expect(dialog.getByRole('button', { name: '测试嵌入' })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: '保存嵌入模型' })).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
   })
@@ -609,6 +642,19 @@ test.describe('console smoke', () => {
         json: { configured: true, apiKeySet: true, protocol: 'openai', model: 'qwen', baseUrl: 'http://llm.local' }
       })
     )
+    await page.route('**/api/v1/ask/embed/config', (route) =>
+      route.fulfill({
+        json: {
+          configured: true,
+          apiKeySet: true,
+          endpoint: 'http://embed.local/v1',
+          model: 'embedding-3',
+          embedder: 'http',
+          dim: 32,
+          milvus: true
+        }
+      })
+    )
     // Default module (datasource) loads in parallel; without stubs a secured gateway 401s and kicks to login.
     await page.route('**/api/v1/catalogs', (route) => route.fulfill({ json: [] }))
     await page.route('**/api/v1/examples', (route) => route.fulfill({ json: [] }))
@@ -644,6 +690,19 @@ test.describe('console smoke', () => {
     await page.route('**/api/v1/llm/config', (route) =>
       route.fulfill({
         json: { configured: true, apiKeySet: true, protocol: 'openai', model: 'qwen', baseUrl: 'http://llm.local' }
+      })
+    )
+    await page.route('**/api/v1/ask/embed/config', (route) =>
+      route.fulfill({
+        json: {
+          configured: true,
+          apiKeySet: true,
+          endpoint: 'http://embed.local/v1',
+          model: 'embedding-3',
+          embedder: 'http',
+          dim: 32,
+          milvus: true
+        }
       })
     )
     await page.route('**/api/v1/catalogs', (route) => route.fulfill({ json: [] }))

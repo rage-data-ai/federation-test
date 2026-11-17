@@ -16,6 +16,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.cmcc.cmdevops.security.federation.ask.AskService;
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
+import com.cmcc.cmdevops.security.federation.ask.embed.AskEmbedSettings;
 import com.cmcc.cmdevops.security.federation.chatflow.ChatflowRuntime;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient.Settings;
@@ -33,11 +34,17 @@ public class AskController {
     private final AskService askService;
     private final ChatflowRuntime chatflowRuntime;
     private final LlmClient llmClient;
+    private final AskEmbedSettings embedSettings;
 
-    public AskController(AskService askService, ChatflowRuntime chatflowRuntime, LlmClient llmClient) {
+    public AskController(
+            AskService askService,
+            ChatflowRuntime chatflowRuntime,
+            LlmClient llmClient,
+            AskEmbedSettings embedSettings) {
         this.askService = askService;
         this.chatflowRuntime = chatflowRuntime;
         this.llmClient = llmClient;
+        this.embedSettings = embedSettings;
     }
 
     @GetMapping("/llm/status")
@@ -61,6 +68,27 @@ public class AskController {
     public Map<String, Object> testLlm(@RequestBody Settings settings) {
         try {
             return Map.of("success", true, "message", llmClient.test(settings));
+        } catch (RuntimeException e) {
+            return Map.of("success", false, "message", e.getMessage() == null ? e.toString() : e.getMessage());
+        }
+    }
+
+    @GetMapping("/ask/embed/config")
+    public Map<String, Object> embedConfig() {
+        return embedSettings.view();
+    }
+
+    @RequireRole(GatewayRole.ADMIN)
+    @PutMapping("/ask/embed/config")
+    public Map<String, Object> updateEmbed(@RequestBody AskEmbedSettings.Settings settings) {
+        return embedSettings.update(settings);
+    }
+
+    @RequireRole(GatewayRole.ADMIN)
+    @PostMapping("/ask/embed/test")
+    public Map<String, Object> testEmbed(@RequestBody AskEmbedSettings.Settings settings) {
+        try {
+            return embedSettings.test(settings);
         } catch (RuntimeException e) {
             return Map.of("success", false, "message", e.getMessage() == null ? e.toString() : e.getMessage());
         }
