@@ -47,13 +47,22 @@ cd web && npm install && npm run dev
 
 数据源、元数据和模型配置存在配置库的 `fed_catalog`、`fed_meta_table`、`fed_meta_column`、`fed_llm`。问数记录、评价和建议在 `fed_ask_run`、`fed_ask_feedback`、`fed_ask_suggestion`；共享知识正本在 `fed_ask_knowledge`（问题向量在 Milvus，`MILVUS_URI`）；补充提示词在 `fed_ask_prompt`（全局≈Hermes `MEMORY.md`，个人≈`USER.md`）。本体图在 `data/tdb2`。
 
-一键体验（MySQL + Trino + 网关，控制台打进网关镜像，打开 http://localhost:18080）：
+Docker Compose 分两套：
+
+| 文件 | 用途 |
+|------|------|
+| `docker-compose.yml` | 全家桶：MySQL + Trino + Milvus + 网关（控制台打进镜像） |
+| `docker-compose.deps.yml` | 只起依赖，本机再 `mvn spring-boot:run` / `npm run dev` |
 
 ```bash
+# 一键体验（打开 http://localhost:18080）
 docker compose up -d --build
+
+# 本地开发只起依赖（MySQL :3307、Trino :8081、Milvus :19530）
+docker compose -f docker-compose.deps.yml up -d
 ```
 
-仅启动 Trino 时也可 `docker compose up -d trino`。
+Milvus 为单机嵌入式 etcd + 本地存储（`docker/milvus/`），不另起 etcd/minio。仅启动某一依赖时例如：`docker compose -f docker-compose.deps.yml up -d milvus`。
 
 ## 接口
 
