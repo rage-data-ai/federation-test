@@ -8,7 +8,7 @@
 
 ## 部署建议
 
-1. 生产环境设置 `FEDERATION_SECURITY_ENABLED=true`，并为每个调用方配置独立 Bearer token（`federation.security.tokens`）。
+1. 鉴权始终开启；为每个调用方配置独立 Bearer token（`federation.security.tokens`），或使用本地账号登录。首次部署在控制台创建管理员，或设置 `FEDERATION_ADMIN_USER` / `FEDERATION_ADMIN_PASSWORD`。
 2. 通过 `federation.security.roles` 分配角色：`QUERY`（查询/问数）、`ADMIN`（数据源/元数据/本体/模型写入）。未配置 roles 的用户默认拥有全部角色。
 2b. 可选 `federation.security.catalogs`（用户 → catalog/表）：非空时启用资源 ACL；`ADMIN` 绕过。
 2c. 可选 `federation.security.row-filters`（用户 → `catalog.schema.table:predicate`）：查询触及该表时，SQL 须包含谓词列标识，否则 403。

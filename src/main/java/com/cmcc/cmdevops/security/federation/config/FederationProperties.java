@@ -189,7 +189,8 @@ public class FederationProperties {
     }
 
     public static class Security {
-        private boolean enabled = false;
+        /** 鉴权始终开启；保留字段仅为兼容旧配置，设为 false 也会被忽略。 */
+        private boolean enabled = true;
         /** 用户名 → Bearer token（兼容旧配置；未单独配 roles 时默认 QUERY+ADMIN） */
         private Map<String, String> tokens = new LinkedHashMap<>();
         /** 用户名 → 逗号分隔角色，如 QUERY 或 QUERY,ADMIN */

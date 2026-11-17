@@ -41,19 +41,14 @@ class BearerAuthFilterTest {
     }
 
     @Test
-    void allowsAnonymousWhenDisabled() throws Exception {
+    void rejectsAnonymousEvenWhenEnabledFlagIsFalse() throws Exception {
         FederationProperties properties = new FederationProperties();
         properties.getSecurity().setEnabled(false);
         BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt(), noUsers(), new TokenRevocationService());
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/catalogs");
         MockHttpServletResponse response = new MockHttpServletResponse();
-        AtomicBoolean passed = new AtomicBoolean();
-        filter.doFilter(request, response, (req, res) -> {
-            assertEquals("anonymous", GatewayUser.current().name());
-            passed.set(true);
-        });
-        assertTrue(passed.get());
-        assertEquals(200, response.getStatus());
+        filter.doFilter(request, response, new MockFilterChain());
+        assertEquals(401, response.getStatus());
     }
 
     @Test
@@ -167,6 +162,7 @@ class BearerAuthFilterTest {
         properties.getSecurity().setEnabled(true);
         UserService users = new UserService(
                 new MemoryUserStore(), properties, new BCryptPasswordEncoder(4), System::currentTimeMillis);
+        users.bootstrapAdmin("root", "root-pass-11", null);
         String token = users.register("alice", "alice-pass-1", null).token();
         BearerAuthFilter filter = new BearerAuthFilter(
                 properties, noJwt(), usersOf(users), new TokenRevocationService());
@@ -189,16 +185,20 @@ class BearerAuthFilterTest {
     }
 
     @Test
-    void registerAndLoginNeedNoBearerButOtherAuthPathsDo() throws Exception {
+    void registerLoginAndSetupNeedNoBearerButOtherAuthPathsDo() throws Exception {
         FederationProperties properties = new FederationProperties();
         properties.getSecurity().setEnabled(true);
         BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt(), noUsers(), new TokenRevocationService());
-        for (String path : new String[] {"/api/v1/auth/register", "/api/v1/auth/login"}) {
+        for (String path : new String[] {"/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/setup"}) {
             AtomicBoolean passed = new AtomicBoolean();
             filter.doFilter(new MockHttpServletRequest("POST", path), new MockHttpServletResponse(),
                     (req, res) -> passed.set(true));
             assertTrue(passed.get(), path);
         }
+        AtomicBoolean statusOk = new AtomicBoolean();
+        filter.doFilter(new MockHttpServletRequest("GET", "/api/v1/auth/setup-status"), new MockHttpServletResponse(),
+                (req, res) -> statusOk.set(true));
+        assertTrue(statusOk.get());
         MockHttpServletResponse getLogin = new MockHttpServletResponse();
         filter.doFilter(new MockHttpServletRequest("GET", "/api/v1/auth/login"), getLogin, new MockFilterChain());
         assertEquals(401, getLogin.getStatus());

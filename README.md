@@ -92,14 +92,14 @@ docker compose up -d --build
 }
 ```
 
-`engine` 可强制指定 `trino` / `direct` / `spark`。生产可把 `FEDERATION_SECURITY_ENABLED=true`：控制台走本地账号注册 / 登录（见 [`docs/auth.md`](docs/auth.md)），脚本仍可带 `Authorization: Bearer <token>`：
+`engine` 可强制指定 `trino` / `direct` / `spark`。鉴权始终开启：控制台走本地账号登录 / 注册（见 [`docs/auth.md`](docs/auth.md)），脚本带 `Authorization: Bearer <token>`：
 
 | 用户 | 默认令牌环境变量 | 角色 |
 |------|------------------|------|
 | `demo` | `FEDERATION_DEMO_TOKEN` | `QUERY,ADMIN` |
 | `reader` | `FEDERATION_READER_TOKEN` | `QUERY`（只读查询/问数） |
 
-首个本地管理员用 `FEDERATION_ADMIN_USER` / `FEDERATION_ADMIN_PASSWORD` 在启动时创建；会话有效期 `FEDERATION_SESSION_TTL_HOURS`（默认 24）。写入数据源、元数据、本体、模型配置需要 `ADMIN`。可选 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出 tracing。多实例吊销可配 `FEDERATION_SECURITY_REVOCATION_REDIS_URI`（或 `federation.security.revocation-redis-uri`）。问数术语嵌入可配 `FEDERATION_ASK_EMBED_ENDPOINT` / `FEDERATION_ASK_EMBED_API_KEY` / `FEDERATION_ASK_EMBED_MODEL`（OpenAI 兼容，含 NVIDIA NIM）；未配置时用本地哈希嵌入。术语向量默认 `FEDERATION_ASK_EMBED_STORE=both`（联邦库 + 落盘）。可选 pgvector：`FEDERATION_ASK_PGVECTOR_URL`、`FEDERATION_ASK_PGVECTOR_INDEX`（`hnsw`/`ivfflat`/`none`）。API 文档：`/swagger-ui.html`、`/v3/api-docs`。嵌入策略见 [`docs/adr/0001-term-embedding.md`](docs/adr/0001-term-embedding.md)；人工 AT 清单见 [`docs/a11y-checklist.md`](docs/a11y-checklist.md)。
+首次使用在控制台配置管理员，或用 `FEDERATION_ADMIN_USER` / `FEDERATION_ADMIN_PASSWORD` 在启动时创建；会话有效期 `FEDERATION_SESSION_TTL_HOURS`（默认 24）。写入数据源、元数据、本体、模型配置需要 `ADMIN`。可选 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出 tracing。多实例吊销可配 `FEDERATION_SECURITY_REVOCATION_REDIS_URI`（或 `federation.security.revocation-redis-uri`）。问数术语嵌入可配 `FEDERATION_ASK_EMBED_ENDPOINT` / `FEDERATION_ASK_EMBED_API_KEY` / `FEDERATION_ASK_EMBED_MODEL`（OpenAI 兼容，含 NVIDIA NIM）；未配置时用本地哈希嵌入。术语向量默认 `FEDERATION_ASK_EMBED_STORE=both`（联邦库 + 落盘）。可选 pgvector：`FEDERATION_ASK_PGVECTOR_URL`、`FEDERATION_ASK_PGVECTOR_INDEX`（`hnsw`/`ivfflat`/`none`）。API 文档：`/swagger-ui.html`、`/v3/api-docs`。嵌入策略见 [`docs/adr/0001-term-embedding.md`](docs/adr/0001-term-embedding.md)；人工 AT 清单见 [`docs/a11y-checklist.md`](docs/a11y-checklist.md)。
 
 ## 示例
 
@@ -154,9 +154,8 @@ SQL 以 `EXPLAIN` 开头时，前缀会原样下发给引擎。`/explain` 只返
 |------|------|
 | `FEDERAL_DB_URL` / `USER` / `PASSWORD` | 网关配置库（必填） |
 | `TRINO_JDBC_URL` | Trino JDBC |
-| `FEDERATION_SECURITY_ENABLED` | 是否启用 Bearer 鉴权 |
-| `FEDERATION_DEMO_TOKEN` | demo 用户令牌 |
-| `FEDERATION_ADMIN_USER` / `PASSWORD` | 启动时保证存在的本地管理员 |
+| `FEDERATION_DEMO_TOKEN` | demo 用户令牌（脚本用） |
+| `FEDERATION_ADMIN_USER` / `PASSWORD` | 可选：启动时创建本地管理员（也可在控制台首次配置） |
 | `FEDERATION_SESSION_TTL_HOURS` | 本地账号会话有效期（小时，默认 24） |
 | `LLM_*` | 大模型初始值（也可在控制台写入 `fed_llm`） |
 | `MILVUS_URI` | 非空则用 Milvus REST，否则内存演示 |

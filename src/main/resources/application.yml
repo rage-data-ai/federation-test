@@ -42,7 +42,8 @@ federation:
     username: ${FEDERAL_DB_USER:}
     password: ${FEDERAL_DB_PASSWORD:}
   security:
-    enabled: ${FEDERATION_SECURITY_ENABLED:false}
+    # 鉴权始终开启；环境变量仅为兼容旧部署，false 会被忽略。
+    enabled: ${FEDERATION_SECURITY_ENABLED:true}
     tokens:
       demo: ${FEDERATION_DEMO_TOKEN:demo-token}
       reader: ${FEDERATION_READER_TOKEN:reader-token}

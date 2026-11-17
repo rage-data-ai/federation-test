@@ -18,6 +18,7 @@
 
 ### Changed
 
+- 鉴权始终开启（`FEDERATION_SECURITY_ENABLED=false` 已忽略）；无本地账号时控制台引导首次配置管理员（`/api/v1/auth/setup`）
 - 默认 CORS 放行 `127.0.0.1:5173` / `:18080`（原先仅 localhost，本机 IP 访问会改删失败）
 - 内置「智能问数」启动时若仍为单节点 `builtin_ask` 图，自动迁移并重新发布
 - 知识向量：Milvus 可选；写入/检索失败回退进程内索引，不阻断审核与问数

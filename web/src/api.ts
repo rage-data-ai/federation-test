@@ -69,8 +69,8 @@ export class ApiError extends Error {
   }
 }
 
-/** 登录和注册本身返回的 401 是“密码不对”，不代表会话失效。 */
-const SIGN_IN_PATHS = ['/api/v1/auth/login', '/api/v1/auth/register']
+/** 登录 / 注册 / 首次初始化返回的 401 是“密码不对”，不代表会话失效。 */
+const SIGN_IN_PATHS = ['/api/v1/auth/login', '/api/v1/auth/register', '/api/v1/auth/setup']
 
 let unauthorizedHandler: (() => void) | null = null
 
@@ -182,6 +182,17 @@ export function authLogin(username: string, password: string) {
 
 export function authRegister(username: string, password: string, displayName: string) {
   return request<AuthSession>('/api/v1/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, displayName })
+  })
+}
+
+export function authSetupStatus() {
+  return request<{ needsSetup: boolean }>('/api/v1/auth/setup-status')
+}
+
+export function authSetup(username: string, password: string, displayName: string) {
+  return request<AuthSession>('/api/v1/auth/setup', {
     method: 'POST',
     body: JSON.stringify({ username, password, displayName })
   })

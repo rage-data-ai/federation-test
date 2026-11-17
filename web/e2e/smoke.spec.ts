@@ -19,10 +19,56 @@ async function stabilizeFonts(page: import('@playwright/test').Page) {
 }
 
 test.describe('console smoke', () => {
+  /** 同一 handler 闭包；各用例改这个值即可切换首次配置 / 登录。 */
+  const authStub = {
+    needsSetup: false,
+    me: {
+      name: 'demo',
+      displayName: 'demo',
+      roles: ['ADMIN', 'QUERY'],
+      securityEnabled: true,
+      jwtEnabled: false,
+      catalogAcl: false,
+      catalogs: ['*']
+    } as Record<string, unknown> | null
+  }
+
   test.beforeEach(async ({ page }) => {
+    authStub.needsSetup = false
+    authStub.me = {
+      name: 'demo',
+      displayName: 'demo',
+      roles: ['ADMIN', 'QUERY'],
+      securityEnabled: true,
+      jwtEnabled: false,
+      catalogAcl: false,
+      catalogs: ['*']
+    }
     await page.addInitScript(() => {
       localStorage.setItem('theme-mode', 'light')
     })
+    // 鉴权始终开启：默认 stub 成「已有管理员 + 已登录」，避免打到网关 401 被踢回登录页。
+    await page.route('**/api/v1/auth/setup-status', (route) =>
+      route.fulfill({ json: { needsSetup: authStub.needsSetup } })
+    )
+    await page.route('**/api/v1/auth/me', (route) => {
+      if (!authStub.me) {
+        return route.fulfill({ status: 401, json: { message: '缺少 Authorization: Bearer <token>' } })
+      }
+      return route.fulfill({ json: authStub.me })
+    })
+    await page.route('**/api/v1/llm/config', (route) =>
+      route.fulfill({
+        json: { configured: true, apiKeySet: true, protocol: 'openai', model: 'qwen', baseUrl: 'http://llm.local' }
+      })
+    )
+    await page.route('**/api/v1/catalogs', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/examples', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/metadata**', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/ask/conversations**', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/ask/knowledge**', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/ask/prompts**', (route) => route.fulfill({ json: [] }))
+    await page.route('**/api/v1/ontology/**', (route) => route.fulfill({ json: [] }))
   })
 
   test('skip-link, main landmark, and module navigation', async ({ page }) => {
@@ -133,16 +179,14 @@ test.describe('console smoke', () => {
     const ratings: unknown[] = []
     const asked: Array<Record<string, unknown>> = []
 
-    await page.route('**/api/v1/llm/config', (route) =>
-      route.fulfill({
-        json: { configured: true, apiKeySet: true, protocol: 'openai', model: 'qwen', baseUrl: 'http://llm.local' }
-      })
-    )
-    await page.route('**/api/v1/auth/me', (route) =>
-      route.fulfill({
-        json: { name: 'root', roles: ['ADMIN', 'QUERY'], securityEnabled: false, jwtEnabled: false, catalogAcl: false, catalogs: [] }
-      })
-    )
+    authStub.me = {
+      name: 'root',
+      roles: ['ADMIN', 'QUERY'],
+      securityEnabled: true,
+      jwtEnabled: false,
+      catalogAcl: false,
+      catalogs: ['*']
+    }
     await page.route('**/api/v1/ask', (route) => {
       asked.push(route.request().postDataJSON())
       const events: Array<[string, unknown]> = [
@@ -248,6 +292,49 @@ test.describe('console smoke', () => {
     expect(asked.map((body) => body.conversationId)).toEqual([undefined, 'conv-1'])
   })
 
+  test('first-time setup creates the admin account', async ({ page }) => {
+    authStub.needsSetup = true
+    authStub.me = null
+    await page.route('**/api/v1/auth/setup', (route) => {
+      authStub.needsSetup = false
+      authStub.me = {
+        name: 'admin',
+        displayName: '管理员',
+        localAccount: true,
+        roles: ['ADMIN', 'QUERY'],
+        securityEnabled: true,
+        jwtEnabled: false,
+        catalogAcl: false,
+        catalogs: ['*']
+      }
+      return route.fulfill({
+        json: {
+          token: 'tok-admin',
+          expiresAt: 9,
+          user: {
+            id: 1,
+            username: 'admin',
+            displayName: '管理员',
+            roles: ['ADMIN', 'QUERY'],
+            status: 'active',
+            createdAt: 1,
+            lastLoginAt: 1
+          }
+        }
+      })
+    })
+
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: '创建管理员', level: 1 })).toBeVisible()
+    await page.getByLabel('用户名').fill('admin')
+    await page.getByLabel('显示名（可选）').fill('管理员')
+    await page.getByLabel('密码', { exact: true }).fill('admin-pass-1')
+    await page.getByLabel('确认密码').fill('admin-pass-1')
+    await page.getByRole('button', { name: '创建并进入' }).click()
+    await expect(page.getByRole('navigation', { name: '模块' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '身份：admin' })).toContainText('管理员')
+  })
+
   test('gateway that requires login: sign in, manage users, sign out, and expire', async ({ page }) => {
     const alice = {
       name: 'alice',
@@ -268,7 +355,15 @@ test.describe('console smoke', () => {
     const signedIn = (route: import('@playwright/test').Route) =>
       sessionValid && route.request().headers().authorization === 'Bearer tok-alice'
 
-    await page.route('**/api/v1/auth/me', (route) => route.fulfill(signedIn(route) ? { json: alice } : unauthorized))
+    authStub.needsSetup = false
+    authStub.me = null
+    await page.route('**/api/v1/auth/me', (route) => {
+      if (signedIn(route)) {
+        authStub.me = alice
+        return route.fulfill({ json: alice })
+      }
+      return route.fulfill(unauthorized)
+    })
     await page.route('**/api/v1/auth/login', (route) => {
       const body = route.request().postDataJSON() as { username: string; password: string }
       return body.password === 'alice-pass-1'
@@ -283,7 +378,7 @@ test.describe('console smoke', () => {
     })
 
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '登录控制台', level: 1 })).toBeVisible()
     await expect(page.getByRole('navigation', { name: '模块' })).toHaveCount(0)
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
     expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([])
@@ -292,7 +387,7 @@ test.describe('console smoke', () => {
     await page.getByLabel('密码', { exact: true }).fill('wrong-pass-1')
     await page.getByRole('button', { name: '登录', exact: true }).last().click()
     await expect(page.getByRole('alert')).toHaveText('用户名或密码错误')
-    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '登录控制台', level: 1 })).toBeVisible()
 
     await page.getByLabel('密码', { exact: true }).fill('alice-pass-1')
     await page.getByRole('button', { name: '登录', exact: true }).last().click()
@@ -310,7 +405,7 @@ test.describe('console smoke', () => {
     const dialog = page.getByRole('dialog', { name: '访问身份' })
     await expect(dialog.getByLabel('原密码')).toBeFocused()
     await dialog.getByRole('button', { name: '退出登录' }).click()
-    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '登录控制台', level: 1 })).toBeVisible()
     await expect(page.getByRole('status')).toHaveCount(0)
 
     await page.getByLabel('用户名').fill('alice')
@@ -320,20 +415,31 @@ test.describe('console smoke', () => {
     await expect(page.getByRole('row', { name: /bob/ })).toBeVisible()
     sessionValid = false
     await page.getByRole('button', { name: '刷新' }).click()
-    await expect(page.getByRole('heading', { name: '登录', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '登录控制台', level: 1 })).toBeVisible()
     await expect(page.getByRole('status')).toHaveText('令牌无效或登录已过期，请重新登录')
   })
 
   test('register form checks the confirmation before calling the gateway', async ({ page }) => {
     const registered: unknown[] = []
     let token = ''
-    await page.route('**/api/v1/auth/me', (route) =>
-      token && route.request().headers().authorization === `Bearer ${token}`
-        ? route.fulfill({
-            json: { name: 'carol', displayName: '卡萝', localAccount: true, roles: ['QUERY'], securityEnabled: true, jwtEnabled: false, catalogAcl: false, catalogs: ['*'] }
-          })
-        : route.fulfill({ status: 401, json: { message: '缺少 Authorization: Bearer <token>' } })
-    )
+    authStub.needsSetup = false
+    authStub.me = null
+    await page.route('**/api/v1/auth/me', (route) => {
+      if (token && route.request().headers().authorization === `Bearer ${token}`) {
+        authStub.me = {
+          name: 'carol',
+          displayName: '卡萝',
+          localAccount: true,
+          roles: ['QUERY'],
+          securityEnabled: true,
+          jwtEnabled: false,
+          catalogAcl: false,
+          catalogs: ['*']
+        }
+        return route.fulfill({ json: authStub.me })
+      }
+      return route.fulfill({ status: 401, json: { message: '缺少 Authorization: Bearer <token>' } })
+    })
     await page.route('**/api/v1/auth/register', (route) => {
       registered.push(route.request().postDataJSON())
       token = 'tok-carol'
@@ -347,11 +453,12 @@ test.describe('console smoke', () => {
     await page.getByLabel('显示名（可选）').fill('卡萝')
     await page.getByLabel('密码', { exact: true }).fill('carol-pass-1')
     await page.getByLabel('确认密码').fill('carol-pass-2')
-    await page.getByRole('button', { name: '注册并登录' }).click()
-    await expect(page.getByRole('alert')).toHaveText('两次输入的密码不一致')
+    await expect(page.getByRole('status')).toHaveText('两次输入的密码不一致')
+    await expect(page.getByRole('button', { name: '注册并登录' })).toBeDisabled()
     expect(registered).toEqual([])
 
     await page.getByLabel('确认密码').fill('carol-pass-1')
+    await expect(page.getByRole('button', { name: '注册并登录' })).toBeEnabled()
     await page.getByRole('button', { name: '注册并登录' }).click()
     await expect(page.getByRole('navigation', { name: '模块' })).toBeVisible()
     expect(registered).toEqual([{ username: 'carol', password: 'carol-pass-1', displayName: '卡萝' }])

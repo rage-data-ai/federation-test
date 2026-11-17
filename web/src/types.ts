@@ -8,6 +8,7 @@ export type AuthMe = {
   localAccount?: boolean
   roles: string[]
   securityEnabled: boolean
+  needsSetup?: boolean
   jwtEnabled: boolean
   catalogAcl: boolean
   catalogs: string[]
