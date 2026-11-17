@@ -35,6 +35,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import com.cmcc.cmdevops.security.federation.ask.AskListener;
 import com.cmcc.cmdevops.security.federation.ask.AskService;
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
+import com.cmcc.cmdevops.security.federation.ask.embed.AskEmbedSettings;
 import com.cmcc.cmdevops.security.federation.chatflow.ChatflowRuntime;
 import com.cmcc.cmdevops.security.federation.config.WebMvcSecurityConfiguration;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
@@ -60,6 +61,9 @@ class AskControllerWebTest {
     @MockitoBean
     private LlmClient llmClient;
 
+    @MockitoBean
+    private AskEmbedSettings embedSettings;
+
     @BeforeEach
     void setUp() {
         GatewayUser.set(new GatewayUser("admin", Set.of(GatewayRole.ADMIN, GatewayRole.QUERY)));
@@ -73,6 +77,19 @@ class AskControllerWebTest {
         view.put("apiKeySet", true);
         when(llmClient.view()).thenReturn(view);
         when(llmClient.update(any(Settings.class))).thenReturn(view);
+
+        Map<String, Object> embedView = new LinkedHashMap<>();
+        embedView.put("configured", true);
+        embedView.put("endpoint", "http://embed.local/v1");
+        embedView.put("model", "embedding-3");
+        embedView.put("apiKeySet", true);
+        embedView.put("embedder", "http");
+        embedView.put("dim", 32);
+        embedView.put("milvus", true);
+        when(embedSettings.view()).thenReturn(embedView);
+        when(embedSettings.update(any(AskEmbedSettings.Settings.class))).thenReturn(embedView);
+        when(embedSettings.test(any(AskEmbedSettings.Settings.class)))
+                .thenReturn(Map.of("success", true, "message", "ok dim=32", "dim", 32));
     }
 
     @AfterEach
@@ -190,6 +207,56 @@ class AskControllerWebTest {
                                   "baseUrl": "http://llm.local/v1",
                                   "apiKey": "secret",
                                   "model": "qwen"
+                                }
+                                """))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void embedConfigAndUpdate() throws Exception {
+        mockMvc.perform(get("/api/v1/ask/embed/config"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.configured").value(true))
+                .andExpect(jsonPath("$.model").value("embedding-3"))
+                .andExpect(jsonPath("$.milvus").value(true));
+
+        mockMvc.perform(put("/api/v1/ask/embed/config")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "endpoint": "http://embed.local/v1",
+                                  "apiKey": "secret",
+                                  "model": "embedding-3"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.apiKeySet").value(true));
+        verify(embedSettings).update(any(AskEmbedSettings.Settings.class));
+
+        mockMvc.perform(post("/api/v1/ask/embed/test")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "endpoint": "http://embed.local/v1",
+                                  "apiKey": "secret",
+                                  "model": "embedding-3"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("ok dim=32"));
+    }
+
+    @Test
+    void embedUpdateForbiddenWithoutAdmin() throws Exception {
+        GatewayUser.set(new GatewayUser("query-only", Set.of(GatewayRole.QUERY)));
+        mockMvc.perform(put("/api/v1/ask/embed/config")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "endpoint": "http://embed.local/v1",
+                                  "apiKey": "secret",
+                                  "model": "embedding-3"
                                 }
                                 """))
                 .andExpect(status().isForbidden());

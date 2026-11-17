@@ -13,8 +13,8 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import com.cmcc.cmdevops.security.federation.ask.embed.AskEmbedSettings;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.HashingTermEmbedder;
-import com.cmcc.cmdevops.security.federation.ask.ontologytools.HttpTermEmbedder;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.TermEmbedder;
 import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 
@@ -24,7 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * 只索引「问题」向量。
  * <ul>
- *   <li>配置了 {@code MILVUS_URI}：只写/查 Milvus，必须配置 HTTP 嵌入模型，不再维护内存检索。</li>
+ *   <li>配置了 {@code MILVUS_URI}：只写/查 Milvus，嵌入由控制台/环境变量配置（禁止哈希回退）。</li>
  *   <li>未配置 Milvus：进程内余弦检索（单测 / 本地无向量库）。</li>
  * </ul>
  */
@@ -35,36 +35,39 @@ public class KnowledgeVectorIndex {
 
     private static final Logger log = LoggerFactory.getLogger(KnowledgeVectorIndex.class);
 
-    private final TermEmbedder embedder;
-    private final int dim;
+    private final AskEmbedSettings embedSettings;
     private final RestClient milvus;
     private final ObjectMapper json;
     /** 仅无 Milvus 时使用；有 Milvus 时保持为空。 */
     private final Map<Long, float[]> memory;
+    private volatile TermEmbedder embedder;
+    private volatile int dim;
     private volatile boolean collectionReady;
 
     @Autowired
-    public KnowledgeVectorIndex(FederationProperties properties, ObjectMapper objectMapper) {
+    public KnowledgeVectorIndex(
+            FederationProperties properties, ObjectMapper objectMapper, AskEmbedSettings embedSettings) {
         this.json = objectMapper;
+        this.embedSettings = embedSettings;
         String uri = properties.getVector().getMilvusUri();
         boolean milvusEnabled = uri != null && !uri.isBlank();
         this.milvus = milvusEnabled ? RestClient.builder().baseUrl(uri.strip()).build() : null;
-        this.embedder = knowledgeEmbedder(properties, milvusEnabled);
-        this.dim = dimOf(embedder.embed("dimension-probe"));
         this.memory = milvusEnabled ? Map.of() : new ConcurrentHashMap<>();
+        reloadEmbedder();
         if (milvusEnabled) {
             log.info(
-                    "知识库向量：Milvus={} embedder={} dim={}（无内存回退）",
+                    "知识库向量：Milvus={} embedder={} dim={}（无内存回退；可在控制台「模型」改嵌入）",
                     uri.strip(),
-                    embedder.name(),
+                    embedderName(),
                     dim);
         } else {
-            log.info("知识库向量：未配置 Milvus，使用进程内索引 embedder={}", embedder.name());
+            log.info("知识库向量：未配置 Milvus，使用进程内索引 embedder={}", embedderName());
         }
     }
 
     /** 单测：milvus 为 null 时走内存索引。 */
     public KnowledgeVectorIndex(TermEmbedder embedder, RestClient milvus, ObjectMapper objectMapper) {
+        this.embedSettings = null;
         this.embedder = embedder;
         this.dim = dimOf(embedder.embed("dimension-probe"));
         this.milvus = milvus;
@@ -72,12 +75,40 @@ public class KnowledgeVectorIndex {
         this.memory = milvus == null ? new ConcurrentHashMap<>() : Map.of();
     }
 
+    /** 嵌入配置变更后重建；维度变化时下次写入会重建 Milvus 集合。 */
+    public synchronized void reloadEmbedder() {
+        collectionReady = false;
+        if (milvus == null) {
+            TermEmbedder next = embedSettings == null
+                    ? embedder
+                    : (embedSettings.configured()
+                            ? embedSettings.requireEmbedderForMilvus()
+                            : embedSettings.hashingFallback());
+            if (next == null) {
+                next = new HashingTermEmbedder();
+            }
+            this.embedder = next;
+            this.dim = dimOf(next.embed("dimension-probe"));
+            return;
+        }
+        if (embedSettings == null || !embedSettings.configured()) {
+            this.embedder = null;
+            this.dim = 0;
+            log.warn("已启用 Milvus，但嵌入尚未配置：请在控制台「模型」填写嵌入接口与模型名");
+            return;
+        }
+        TermEmbedder next = embedSettings.requireEmbedderForMilvus();
+        this.embedder = next;
+        this.dim = embedSettings.dim() > 0 ? embedSettings.dim() : dimOf(next.embed("dimension-probe"));
+        log.info("知识库嵌入已更新 embedder={} dim={}", embedderName(), dim);
+    }
+
     public int dim() {
         return dim;
     }
 
     public String embedderName() {
-        return embedder.name();
+        return embedder == null ? "none" : embedder.name();
     }
 
     public boolean milvusEnabled() {
@@ -85,7 +116,7 @@ public class KnowledgeVectorIndex {
     }
 
     public void upsert(long id, String question) {
-        float[] vector = embedder.embed(question);
+        float[] vector = embed(question);
         if (milvus == null) {
             memory.put(id, vector);
             return;
@@ -99,7 +130,6 @@ public class KnowledgeVectorIndex {
                             "vector", toList(vector),
                             "question", question == null ? "" : question))));
         } catch (RuntimeException e) {
-            // 不写内存兜底：有 Milvus 时内存不是权威索引，避免多实例假命中。
             log.warn("Milvus 写入知识向量失败 id={}: {}", id, e.toString());
             throw e;
         }
@@ -122,7 +152,7 @@ public class KnowledgeVectorIndex {
     }
 
     public List<Hit> search(String question, int limit) {
-        float[] query = embedder.embed(question);
+        float[] query = embed(question);
         if (milvus == null) {
             return memorySearch(query, limit);
         }
@@ -146,6 +176,14 @@ public class KnowledgeVectorIndex {
         }
     }
 
+    private float[] embed(String question) {
+        TermEmbedder engine = embedder;
+        if (engine == null) {
+            throw new IllegalStateException("嵌入模型未配置：请打开控制台左侧「模型」，填写嵌入接口地址与模型名");
+        }
+        return engine.embed(question);
+    }
+
     private List<Hit> memorySearch(float[] query, int limit) {
         return memory.entrySet().stream()
                 .map(entry -> new Hit(entry.getKey(), HashingTermEmbedder.cosine(query, entry.getValue())))
@@ -161,6 +199,9 @@ public class KnowledgeVectorIndex {
         synchronized (this) {
             if (collectionReady) {
                 return;
+            }
+            if (dim <= 0) {
+                throw new IllegalStateException("嵌入维度未知：请先在控制台配置并测试嵌入模型");
             }
             Integer existingDim = describeCollectionDim();
             if (existingDim != null && existingDim != dim) {
@@ -187,7 +228,6 @@ public class KnowledgeVectorIndex {
         }
     }
 
-    /** @return 已存在集合的向量维；不存在或无法解析时返回 null */
     private Integer describeCollectionDim() {
         try {
             String response = post("/v2/vectordb/collections/describe", Map.of("collectionName", COLLECTION));
@@ -262,25 +302,6 @@ public class KnowledgeVectorIndex {
 
     private static int dimOf(float[] vector) {
         return vector == null ? HashingTermEmbedder.DEFAULT_DIM : vector.length;
-    }
-
-    /**
-     * 有 Milvus 时强制 HTTP 嵌入且禁止回退哈希，避免与集合维度/语义空间错乱。
-     */
-    static TermEmbedder knowledgeEmbedder(FederationProperties properties, boolean milvusEnabled) {
-        if (!milvusEnabled) {
-            return com.cmcc.cmdevops.security.federation.ask.OntologyTools.termEmbedderOf(properties);
-        }
-        String endpoint = properties.getAsk().getEmbedEndpoint();
-        if (endpoint == null || endpoint.isBlank()) {
-            throw new IllegalStateException(
-                    "已配置 MILVUS_URI，知识库必须设置 federation.ask.embed-endpoint（FEDERATION_ASK_EMBED_ENDPOINT）");
-        }
-        return new HttpTermEmbedder(
-                endpoint,
-                properties.getAsk().getEmbedApiKey(),
-                properties.getAsk().getEmbedModel(),
-                false);
     }
 
     public record Hit(long id, double score) {

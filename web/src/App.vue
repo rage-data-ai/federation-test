@@ -7,9 +7,12 @@ import {
   authLogout,
   authMe,
   authSetupStatus,
+  embedConfig,
   llmConfig,
   onUnauthorized,
+  saveEmbed,
   saveLlm,
+  testEmbed,
   testLlm
 } from './api'
 import { useFocusTrap } from './composables/useFocusTrap'
@@ -33,7 +36,7 @@ import OntologyView from './OntologyView.vue'
 import SetupView from './SetupView.vue'
 import UsersView from './UsersView.vue'
 import { AGENT_MODELS, findModel } from './models'
-import type { AuthMe, LlmConfig, LlmStatus } from './types'
+import type { AuthMe, EmbedConfig, LlmConfig, LlmStatus } from './types'
 import { errMessage } from './types'
 
 type ModuleDef = {
@@ -75,6 +78,26 @@ const llmForm = reactive({ protocol: 'openai', baseUrl: '', apiKey: '', model: '
 const llmMessage = ref('')
 const llmError = ref('')
 const llmBusy = ref('')
+const embed = ref<EmbedConfig | null>(null)
+const embedForm = reactive({ endpoint: '', apiKey: '', model: 'embedding-3' })
+const embedMessage = ref('')
+const embedError = ref('')
+const embedBusy = ref('')
+
+const EMBED_PRESETS = [
+  {
+    id: 'zhipu-embedding-3',
+    label: '智谱 embedding-3',
+    endpoint: 'https://open.bigmodel.cn/api/paas/v4/embeddings',
+    model: 'embedding-3'
+  },
+  {
+    id: 'openai-small',
+    label: 'OpenAI text-embedding-3-small',
+    endpoint: 'https://api.openai.com/v1/embeddings',
+    model: 'text-embedding-3-small'
+  }
+] as const
 provide('openLlmSettings', openLlm)
 provide('llmRevision', llmRevision)
 
@@ -344,6 +367,8 @@ async function refreshOidc() {
 async function openLlm() {
   llmMessage.value = ''
   llmError.value = ''
+  embedMessage.value = ''
+  embedError.value = ''
   showLlm.value = true
   try {
     const config = await llmConfig()
@@ -354,6 +379,67 @@ async function openLlm() {
     llm.value = config
   } catch (e) {
     llmError.value = errMessage(e)
+  }
+  try {
+    const config = await embedConfig()
+    embedForm.endpoint = config.endpoint || ''
+    embedForm.model = config.model || 'embedding-3'
+    embedForm.apiKey = ''
+    embed.value = config
+  } catch (e) {
+    embedError.value = errMessage(e)
+  }
+}
+
+function applyEmbedPreset(id: string) {
+  const preset = EMBED_PRESETS.find((item) => item.id === id)
+  if (!preset) {
+    return
+  }
+  embedForm.endpoint = preset.endpoint
+  embedForm.model = preset.model
+}
+
+function embedPayload() {
+  return {
+    endpoint: embedForm.endpoint.trim(),
+    apiKey: embedForm.apiKey,
+    model: embedForm.model.trim()
+  }
+}
+
+async function saveEmbedConfig() {
+  embedBusy.value = 'save'
+  embedMessage.value = ''
+  embedError.value = ''
+  try {
+    embed.value = await saveEmbed(embedPayload())
+    embedForm.apiKey = ''
+    embedMessage.value = embed.value.dim
+      ? `已保存，立即生效（dim=${embed.value.dim}）`
+      : '已保存，立即生效'
+  } catch (e) {
+    embedError.value = errMessage(e)
+  } finally {
+    embedBusy.value = ''
+  }
+}
+
+async function testEmbedConfig() {
+  embedBusy.value = 'test'
+  embedMessage.value = ''
+  embedError.value = ''
+  try {
+    const result = await testEmbed(embedPayload())
+    if (result.success) {
+      embedMessage.value = `连接成功：${result.message || 'ok'}`
+    } else {
+      embedError.value = result.message || '连接失败'
+    }
+  } catch (e) {
+    embedError.value = errMessage(e)
+  } finally {
+    embedBusy.value = ''
   }
 }
 
@@ -597,7 +683,63 @@ function cycleTheme() {
         <div class="actions">
           <button type="button" :disabled="!!llmBusy" @click="testLlmConfig">{{ llmBusy === 'test' ? '测试中…' : '测试连接' }}</button>
           <button type="button" @click="showLlm = false">关闭</button>
-          <button class="primary" type="submit" :disabled="!!llmBusy">{{ llmBusy === 'save' ? '保存中…' : '保存' }}</button>
+          <button class="primary" type="submit" :disabled="!!llmBusy">{{ llmBusy === 'save' ? '保存中…' : '保存对话模型' }}</button>
+        </div>
+
+        <h3 id="embed-title" style="margin-top: 18px">嵌入模型</h3>
+        <p class="hint">
+          知识库向量召回用（OpenAI 兼容 embeddings）。
+          <template v-if="embed?.milvus">已接 Milvus{{ embed.dim ? ` · dim ${embed.dim}` : '' }}。</template>
+          保存在 federal.fed_ask_embed，立即生效。
+        </p>
+        <label>
+          嵌入模型
+          <input
+            v-model="embedForm.model"
+            list="embed-model-presets"
+            autocomplete="off"
+            placeholder="例如 embedding-3、text-embedding-3-small"
+          />
+          <datalist id="embed-model-presets">
+            <option v-for="item in EMBED_PRESETS" :key="item.id" :value="item.model">{{ item.label }}</option>
+          </datalist>
+        </label>
+        <div class="preset-row" role="group" aria-label="嵌入快捷填入">
+          <span class="hint">快捷填入</span>
+          <button
+            v-for="item in EMBED_PRESETS"
+            :key="item.id"
+            class="tiny"
+            type="button"
+            @click="applyEmbedPreset(item.id)"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+        <label>
+          嵌入接口
+          <input
+            v-model="embedForm.endpoint"
+            placeholder="https://open.bigmodel.cn/api/paas/v4/embeddings"
+          />
+        </label>
+        <label>
+          嵌入 API Key
+          <input
+            v-model="embedForm.apiKey"
+            type="password"
+            :placeholder="embed?.apiKeySet ? '已保存，留空则不修改' : '可与对话模型相同；本地服务可留空'"
+          />
+        </label>
+        <p v-if="embedMessage" class="ok">{{ embedMessage }}</p>
+        <p v-if="embedError" class="err">{{ embedError }}</p>
+        <div class="actions">
+          <button type="button" :disabled="!!embedBusy" @click="testEmbedConfig">
+            {{ embedBusy === 'test' ? '测试中…' : '测试嵌入' }}
+          </button>
+          <button type="button" class="primary" :disabled="!!embedBusy" @click="saveEmbedConfig">
+            {{ embedBusy === 'save' ? '保存中…' : '保存嵌入模型' }}
+          </button>
         </div>
       </form>
     </div>

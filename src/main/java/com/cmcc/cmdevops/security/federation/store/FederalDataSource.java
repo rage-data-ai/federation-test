@@ -126,6 +126,14 @@ public class FederalDataSource {
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
         jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS fed_ask_embed (
+                  id TINYINT NOT NULL PRIMARY KEY,
+                  endpoint VARCHAR(512) NOT NULL,
+                  api_key VARCHAR(512) NULL,
+                  model VARCHAR(128) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS fed_ontology_embedding (
                   fingerprint VARCHAR(32) NOT NULL,
                   embedder VARCHAR(64) NOT NULL,

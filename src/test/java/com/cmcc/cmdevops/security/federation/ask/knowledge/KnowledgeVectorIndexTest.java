@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
 
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.HashingTermEmbedder;
-import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,11 +35,4 @@ class KnowledgeVectorIndexTest {
         assertTrue(index.search("高危告警数量", 5).isEmpty());
     }
 
-    @Test
-    void milvusRequiresEmbedEndpoint() {
-        FederationProperties props = new FederationProperties();
-        props.getVector().setMilvusUri("http://127.0.0.1:19530");
-        props.getAsk().setEmbedEndpoint("");
-        assertThrows(IllegalStateException.class, () -> KnowledgeVectorIndex.knowledgeEmbedder(props, true));
-    }
 }

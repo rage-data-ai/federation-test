@@ -272,6 +272,8 @@ button:disabled {
 
 .dialog {
   width: min(540px, 100%);
+  max-height: min(90vh, 100%);
+  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;

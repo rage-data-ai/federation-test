@@ -22,6 +22,7 @@ import type {
   FlowDraft,
   FlowGraph,
   FlowTemplate,
+  EmbedConfig,
   LlmConfig,
   LlmStatus,
   LlmTestResult,
@@ -234,6 +235,18 @@ export function saveLlm(body: unknown) {
 
 export function testLlm(body: unknown) {
   return request<LlmTestResult>('/api/v1/llm/test', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function embedConfig() {
+  return request<EmbedConfig>('/api/v1/ask/embed/config')
+}
+
+export function saveEmbed(body: unknown) {
+  return request<EmbedConfig>('/api/v1/ask/embed/config', { method: 'PUT', body: JSON.stringify(body) })
+}
+
+export function testEmbed(body: unknown) {
+  return request<LlmTestResult>('/api/v1/ask/embed/test', { method: 'POST', body: JSON.stringify(body) })
 }
 
 export function getOntology() {
