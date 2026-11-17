@@ -18,6 +18,7 @@
 
 ### Changed
 
+- Compose 拆成两套：`docker-compose.yml` 全家桶（含 Milvus + 网关/控制台），`docker-compose.deps.yml` 仅依赖供本机跑后端/前端
 - 控制台「模型」可配置知识库嵌入（endpoint / model / key → `fed_ask_embed`），保存后热更新，不必只靠环境变量
 - 鉴权始终开启（`FEDERATION_SECURITY_ENABLED=false` 已忽略）；无本地账号时控制台引导首次配置管理员（`/api/v1/auth/setup`）
 - SQL 洞察与大模型对话合并：调色板不再新增 insight；`llm_chat` 勾选 sql 即走 InsightSession；默认智能问数末级改为 llm_chat；旧 insight 节点仍兼容

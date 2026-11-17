@@ -1,36 +1,13 @@
+# 一键全家桶：依赖（MySQL + Trino + Milvus）+ 网关（内嵌控制台静态资源）
+# 用法：docker compose up -d --build
+# 控制台：http://localhost:18080
+#
+# 仅起依赖、本机跑网关/前端：见 docker-compose.deps.yml
+
+include:
+  - path: docker-compose.deps.yml
+
 services:
-  mysql:
-    image: mysql:8.4
-    environment:
-      MYSQL_DATABASE: federal
-      MYSQL_USER: federation
-      MYSQL_PASSWORD: federation
-      MYSQL_ROOT_PASSWORD: root
-    ports:
-      - "3307:3306"
-    volumes:
-      - federal-mysql:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  trino:
-    image: trinodb/trino:476
-    ports:
-      - "8081:8080"
-    volumes:
-      - ./docker/trino/config.properties:/etc/trino/config.properties:ro
-      - ./docker/trino/catalog-store.properties:/etc/trino/catalog-store.properties:ro
-      - ./docker/trino/catalog:/etc/trino/catalog
-      - ./docker/trino/kafka:/etc/trino/kafka
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/info"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
   gateway:
     build: .
     ports:
@@ -41,7 +18,8 @@ services:
       FEDERAL_DB_PASSWORD: federation
       TRINO_JDBC_URL: jdbc:trino://trino:8080
       TRINO_USER: federation
-      FEDERATION_CORS_ORIGINS: "http://localhost:18080,http://localhost:5173"
+      MILVUS_URI: http://milvus:19530
+      FEDERATION_CORS_ORIGINS: "http://localhost:18080,http://localhost:5173,http://127.0.0.1:18080,http://127.0.0.1:5173"
       # 可选：跳过控制台首次管理员向导
       # FEDERATION_ADMIN_USER: admin
       # FEDERATION_ADMIN_PASSWORD: change-me-now
@@ -54,7 +32,8 @@ services:
         condition: service_healthy
       trino:
         condition: service_healthy
+      milvus:
+        condition: service_healthy
 
 volumes:
-  federal-mysql:
   gateway-data:

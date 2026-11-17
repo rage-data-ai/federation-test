@@ -1,0 +1,70 @@
+# 本地开发依赖（不含网关 / 控制台）：MySQL + Trino + Milvus
+# 用法：docker compose -f docker-compose.deps.yml up -d
+#
+# 本机再跑：
+#   mvn spring-boot:run
+#   cd web && npm run dev
+# MILVUS_URI 默认 http://127.0.0.1:19530；配置库端口映射为 3307→3306。
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: federal
+      MYSQL_USER: federation
+      MYSQL_PASSWORD: federation
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3307:3306"
+    volumes:
+      - federal-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  trino:
+    image: trinodb/trino:476
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./docker/trino/config.properties:/etc/trino/config.properties:ro
+      - ./docker/trino/catalog-store.properties:/etc/trino/catalog-store.properties:ro
+      - ./docker/trino/catalog:/etc/trino/catalog
+      - ./docker/trino/kafka:/etc/trino/kafka
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # 单机嵌入式 etcd + 本地存储，不依赖外置 etcd/minio
+  milvus:
+    image: milvusdb/milvus:v3.0.6
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: /var/lib/milvus/etcd
+      ETCD_CONFIG_PATH: /milvus/configs/embedEtcd.yaml
+      COMMON_STORAGETYPE: local
+      DEPLOY_MODE: STANDALONE
+    volumes:
+      - milvus-data:/var/lib/milvus
+      - ./docker/milvus/embedEtcd.yaml:/milvus/configs/embedEtcd.yaml:ro
+      - ./docker/milvus/user.yaml:/milvus/configs/user.yaml:ro
+    ports:
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:9091:9091"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+
+volumes:
+  federal-mysql:
+  milvus-data:
