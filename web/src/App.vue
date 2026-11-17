@@ -225,9 +225,10 @@ async function handleUnauthorized() {
     if (oidcEnabled && getRefreshToken()) {
       try {
         await refreshAccessToken()
-        authUser.value = await authMe()
-        gate.value = 'ready'
-        return
+        await refreshAuth()
+        if (gate.value === 'ready') {
+          return
+        }
       } catch {
         // 刷新不了就走下面的重新登录
       }
