@@ -78,7 +78,7 @@ federation:
     result-preview-rows: 50
     # 对话记忆：最近 N 条 history（user+assistant）；开始节点可覆盖
     history-window-turns: ${FEDERATION_ASK_HISTORY_WINDOW:12}
-    # OpenAI 兼容 embeddings（NIM）。空则本地哈希（仅无 Milvus 时）；配了 MILVUS_URI 则必填。
+    # OpenAI 兼容 embeddings（NIM / 智谱等）。知识库默认接 Milvus，此项必填；仅单测无内存索引时可留空。
     embed-endpoint: ${FEDERATION_ASK_EMBED_ENDPOINT:}
     embed-api-key: ${FEDERATION_ASK_EMBED_API_KEY:}
     embed-model: ${FEDERATION_ASK_EMBED_MODEL:}
@@ -98,8 +98,8 @@ federation:
   kafka-mappings: {}
   vector:
     default-k: 10
-    # 非空则知识库向量只走 Milvus（须同时配置 ask.embed-endpoint）
-    milvus-uri: ${MILVUS_URI:}
+    # 知识库默认走本机 Milvus；设 MILVUS_URI= 可关掉（仅单测）。配了则必须同时设 ask.embed-endpoint，禁止哈希。
+    milvus-uri: ${MILVUS_URI:http://127.0.0.1:19530}
 
 springdoc:
   api-docs:

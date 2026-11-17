@@ -162,7 +162,18 @@ public class KnowledgeVectorIndex {
             if (collectionReady) {
                 return;
             }
-            try {
+            Integer existingDim = describeCollectionDim();
+            if (existingDim != null && existingDim != dim) {
+                log.warn("Milvus 集合 {} 维度 {} 与当前嵌入 dim={} 不一致，删除后重建", COLLECTION, existingDim, dim);
+                try {
+                    post("/v2/vectordb/collections/drop", Map.of("collectionName", COLLECTION));
+                } catch (RuntimeException e) {
+                    throw new IllegalStateException(
+                            "无法删除维度不匹配的 Milvus 集合 " + COLLECTION + ": " + e.getMessage(), e);
+                }
+                existingDim = null;
+            }
+            if (existingDim == null) {
                 post("/v2/vectordb/collections/create", Map.of(
                         "collectionName", COLLECTION,
                         "dimension", dim,
@@ -171,10 +182,35 @@ public class KnowledgeVectorIndex {
                         "vectorFieldName", "vector",
                         "idType", "Int64",
                         "autoID", false));
-            } catch (RuntimeException e) {
-                log.info("Milvus 集合 {} 可能已存在: {}", COLLECTION, e.toString());
             }
             collectionReady = true;
+        }
+    }
+
+    /** @return 已存在集合的向量维；不存在或无法解析时返回 null */
+    private Integer describeCollectionDim() {
+        try {
+            String response = post("/v2/vectordb/collections/describe", Map.of("collectionName", COLLECTION));
+            JsonNode fields = json.readTree(response).path("data").path("fields");
+            if (!fields.isArray()) {
+                return null;
+            }
+            for (JsonNode field : fields) {
+                if ("vector".equals(field.path("name").asString())) {
+                    for (JsonNode param : field.path("params")) {
+                        if ("dim".equals(param.path("key").asString())) {
+                            return Integer.parseInt(param.path("value").asString());
+                        }
+                    }
+                }
+            }
+            return null;
+        } catch (RuntimeException e) {
+            log.info("Milvus 集合 {} 尚不存在或无法描述: {}", COLLECTION, e.toString());
+            return null;
+        } catch (Exception e) {
+            log.info("解析 Milvus describe 失败: {}", e.toString());
+            return null;
         }
     }
 
