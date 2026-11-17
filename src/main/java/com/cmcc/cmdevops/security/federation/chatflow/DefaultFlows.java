@@ -16,7 +16,10 @@ public final class DefaultFlows {
     public static final String DEFAULT_APP_ID = "app-builtin-ask";
     public static final String DEFAULT_FLOW_ID = "flow-builtin-ask";
 
-    /** 问数阶段节点（白盒拆跑；按 outcome 选边）。 */
+    /**
+     * 问数阶段节点（白盒拆跑；按 outcome 选边）。
+     * {@code insight} 保留作旧图兼容；新默认图末级已改为 {@code llm_chat}+sql。
+     */
     public static final Set<String> ASK_STAGE_TYPES = Set.of("knowledge", "ontology", "metadata", "insight");
 
     private DefaultFlows() {
@@ -29,7 +32,7 @@ public final class DefaultFlows {
      * start → knowledge ─answered→ end
      *            └continue→ ontology ─clarify→ end
      *                          └continue→ metadata ─error→ end
-     *                                        └continue→ insight → end
+     *                                        └continue→ llm（大模型+SQL）→ end
      * </pre>
      */
     public static FlowGraph builtinAsk() {
@@ -87,14 +90,18 @@ public final class DefaultFlows {
                                         "inputs",
                                         Map.of("recover", true))),
                         new FlowNode(
-                                "insight",
-                                "insight",
-                                "SQL 洞察",
+                                "llm",
+                                "llm_chat",
+                                "大模型对话",
                                 Map.of(
                                         "x",
                                         900,
                                         "y",
                                         140,
+                                        "memoryWindowTurns",
+                                        12,
+                                        "systemPrompt",
+                                        "你是安全运营数据分析师，基于本体与元数据规划并执行联邦 SQL。",
                                         "skills",
                                         List.of("sql", "preference"),
                                         "inputs",
@@ -113,12 +120,12 @@ public final class DefaultFlows {
                         new FlowEdge("ontology", "metadata", "continue"),
                         new FlowEdge("ontology", "metadata", "default"),
                         new FlowEdge("metadata", "end", "error"),
-                        new FlowEdge("metadata", "insight", "continue"),
-                        new FlowEdge("metadata", "insight", "default"),
-                        new FlowEdge("insight", "end", "answered"),
-                        new FlowEdge("insight", "end", "clarify"),
-                        new FlowEdge("insight", "end", "error"),
-                        new FlowEdge("insight", "end", "default")));
+                        new FlowEdge("metadata", "llm", "continue"),
+                        new FlowEdge("metadata", "llm", "default"),
+                        new FlowEdge("llm", "end", "answered"),
+                        new FlowEdge("llm", "end", "clarify"),
+                        new FlowEdge("llm", "end", "error"),
+                        new FlowEdge("llm", "end", "default")));
     }
 
     /** 旧版单节点智能问数（兼容已发布 Release）。 */

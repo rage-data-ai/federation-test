@@ -29,7 +29,7 @@
 
 - 控制台用 Vue Flow 画布拖拽节点、连线、编辑分支条件（`when`）
 - 节点坐标写入 `config.x` / `config.y`，与一期 JSON 兼容
-- 「智能问数」默认图展开为 `knowledge → ontology → metadata → insight`（含短路/澄清边）；`FlowRunner` 仍折叠为一次 `AskService.ask`（真拆跑见阶段 2.5 / [`chatflow-stage-nodes.md`](chatflow-stage-nodes.md)）
+- 「智能问数」默认图展开为 `knowledge → ontology → metadata → llm_chat(+sql)`（含短路/澄清边）；旧 `insight` 节点仍兼容；见 [`chatflow-stage-nodes.md`](chatflow-stage-nodes.md)
 
 ### 阶段 2.6 — 节点入参 / 出参（Dify 变量，已落地）
 
@@ -69,7 +69,7 @@ POST   /api/v1/ask                   { question, history, conversationId?, appId
   start → knowledge ─answered→ end
              └continue→ ontology ─clarify→ end
                            └continue→ metadata ─error→ end
-                                         └continue→ insight → end
+                                         └continue→ llm_chat(+sql) → end
 
 简单对话:  start ──default──► llm_chat ──default──► end
 

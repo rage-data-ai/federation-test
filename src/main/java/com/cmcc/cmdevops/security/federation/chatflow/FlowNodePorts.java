@@ -76,12 +76,14 @@ public final class FlowNodePorts {
                 new Spec(
                         List.of(
                                 new Port("query", "用户消息", "默认绑定 sys.query"),
-                                new Port("systemPrompt", "系统提示词", "支持 {{#var#}} 插值"),
+                                new Port("systemPrompt", "系统提示词", "支持 {{#var#}}；勾选 SQL 时由洞察 Analyst 主导"),
                                 new Port("memoryWindowTurns", "记忆轮数", "覆盖开始节点；0=无历史"),
-                                new Port("skills", "工具技能", "可自由勾选已有工具包")),
+                                new Port("skills", "工具技能", "勾选 sql 即联邦查询（原 SQL 洞察）")),
                         List.of(
-                                new Port("outcome", "结果条件", "default"),
-                                new Port("answer", "回复文本", "")),
+                                new Port("outcome", "结果条件", "default；勾选 sql 时 answered/clarify/error"),
+                                new Port("answer", "回复文本", ""),
+                                new Port("sql", "SQL", "勾选 sql 时写出"),
+                                new Port("rowCount", "行数", "勾选 sql 时写出")),
                         Map.of(
                                 "query",
                                 "{{#sys.query#}}",

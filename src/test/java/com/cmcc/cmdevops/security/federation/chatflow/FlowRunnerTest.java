@@ -152,6 +152,39 @@ class FlowRunnerTest {
     }
 
     @Test
+    void llmChatWithSqlSkillDelegatesToInsight() {
+        AskService askService = mock(AskService.class);
+        AskRunRecorder recorder = mock(AskRunRecorder.class);
+        when(askService.beginRun(any(), any())).thenReturn(recorder);
+        when(askService.runOntology(any(), any(), any(), any())).thenReturn(AskStageResult.of("continue"));
+        when(askService.runMetadata(any(), any(), any(), eq(true))).thenReturn(AskStageResult.of("continue"));
+        when(askService.runInsight(any(), any(), any(), any()))
+                .thenReturn(AskStageResult.of("answered", Map.of("answer", "n", "sql", "select 1", "rowCount", 1L)));
+        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        FlowGraph graph = FlowGraph.of(
+                "start",
+                List.of(
+                        new FlowNode("start", "start", "开始", Map.of()),
+                        new FlowNode(
+                                "chat",
+                                "llm_chat",
+                                "对话",
+                                Map.of("skills", List.of("sql", "preference"), "systemPrompt", "hi")),
+                        new FlowNode("end", "end", "结束", Map.of())),
+                List.of(
+                        new FlowEdge("start", "chat", "default"),
+                        new FlowEdge("chat", "end", "answered"),
+                        new FlowEdge("chat", "end", "default")));
+        runner.run(
+                new PublishedApp("app-sql-llm", "SQL对话", 1L, "fv", graph),
+                new AskRequest("q", List.of()),
+                (event, data) -> {
+                });
+        verify(askService).runInsight(any(), eq(recorder), any(AskFlowState.class), any());
+        verify(askService, never()).runLlmChat(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void llmChatMemoryWindowOverridesHistory() {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
