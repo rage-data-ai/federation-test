@@ -10,22 +10,39 @@ const form = reactive({ username: '', displayName: '', password: '', confirm: ''
 const busy = ref(false)
 const error = ref('')
 const usernameInput = ref<HTMLInputElement | null>(null)
+const passwordInput = ref<HTMLInputElement | null>(null)
+const confirmInput = ref<HTMLInputElement | null>(null)
 
 const mismatch = computed(() => !!form.confirm && form.confirm !== form.password)
-const canSubmit = computed(
-  () =>
-    form.username.trim().length >= 3 &&
-    form.password.length >= 8 &&
-    form.confirm === form.password &&
-    !busy.value
-)
 
 onMounted(() => {
   void nextTick(() => usernameInput.value?.focus())
 })
 
+/** 浏览器自动填充有时不触发 v-model，提交前从 DOM 再读一遍。 */
+function syncFromDom() {
+  if (usernameInput.value) {
+    form.username = usernameInput.value.value.trim()
+  }
+  if (passwordInput.value) {
+    form.password = passwordInput.value.value
+  }
+  if (confirmInput.value) {
+    form.confirm = confirmInput.value.value
+  }
+}
+
 async function submit() {
-  if (mismatch.value) {
+  syncFromDom()
+  if (form.username.length < 3) {
+    error.value = '用户名至少 3 位'
+    return
+  }
+  if (form.password.length < 8) {
+    error.value = '密码至少 8 位'
+    return
+  }
+  if (form.confirm !== form.password) {
     error.value = '两次输入的密码不一致'
     return
   }
@@ -54,7 +71,7 @@ async function submit() {
         </p>
       </header>
 
-      <form class="auth-gate__form" @submit.prevent="submit">
+      <form class="auth-gate__form" novalidate @submit.prevent="submit">
         <label>
           用户名
           <input
@@ -62,6 +79,8 @@ async function submit() {
             v-model.trim="form.username"
             name="username"
             required
+            minlength="3"
+            maxlength="32"
             autocomplete="username"
             autocapitalize="none"
             spellcheck="false"
@@ -75,6 +94,7 @@ async function submit() {
         <label>
           密码
           <input
+            ref="passwordInput"
             v-model="form.password"
             name="password"
             type="password"
@@ -87,17 +107,20 @@ async function submit() {
         <label>
           确认密码
           <input
+            ref="confirmInput"
             v-model="form.confirm"
             name="confirm"
             type="password"
             required
+            minlength="8"
             autocomplete="new-password"
             :aria-invalid="mismatch"
           />
         </label>
         <p v-if="mismatch" class="auth-gate__field-hint" role="status">两次输入的密码不一致</p>
         <p v-if="error" class="err" role="alert">{{ error }}</p>
-        <button class="primary" type="submit" :disabled="!canSubmit">
+        <!-- 与登录页一致：仅 busy / 密码不一致时禁用，避免填完仍灰掉点不了（含自动填充） -->
+        <button class="primary" type="submit" :disabled="busy || mismatch">
           {{ busy ? '创建中…' : '创建并进入' }}
         </button>
       </form>
