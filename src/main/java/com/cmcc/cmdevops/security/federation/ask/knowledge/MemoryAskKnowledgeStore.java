@@ -30,6 +30,8 @@ public final class MemoryAskKnowledgeStore implements AskKnowledgeStore {
                 item.createdBy(),
                 item.reviewedBy(),
                 item.reviewNote(),
+                item.year(),
+                item.versionOrDefault(),
                 item.createdAt(),
                 item.updatedAt());
         items.put(id, saved);

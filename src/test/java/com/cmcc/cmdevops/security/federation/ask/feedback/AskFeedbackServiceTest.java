@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.cmcc.cmdevops.security.federation.ask.feedback.AskFeedbackService.SuggestionPatch;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledge;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.AskKnowledgeService;
+import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeQaPair;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.KnowledgeVectorIndex;
 import com.cmcc.cmdevops.security.federation.ask.knowledge.MemoryAskKnowledgeStore;
 import com.cmcc.cmdevops.security.federation.ask.ontologytools.HashingTermEmbedder;
@@ -220,7 +221,9 @@ class AskFeedbackServiceTest {
         List<AskKnowledge> pending = knowledge.list(AskKnowledge.PENDING);
         assertEquals(1, pending.size());
         assertEquals("问题 run-alice", pending.get(0).question());
-        assertEquals("高危应按 level >= 4", pending.get(0).answerPair().answer());
+        assertEquals(
+                KnowledgeQaPair.format("问题 run-alice", "高危应按 level >= 4"),
+                pending.get(0).answerPair().answer());
     }
 
     @Test

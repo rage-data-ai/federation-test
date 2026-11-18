@@ -38,7 +38,9 @@ public class AskKnowledgeController {
             String sql,
             List<Map<String, Object>> caliber,
             Map<String, Object> evidence,
-            String kind) {
+            String kind,
+            String year,
+            String version) {
     }
 
     public record SearchBody(String question, Integer topK, String kind) {
@@ -66,7 +68,9 @@ public class AskKnowledgeController {
                 body == null ? null : body.sql(),
                 body == null ? null : body.caliber(),
                 body == null ? null : body.evidence(),
-                body == null ? null : body.kind());
+                body == null ? null : body.kind(),
+                body == null ? null : body.year(),
+                body == null ? null : body.version());
     }
 
     @PutMapping("/{id}")

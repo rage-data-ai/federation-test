@@ -56,7 +56,7 @@ public class AskService {
     private static final Logger log = LoggerFactory.getLogger(AskService.class);
 
     static final String KNOWLEDGE_PROMPT = """
-            你是问数助手。下面给出用户问题，以及知识库按问题召回的若干条「问题–答案对」（含 SQL 与证据摘要）。
+            你是问数助手。下面给出用户问题，以及知识库按问题召回的若干条（answer 为「问：…\\n答：…」问答对，另含 year/version、SQL 与证据摘要）。
             判断是否能仅凭这些知识直接回答当前问题：
             - 能：复用或微调知识中的结论；若知识含 SQL 且时间范围等仍适用，可沿用；不要编造知识里没有的数字。
             - 不能：例如时间范围、过滤条件、口径与知识明显不符，或需要重新查库。
@@ -632,7 +632,10 @@ public class AskService {
             row.put("id", item.id());
             row.put("score", match.score());
             row.put("question", item.question());
+            // 与 MySQL/Milvus answer 一致：问答对文本
             row.put("answer", item.answerPair().answer());
+            row.put("year", item.yearOrDefault());
+            row.put("version", item.versionOrDefault());
             row.put("sql", item.answerPair().sql());
             row.put("caliber", item.answerPair().caliber());
             row.put("evidence", item.evidence());

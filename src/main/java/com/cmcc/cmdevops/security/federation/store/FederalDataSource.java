@@ -231,7 +231,7 @@ public class FederalDataSource {
                 """);
     }
 
-    /** 问数知识正本：问题、问题–答案对、证据；向量可选进 Milvus，不进这张表。 */
+    /** 问数知识正本：问题、问答对 answer、证据；稠密/稀疏向量在 Milvus。 */
     private void ensureAskKnowledgeSchema() {
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS fed_ask_knowledge (
@@ -247,6 +247,8 @@ public class FederalDataSource {
                   created_by VARCHAR(255) NOT NULL,
                   reviewed_by VARCHAR(255) NULL,
                   review_note TEXT NULL,
+                  year VARCHAR(16) NULL,
+                  version VARCHAR(32) NOT NULL DEFAULT '1.0.0',
                   created_at BIGINT NOT NULL,
                   updated_at BIGINT NOT NULL,
                   KEY idx_fed_ask_knowledge_status (status, updated_at),
@@ -263,6 +265,18 @@ public class FederalDataSource {
                     """);
             jdbc.execute("""
                     CREATE INDEX idx_fed_ask_knowledge_kind ON fed_ask_knowledge (kind, status, updated_at)
+                    """);
+        }
+        if (!columnExists("fed_ask_knowledge", "year")) {
+            jdbc.execute("""
+                    ALTER TABLE fed_ask_knowledge
+                      ADD COLUMN year VARCHAR(16) NULL AFTER review_note
+                    """);
+        }
+        if (!columnExists("fed_ask_knowledge", "version")) {
+            jdbc.execute("""
+                    ALTER TABLE fed_ask_knowledge
+                      ADD COLUMN version VARCHAR(32) NOT NULL DEFAULT '1.0.0' AFTER year
                     """);
         }
     }
