@@ -34,4 +34,20 @@ class FlowVarRefsTest {
         assertEquals(8, resolved.get("topK"));
         assertTrue(FlowVarRefs.isRef("{{#sys.query#}}"));
     }
+
+    @Test
+    void interpolatesKnowledgeResultArrayAsJson() {
+        FlowVariablePool pool = FlowVariablePool.fromRequest(new AskRequest("高危告警多少", List.of()), "alice");
+        pool.putNode(
+                "知识库",
+                Map.of(
+                        "result",
+                        List.of(Map.of("id", 1, "question", "高危告警多少", "answer", "共 12 条"))));
+        Object resolved = FlowVarRefs.resolve("{{#知识库.result#}}", pool);
+        assertTrue(resolved instanceof List);
+        String text = FlowVarRefs.interpolate("召回：{{#知识库.result#}}", pool);
+        assertTrue(text.contains("\"question\":\"高危告警多少\""));
+        assertTrue(text.contains("\"answer\":\"共 12 条\""));
+        assertEquals("高危告警多少", FlowVarRefs.resolve("{{#知识库.result.0.question#}}", pool));
+    }
 }

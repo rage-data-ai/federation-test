@@ -37,7 +37,23 @@ public final class FlowVariablePool {
         if (outputs != null) {
             copy.putAll(outputs);
         }
-        nodes.put(nodeId, copy);
+        nodes.put(nodeId.strip(), copy);
+    }
+
+    /**
+     * 按节点显示名写入变量（主路径）；若显示名与 id 不同，额外保留 id 别名以兼容旧引用。
+     */
+    public void putNode(FlowGraph.FlowNode node, Map<String, Object> outputs) {
+        if (node == null) {
+            return;
+        }
+        String title = node.title() == null ? "" : node.title().strip();
+        String id = node.id() == null ? "" : node.id().strip();
+        String primary = !title.isBlank() ? title : id;
+        putNode(primary, outputs);
+        if (!id.isBlank() && !id.equals(primary)) {
+            putNode(id, outputs);
+        }
     }
 
     public Map<String, Object> node(String nodeId) {
@@ -80,21 +96,39 @@ public final class FlowVariablePool {
         if (rest == null || rest.isBlank() || value == null) {
             return value;
         }
+        String head;
+        String next;
+        int dot = rest.indexOf('.');
+        if (dot < 0) {
+            head = rest;
+            next = null;
+        } else {
+            head = rest.substring(0, dot);
+            next = rest.substring(dot + 1);
+        }
         if (value instanceof Map<?, ?> map) {
-            String head;
-            String next;
-            int dot = rest.indexOf('.');
-            if (dot < 0) {
-                head = rest;
-                next = null;
-            } else {
-                head = rest.substring(0, dot);
-                next = rest.substring(dot + 1);
-            }
             Object child = ((Map<String, Object>) map).get(head);
             return dig(child, next);
         }
+        if (value instanceof List<?> list) {
+            Integer index = parseIndex(head);
+            if (index == null || index < 0 || index >= list.size()) {
+                return null;
+            }
+            return dig(list.get(index), next);
+        }
         return null;
+    }
+
+    private static Integer parseIndex(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(text.strip());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** 可供 UI / 调试列出的变量路径。 */

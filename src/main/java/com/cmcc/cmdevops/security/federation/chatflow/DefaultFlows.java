@@ -16,23 +16,50 @@ public final class DefaultFlows {
     public static final String DEFAULT_APP_ID = "app-builtin-ask";
     public static final String DEFAULT_FLOW_ID = "flow-builtin-ask";
 
+    /** 内置问数图修订号；迁移器据此强制升级。 */
+    public static final int BUILTIN_ASK_REVISION = 16;
+
+    /** 大模型+SQL：只引用上游本体 / 元数据出参（运行时再叠内置 SQL 规则）。 */
+    public static final String SQL_LLM_PROMPT = """
+            基于上游节点输出规划并执行联邦 SQL。
+            本体上下文：
+            {{#本体.context#}}
+            元数据：
+            {{#元数据.report#}}
+            """;
+
     /**
-     * 问数阶段节点（白盒拆跑；按 outcome 选边）。
-     * {@code insight} 保留作旧图兼容；新默认图末级已改为 {@code llm_chat}+sql。
+     * 知识判定：只引用上游知识库.result；写出 canAnswer/answer 供下游条件节点。
      */
-    public static final Set<String> ASK_STAGE_TYPES = Set.of("knowledge", "ontology", "metadata", "insight");
+    public static final String KB_JUDGE_PROMPT = """
+            你是问数助手。根据上游知识库召回判断能否直接作答。
+            上游召回（知识库.result，含 id/question/answer/sql/caliber/evidence/year/version）：
+            {{#知识库.result#}}
+            判断是否能仅凭这些知识直接回答当前问题：
+            - 能：复用或微调知识中的结论；不要编造知识里没有的数字。
+            - 不能：时间范围、过滤条件、口径不符，或需要重新查库。
+            请只输出一个 JSON 对象（不要其它文字）。本节点写出字段：canAnswer、answer（及可选 sql/knowledgeId/reason）：
+            {"canAnswer":true,"answer":"中文结论","sql":"可空","knowledgeId":1}
+            或
+            {"canAnswer":false,"reason":"原因"}
+            """;
+
+    /**
+     * 问数白盒相关节点（含条件）。{@code insight} 仅旧图兼容。
+     */
+    public static final Set<String> ASK_STAGE_TYPES =
+            Set.of("knowledge", "ontology", "metadata", "insight", "if_else");
 
     private DefaultFlows() {
     }
 
     /**
-     * 智能问数：Dify 式四阶段展开。
+     * 智能问数：检索 → llm_chat（提示词约定 JSON/canAnswer）→ if_else 分流 → 本体/元数据/SQL 或结束。
      *
      * <pre>
-     * start → knowledge ─answered→ end
-     *            └continue→ ontology ─clarify→ end
-     *                          └continue→ metadata ─error→ end
-     *                                        └continue→ llm（大模型+SQL）→ end
+     * start → knowledge → llm_kb → if_kb
+     *                                  ├─true  → end（判定节点已发 answer）
+     *                                  └─false → ontology → metadata → llm(sql) → end
      * </pre>
      */
     public static FlowGraph builtinAsk() {
@@ -43,48 +70,88 @@ public final class DefaultFlows {
                                 "start",
                                 "start",
                                 "开始",
-                                Map.of("x", 40, "y", 140, "memoryWindowTurns", 12)),
+                                Map.of(
+                                        "x",
+                                        40,
+                                        "y",
+                                        160,
+                                        "memoryWindowTurns",
+                                        12,
+                                        "builtinAskRevision",
+                                        BUILTIN_ASK_REVISION)),
                         new FlowNode(
                                 "knowledge",
                                 "knowledge",
                                 "知识库",
                                 Map.of(
                                         "x",
-                                        240,
+                                        220,
                                         "y",
-                                        140,
+                                        160,
                                         "topK",
                                         5,
-                                        "skills",
-                                        List.of("knowledge"),
                                         "inputs",
                                         Map.of("query", "{{#sys.query#}}", "topK", 5))),
+                        new FlowNode(
+                                "llm_kb",
+                                "llm_chat",
+                                "知识判定",
+                                Map.of(
+                                        "x",
+                                        440,
+                                        "y",
+                                        160,
+                                        "memoryWindowTurns",
+                                        12,
+                                        "systemPrompt",
+                                        KB_JUDGE_PROMPT,
+                                        "skills",
+                                        List.of(),
+                                        "inputs",
+                                        Map.of(
+                                                "query",
+                                                "{{#sys.query#}}",
+                                                "systemPrompt",
+                                                KB_JUDGE_PROMPT,
+                                                "skills",
+                                                List.of()))),
+                        new FlowNode(
+                                "if_kb",
+                                "if_else",
+                                "能否用知识作答",
+                                Map.of(
+                                        "x",
+                                        660,
+                                        "y",
+                                        160,
+                                        "inputs",
+                                        Map.of(
+                                                "left",
+                                                "{{#知识判定.canAnswer#}}",
+                                                "op",
+                                                "==",
+                                                "right",
+                                                true))),
                         new FlowNode(
                                 "ontology",
                                 "ontology",
                                 "本体",
                                 Map.of(
                                         "x",
-                                        460,
+                                        900,
                                         "y",
-                                        140,
-                                        "skills",
-                                        List.of("ontology"),
+                                        260,
                                         "inputs",
-                                        Map.of(
-                                                "query",
-                                                "{{#sys.query#}}",
-                                                "skills",
-                                                List.of("ontology")))),
+                                        Map.of("query", "{{#sys.query#}}"))),
                         new FlowNode(
                                 "metadata",
                                 "metadata",
                                 "元数据",
                                 Map.of(
                                         "x",
-                                        680,
+                                        1120,
                                         "y",
-                                        140,
+                                        260,
                                         "recover",
                                         true,
                                         "inputs",
@@ -95,36 +162,35 @@ public final class DefaultFlows {
                                 "大模型对话",
                                 Map.of(
                                         "x",
-                                        900,
+                                        1340,
                                         "y",
-                                        140,
+                                        260,
                                         "memoryWindowTurns",
                                         12,
                                         "systemPrompt",
-                                        "你是安全运营数据分析师，基于本体与元数据规划并执行联邦 SQL。",
+                                        SQL_LLM_PROMPT,
                                         "skills",
                                         List.of("sql", "preference"),
                                         "inputs",
                                         Map.of(
                                                 "query",
                                                 "{{#sys.query#}}",
+                                                "systemPrompt",
+                                                SQL_LLM_PROMPT,
                                                 "skills",
                                                 List.of("sql", "preference")))),
-                        new FlowNode("end", "end", "结束", Map.of("x", 1120, "y", 140))),
+                        new FlowNode("end", "end", "结束", Map.of("x", 900, "y", 60))),
                 List.of(
                         new FlowEdge("start", "knowledge", "default"),
-                        new FlowEdge("knowledge", "end", "answered"),
-                        new FlowEdge("knowledge", "ontology", "continue"),
-                        new FlowEdge("knowledge", "ontology", "default"),
-                        new FlowEdge("ontology", "end", "clarify"),
-                        new FlowEdge("ontology", "metadata", "continue"),
+                        new FlowEdge("knowledge", "llm_kb", "default"),
+                        new FlowEdge("llm_kb", "if_kb", "default"),
+                        new FlowEdge("if_kb", "end", "true"),
+                        new FlowEdge("if_kb", "ontology", "false"),
+                        new FlowEdge("if_kb", "ontology", "default"),
+                        // 澄清≡默认：仍 emit clarify，DAG 一条默认边走元数据；元数据只分 error/默认
                         new FlowEdge("ontology", "metadata", "default"),
                         new FlowEdge("metadata", "end", "error"),
-                        new FlowEdge("metadata", "llm", "continue"),
                         new FlowEdge("metadata", "llm", "default"),
-                        new FlowEdge("llm", "end", "answered"),
-                        new FlowEdge("llm", "end", "clarify"),
-                        new FlowEdge("llm", "end", "error"),
                         new FlowEdge("llm", "end", "default")));
     }
 
@@ -193,7 +259,7 @@ public final class DefaultFlows {
         return type != null && ASK_STAGE_TYPES.contains(type);
     }
 
-    /** 仍是一期「单节点 builtin_ask」图，需要迁移到四阶段。 */
+    /** 仍是一期「单节点 builtin_ask」图，需要迁移到新 DAG。 */
     public static boolean isLegacyBuiltinAskGraph(FlowGraph graph) {
         if (graph == null || graph.nodes().isEmpty()) {
             return false;
@@ -201,5 +267,43 @@ public final class DefaultFlows {
         boolean hasBuiltin = graph.nodes().stream().anyMatch(node -> "builtin_ask".equals(node.type()));
         boolean hasStage = graph.nodes().stream().anyMatch(node -> isAskStageType(node.type()));
         return hasBuiltin && !hasStage;
+    }
+
+    /** 旧四阶段（无 if_else）或修订号落后时升级。 */
+    public static boolean needsIfElseKnowledgeUpgrade(FlowGraph graph) {
+        return needsBuiltinAskGraphUpgrade(graph);
+    }
+
+    /**
+     * 需要升级到「knowledge → llm_chat（提示词约定 canAnswer）→ if_else」的图。
+     */
+    public static boolean needsBuiltinAskGraphUpgrade(FlowGraph graph) {
+        if (graph == null || graph.nodes().isEmpty()) {
+            return false;
+        }
+        if (!graph.nodes().stream().anyMatch(node -> "knowledge".equals(node.type()))) {
+            return false;
+        }
+        Object rev = graph.node(graph.startNodeId()).config().get("builtinAskRevision");
+        int current = rev instanceof Number number ? number.intValue() : 0;
+        if (current < BUILTIN_ASK_REVISION) {
+            return true;
+        }
+        boolean hasLlmChat = graph.nodes().stream().anyMatch(node -> "llm_chat".equals(node.type()));
+        boolean hasIfElse = graph.nodes().stream().anyMatch(node -> "if_else".equals(node.type()));
+        boolean knowledgeToIfElse = graph.edges().stream().anyMatch(edge -> {
+            if (!"knowledge".equals(edge.from())) {
+                return false;
+            }
+            try {
+                return "if_else".equals(graph.node(edge.to()).type());
+            } catch (RuntimeException e) {
+                return false;
+            }
+        });
+        boolean stillSpecialJudge = graph.nodes().stream()
+                .anyMatch(node -> "llm_chat".equals(node.type())
+                        && Boolean.TRUE.equals(node.config().get("knowledgeJudge")));
+        return !hasLlmChat || !hasIfElse || knowledgeToIfElse || stillSpecialJudge;
     }
 }

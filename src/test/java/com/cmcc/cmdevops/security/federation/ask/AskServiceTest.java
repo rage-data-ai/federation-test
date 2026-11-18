@@ -98,7 +98,21 @@ class AskServiceTest {
 
         service(model, rows(List.of("web-01", 5L))).ask(new AskRequest("最近一天高危告警最多的资产名称", List.of()), this::record);
 
-        assertEquals(List.of("run", "stage", "answerability", "ontology", "stage", "metadata", "stage", "sql", "sql", "result", "answer"), events);
+        assertEquals(
+                List.of(
+                        "run",
+                        "stage",
+                        "stage",
+                        "answerability",
+                        "ontology",
+                        "stage",
+                        "metadata",
+                        "stage",
+                        "sql",
+                        "sql",
+                        "result",
+                        "answer"),
+                events);
         assertEquals(List.of(GOOD_SQL), executed);
         Map<?, ?> rejected = (Map<?, ?>) payloads.get(events.indexOf("sql"));
         assertEquals("rejected", rejected.get("status"));
@@ -246,7 +260,7 @@ class AskServiceTest {
 
         service(model, rows(), knowledge).ask(new AskRequest("最近一天高危告警有多少？", List.of()), this::record);
 
-        assertEquals(List.of("run", "stage", "knowledge", "answer"), events);
+        assertEquals(List.of("run", "stage", "knowledge", "stage", "answer"), events);
         assertFalse(events.contains("ontology"));
         assertTrue(executed.isEmpty());
         Map<?, ?> answer = (Map<?, ?>) payloads.get(events.lastIndexOf("answer"));
@@ -269,7 +283,8 @@ class AskServiceTest {
         service(model, rows(List.of("web-01", 5L)), knowledge)
                 .ask(new AskRequest("最近一天高危告警最多的资产名称", List.of()), this::record);
 
-        assertFalse(events.contains("knowledge"));
+        // 检索阶段仍会发 knowledge（空 matches），然后走本体
+        assertTrue(events.contains("knowledge"));
         assertTrue(events.contains("ontology"));
         assertEquals("web-01 最多，5 条", ((Map<?, ?>) payloads.get(events.lastIndexOf("answer"))).get("answer"));
     }
@@ -294,6 +309,61 @@ class AskServiceTest {
         assertTrue(events.contains("ontology"));
         assertEquals("重新查库得到 5 条", ((Map<?, ?>) payloads.get(events.lastIndexOf("answer"))).get("answer"));
         GatewayUser.clear();
+    }
+
+    @Test
+    void llmChatOutputsFlattensPromptJsonFields() {
+        AskService service = service(new ScriptedModel().text("unused"), rows(List.of()));
+        Map<String, Object> outs = service.llmChatOutputs(
+                "说明如下\n{\"canAnswer\":true,\"answer\":\"可直接答\",\"reason\":null}\n");
+        assertEquals(true, outs.get("canAnswer"));
+        assertEquals("可直接答", outs.get("answer"));
+        Map<String, Object> plain = service.llmChatOutputs("普通文本回复");
+        assertEquals("普通文本回复", plain.get("answer"));
+        assertFalse(plain.containsKey("canAnswer"));
+    }
+
+    @Test
+    void llmChatClarifyMergesIntoAnswer() {
+        AskService service = service(new ScriptedModel().text("unused"), rows(List.of()));
+        Map<String, Object> outs = service.llmChatOutputs(
+                "{\"status\":\"clarify\",\"question\":\"要看哪个时间范围？\",\"options\":[\"今天\",\"本周\"]}");
+        assertTrue(outs.get("answer") instanceof Map<?, ?>);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> answer = (Map<String, Object>) outs.get("answer");
+        assertTrue(answer.containsKey("clarify"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> pending = (Map<String, Object>) answer.get("clarify");
+        assertEquals("要看哪个时间范围？", pending.get("question"));
+        assertEquals(List.of("今天", "本周"), pending.get("options"));
+    }
+
+    @Test
+    void ontologyClarifyMergesIntoContextOutput() {
+        ScriptedModel model = new ScriptedModel()
+                .tool("listConcepts", Map.of())
+                .text("{\"entities\":[],\"clarify\":{\"question\":\"你说的漏洞指哪类数据？\",\"options\":[\"告警\",\"资产\"]}}");
+        AskService ask = service(model, rows());
+        AskFlowState state = new AskFlowState();
+        List<Object> stageOut = new ArrayList<>();
+        AskStageResult result = ask.runOntology(
+                new AskRequest("漏洞趋势怎么样", List.of()),
+                (event, data) -> {
+                    if ("clarify".equals(event)) {
+                        stageOut.add(data);
+                    }
+                },
+                state,
+                AskSkillIds.DEFAULT_ONTOLOGY);
+        assertEquals("clarify", result.outcome());
+        assertFalse(stageOut.isEmpty());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> context = (Map<String, Object>) result.outputs().get("context");
+        assertTrue(context.containsKey("clarify"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> pending = (Map<String, Object>) context.get("clarify");
+        assertEquals("你说的漏洞指哪类数据？", pending.get("question"));
+        assertEquals(List.of("告警", "资产"), pending.get("options"));
     }
 
     private AskKnowledgeService knowledgeService() {

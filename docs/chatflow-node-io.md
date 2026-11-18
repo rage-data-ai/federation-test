@@ -2,80 +2,63 @@
 
 ## 目标
 
-让每个节点像 Dify 一样声明 **输入（可绑定变量或字面量）** 与 **输出（写入变量池）**，下游用 `{{#nodeId.field#}}` / `{{#sys.query#}}` 引用，而不是写死读 `AskRequest`。
+让每个节点像 Dify 一样声明 **输入（可绑定变量或字面量）** 与 **输出（写入变量池）**，下游用 `{{#节点名称.字段#}}` / `{{#sys.query#}}` 引用。
 
-## 对照 Dify
-
-| Dify | 本仓库 |
-|---|---|
-| `sys.query` / 会话变量 | `sys.*`（见下） |
-| 节点输出变量 `{{#llm.text#}}` | `{{#<nodeId>.<field>#}}` |
-| 节点 Inputs 面板绑定 | `config.inputs`：`{ port: "{{#ref#}}" \| literal }` |
-| 节点 Outputs 只读列表 | 类型目录 `FlowNodePorts` / 前端 `nodePorts.ts` |
-| 提示词里插变量 | `systemPrompt` 等字符串做模板替换 |
-
-## 系统变量 `sys.*`
-
-| 路径 | 含义 |
-|---|---|
-| `sys.query` | 当前用户问题 |
-| `sys.history` | 截断后的对话历史（Turn 列表） |
-| `sys.conversation_id` | 会话 id |
-| `sys.app_id` | 应用 id |
-| `sys.user` | 当前用户名 |
-
-## 节点端口（一期）
-
-| type | inputs | outputs |
-|---|---|---|
-| `start` | — | `query`, `history`, `conversation_id`（写入 sys 同源） |
-| `knowledge` | `query`（默认 `{{#sys.query#}}`）, `topK` | `outcome`, `answered`, `answer`, `matches` |
-| `ontology` | `query`, `skills` | `outcome`, `context`, `answerability` |
-| `metadata` | `recover` | `outcome`, `report`, `tables` |
-| `insight`（旧） | `query`, `skills` | `outcome`, `answer`, `sql`, `rowCount` |
-| `llm_chat` | `query`, `systemPrompt`, `memoryWindowTurns`, `skills` | `outcome`, `answer`；（勾选 sql 时另有 `sql`/`rowCount`） |
-| `llm_chat` | `query`, `systemPrompt`, `skills` | `outcome`, `answer` |
-| `builtin_ask` | `query` | `outcome`（整段，输出有限） |
-| `end` | — | — |
-
-未配置的 input 使用上表默认绑定；字面量可覆盖（如 `topK: 8`）。
-
-## 图 JSON 形状
-
-```json
-{
-  "id": "insight",
-  "type": "insight",
-  "title": "SQL 洞察",
-  "config": {
-    "x": 900,
-    "y": 140,
-    "skills": ["sql", "preference"],
-    "inputs": {
-      "query": "{{#sys.query#}}",
-      "skills": ["sql", "preference"]
-    }
-  }
-}
-```
-
-`systemPrompt` 示例：
+## 默认智能问数图
 
 ```text
-基于上游结论作答。知识库答案：{{#knowledge.answer#}}
+start → 知识库 → 知识判定(llm_chat) → 能否用知识作答(canAnswer==true)
+                                         ├─是 → end（判定节点已发 answer）
+                                         └─否 → 本体 → 元数据 ─出错→ end
+                                                      └─默认→ 大模型(sql) → end
+```
+
+澄清不单独分边：`continue` / `clarify` 运行时都等同 `default`（仍会 `emit clarify` 给前端）。本体→元数据只画一条默认边。元数据本身不澄清，只分出错/默认；澄清若发生在大模型阶段，同样走默认边到结束。
+
+1. **知识库**：只检索，写出唯一出参 `result`（`Array[Object]`）
+2. **知识判定**：普通 `llm_chat`；提示词插入 `{{#知识库.result#}}`，并约定模型输出含 `canAnswer` 的 JSON
+3. **能否用知识作答**：读 `{{#知识判定.canAnswer#}}` 分流
+
+画布：单击节点配置；**节点名称不可重复**；变量路径用**节点名称**（不展示内部 id）。提示词用 `{x}` 在光标处插入；**只能引用本节点上游出参**；侧栏提示本节点输出字段名。
+
+## 端口目录来源
+
+前端通过 `GET /api/v1/flows/node-ports` 拉取；权威定义在后端 `FlowNodePorts`，运行时解析在 `FlowVarRefs` / `FlowRunner`（按节点名称写入变量池）。
+
+## 变量引用（唯一方式）
+
+```text
+召回知识：
+{{#知识库.result#}}
+首条问题：{{#知识库.result.0.question#}}
 用户问题：{{#sys.query#}}
 ```
 
-## 运行时
+## llm_chat 出参（通用）
 
-1. `FlowRunner` 创建 `FlowVariablePool`，灌入 `sys.*`。
-2. 进入节点前：按 `FlowNodePorts` + `config.inputs` 解析得到 `ResolvedInputs`。
-3. 执行阶段（白盒 AskService）；把结果 `pool.put(nodeId, outputs)`。
-4. 选边仍用 outcome；字符串配置（如 prompt）经 `FlowVarRefs.interpolate`。
+配置面板不展示固定「输出」清单。运行时：模型回复写入 `answer`；若回复含 JSON 对象，其字段一并写入变量池（如提示词约定的 `canAnswer`）。下游用 `{{#节点名称.字段#}}` 引用。
 
-## 分期
+## 知识库 `result` 字段（对齐 `fed_ask_knowledge`）
 
-1. **本期（已实现）**：变量池 + 引用解析 + 端口目录 + Runner 接线 + 画布 Inputs/Outputs 面板。
-2. **已补**：知识库召回测试；`llm_chat.memoryWindowTurns`；工具技能清单展示与自由勾选；`answer` 节点；Ask 轨迹展示 `vars`。
-3. **下期**：开始节点自定义会话变量；条件边表达式；按上游过滤变量选择器；`llm_chat` 挂载 SQL 工具（需会话态 InsightSession）。
-4. **更后**：并行分支变量合并、循环节点、HTTP 节点响应映射。
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | Number | 主键 |
+| `score` | Number | 召回分 |
+| `question` | String | 问题 |
+| `answer` | String | 答案 |
+| `sql` | String | sql_text |
+| `caliber` | Array | 口径 |
+| `evidence` | Object | 证据 |
+| `kind` | String | smart_ask / general |
+| `status` | String | pending / approved / rejected |
+| `year` | String | 业务年 |
+| `version` | String | 知识版本 |
+| `sourceRunId` | String | 来源问数 run |
+
+## 节点端口（摘要）
+
+| type | 关键 outputs |
+|---|---|
+| `knowledge` | `result` Array[Object] |
+| `llm_chat` | `answer`（JSON 其它字段运行时动态写入） |
+| `if_else` | `outcome`=`true`/`false`, `result` |

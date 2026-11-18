@@ -8,7 +8,7 @@ public record AskStageResult(String outcome, Map<String, Object> outputs) {
 
     public AskStageResult {
         outcome = outcome == null || outcome.isBlank() ? "default" : outcome;
-        outputs = outputs == null ? Map.of() : Map.copyOf(outputs);
+        outputs = sanitize(outputs);
     }
 
     public static AskStageResult of(String outcome) {
@@ -18,9 +18,26 @@ public record AskStageResult(String outcome, Map<String, Object> outputs) {
     public static AskStageResult of(String outcome, Map<String, Object> outputs) {
         Map<String, Object> copy = new LinkedHashMap<>();
         if (outputs != null) {
-            copy.putAll(outputs);
+            outputs.forEach((k, v) -> {
+                if (k != null && v != null) {
+                    copy.put(k, v);
+                }
+            });
         }
         copy.putIfAbsent("outcome", outcome == null ? "default" : outcome);
         return new AskStageResult(outcome, copy);
+    }
+
+    private static Map<String, Object> sanitize(Map<String, Object> outputs) {
+        if (outputs == null || outputs.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> copy = new LinkedHashMap<>();
+        outputs.forEach((k, v) -> {
+            if (k != null && v != null) {
+                copy.put(k, v);
+            }
+        });
+        return Map.copyOf(copy);
     }
 }

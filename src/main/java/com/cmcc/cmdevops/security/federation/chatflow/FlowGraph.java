@@ -32,15 +32,19 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
         return map;
     }
 
-    /** 按条件选下一条边；无精确匹配时走 default / 空条件。 */
+    /**
+     * 按条件选下一条边；无精确匹配时走 default。
+     * {@code continue} / {@code clarify} 与 default 同义（澄清仍发事件，DAG 沿默认路走）。
+     */
     public String next(String fromId, String outcome) {
+        String want = normalizeWhen(outcome);
         String fallback = null;
         for (FlowEdge edge : edges) {
             if (!edge.from().equals(fromId)) {
                 continue;
             }
-            String when = edge.when() == null || edge.when().isBlank() ? "default" : edge.when().strip();
-            if (when.equalsIgnoreCase(outcome)) {
+            String when = normalizeWhen(edge.when());
+            if (when.equalsIgnoreCase(want)) {
                 return edge.to();
             }
             if ("default".equalsIgnoreCase(when)) {
@@ -48,6 +52,17 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
             }
         }
         return fallback;
+    }
+
+    static String normalizeWhen(String when) {
+        if (when == null || when.isBlank()) {
+            return "default";
+        }
+        String w = when.strip();
+        if ("continue".equalsIgnoreCase(w) || "clarify".equalsIgnoreCase(w)) {
+            return "default";
+        }
+        return w;
     }
 
     public void validate() {
@@ -66,6 +81,22 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
         boolean hasEnd = nodes.stream().anyMatch(node -> "end".equals(node.type()));
         if (!hasEnd) {
             throw new IllegalArgumentException("流程需要至少一个 end 节点");
+        }
+        java.util.HashSet<String> titles = new java.util.HashSet<>();
+        for (FlowNode node : nodes) {
+            String title = node.title() == null ? "" : node.title().strip();
+            if (title.isBlank()) {
+                throw new IllegalArgumentException("节点名称不能为空：" + node.id());
+            }
+            if (title.indexOf('#') >= 0
+                    || title.indexOf('.') >= 0
+                    || title.indexOf('{') >= 0
+                    || title.indexOf('}') >= 0) {
+                throw new IllegalArgumentException("节点名称不能包含 # . { }：" + title);
+            }
+            if (!titles.add(title)) {
+                throw new IllegalArgumentException("节点名称不能重复：" + title);
+            }
         }
     }
 

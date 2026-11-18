@@ -7,16 +7,25 @@ import {
   type Connection,
   type NodeTypesObject
 } from '@vue-flow/core'
-import { computed, markRaw, nextTick, ref, watch } from 'vue'
+import { computed, markRaw, nextTick, onMounted, ref, watch } from 'vue'
+import { getFlowNodePorts } from '../../api'
 import type { FlowGraph } from '../../types'
 import {
   graphToVueFlow,
   newNodeId,
+  upstreamNodeIds,
   vueFlowToGraph,
+  withParallelEdgeLayout,
   type DagNodeData
 } from '../../flow/graphAdapter'
-import { EDGE_WHEN_OPTIONS, NODE_CATALOG, catalogItem } from '../../flow/nodeCatalog'
-import { asRef, parseRef, portsFor, SYS_VARS } from '../../flow/nodePorts'
+import {
+  NODE_CATALOG,
+  catalogItem,
+  edgeWhenLabel,
+  edgeWhenOptionsFor,
+  nextEdgeWhen
+} from '../../flow/nodeCatalog'
+import { asRef, parseRef, portsFor, setPortsCatalog, sysVars } from '../../flow/nodePorts'
 import { skillsBindableOn, skillsForNode, type AskSkillId } from '../../flow/skillCatalog'
 import FlowNodeCard from './FlowNodeCard.vue'
 
@@ -38,17 +47,37 @@ const emit = defineEmits<{
 /** any[] avoids Vue Flow Node generics (TS2589) while still driving the canvas. */
 const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
-/** 单击选中（高亮）；不直接打开配置，避免画布一点就乱。 */
+/** 单击节点/连线即打开右侧配置（类 Dify）。 */
 const selectedNodeId = ref('')
 const selectedEdgeId = ref('')
-/** 双击或点「配置」后才进入属性编辑。 */
 const editingNodeId = ref('')
 const editingEdgeId = ref('')
 const localError = ref('')
 const syncing = ref(false)
 const lastEmitted = ref('')
+/** 后端端口目录加载世代，驱动 portsFor 相关 UI 刷新。 */
+const portsEpoch = ref(0)
+const promptTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const answerTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const promptCaret = ref({ systemPrompt: { start: 0, end: 0 }, text: { start: 0, end: 0 } })
+const promptCaretTouched = ref({ systemPrompt: false, text: false })
+/** Dify 式 {x} 变量选择器。 */
+const varPicker = ref<{ field: 'systemPrompt' | 'text' | ''; filter: string }>({
+  field: '',
+  filter: ''
+})
 
 const nodeTypes = { flow: markRaw(FlowNodeCard) } as unknown as NodeTypesObject
+
+onMounted(async () => {
+  try {
+    const catalog = await getFlowNodePorts()
+    setPortsCatalog(catalog)
+    portsEpoch.value += 1
+  } catch (e) {
+    localError.value = e instanceof Error ? e.message : String(e)
+  }
+})
 
 const selectedNode = computed(
   () => nodes.value.find((node) => node.id === selectedNodeId.value) || null
@@ -63,6 +92,17 @@ const editingEdge = computed(
   () => edges.value.find((edge) => edge.id === editingEdgeId.value) || null
 )
 const addable = computed(() => NODE_CATALOG.filter((item) => item.addable))
+
+const IF_ELSE_OPS = [
+  { value: '==', label: '==' },
+  { value: '!=', label: '!=' },
+  { value: '>', label: '>' },
+  { value: '>=', label: '>=' },
+  { value: '<', label: '<' },
+  { value: '<=', label: '<=' },
+  { value: 'empty', label: '为空' },
+  { value: 'not_empty', label: '非空' }
+] as const
 
 function nodeData(node: { id?: string; data?: Partial<DagNodeData> } | null | undefined): DagNodeData {
   const data = node?.data || {}
@@ -119,35 +159,47 @@ function onConnect(connection: Connection) {
   if (!connection.source || !connection.target || connection.source === connection.target) {
     return
   }
-  const exists = edges.value.some(
-    (edge) => edge.source === connection.source && edge.target === connection.target
-  )
-  if (exists) {
+  const sourceNode = nodes.value.find((node) => node.id === connection.source)
+  const sourceType = nodeData(sourceNode).flowType
+  const usedWhens = edges.value
+    .filter((edge) => edge.source === connection.source)
+    .map((edge) => String(edge.data?.when || 'default'))
+  const when = nextEdgeWhen(sourceType, usedWhens)
+  if (!when) {
     return
   }
-  edges.value = [
+  const pairTaken = edges.value.some(
+    (edge) =>
+      edge.source === connection.source &&
+      edge.target === connection.target &&
+      String(edge.data?.when || 'default') === when
+  )
+  if (pairTaken) {
+    return
+  }
+  const edgeId = `e-${connection.source}-${connection.target}-${when}-${edges.value.length}`
+  edges.value = withParallelEdgeLayout([
     ...edges.value,
     {
-      id: `e-${connection.source}-${connection.target}-default-${edges.value.length}`,
+      id: edgeId,
       source: connection.source,
       target: connection.target,
-      data: { when: 'default' },
-      label: '',
-      animated: false,
+      data: { when },
+      label: edgeWhenLabel(when),
+      animated: when !== 'default',
       markerEnd: 'arrowclosed'
     }
-  ]
-  nextTick(commit)
+  ])
+  nextTick(() => {
+    commit()
+    if (when !== 'default') {
+      openEdgeInspector(edgeId)
+    }
+  })
 }
 
 function onNodeClick(event: { node: { id: string } }) {
-  selectedNodeId.value = event.node.id
-  selectedEdgeId.value = ''
-  // 单击只选中，不打开配置面板
-  if (editingNodeId.value && editingNodeId.value !== event.node.id) {
-    editingNodeId.value = ''
-  }
-  editingEdgeId.value = ''
+  openNodeInspector(event.node.id)
 }
 
 function onNodeDoubleClick(event: { node: { id: string } }) {
@@ -155,12 +207,7 @@ function onNodeDoubleClick(event: { node: { id: string } }) {
 }
 
 function onEdgeClick(payload: { edge: { id: string } }) {
-  selectedEdgeId.value = payload.edge.id
-  selectedNodeId.value = ''
-  if (editingEdgeId.value && editingEdgeId.value !== payload.edge.id) {
-    editingEdgeId.value = ''
-  }
-  editingNodeId.value = ''
+  openEdgeInspector(payload.edge.id)
 }
 
 function onEdgeDoubleClick(payload: { edge: { id: string } }) {
@@ -172,6 +219,7 @@ function onPaneClick() {
   selectedEdgeId.value = ''
   editingNodeId.value = ''
   editingEdgeId.value = ''
+  closeVarPicker()
 }
 
 function openNodeInspector(id: string) {
@@ -179,6 +227,9 @@ function openNodeInspector(id: string) {
   selectedEdgeId.value = ''
   editingNodeId.value = id
   editingEdgeId.value = ''
+  promptCaretTouched.value = { systemPrompt: false, text: false }
+  promptCaret.value = { systemPrompt: { start: 0, end: 0 }, text: { start: 0, end: 0 } }
+  closeVarPicker()
 }
 
 function openEdgeInspector(id: string) {
@@ -191,6 +242,7 @@ function openEdgeInspector(id: string) {
 function closeInspector() {
   editingNodeId.value = ''
   editingEdgeId.value = ''
+  closeVarPicker()
 }
 
 function onNodeDragStop() {
@@ -220,6 +272,14 @@ function defaultConfig(type: string): Record<string, unknown> {
   }
   if (type === 'knowledge') {
     return { ...base, topK: 5, skills: ['knowledge'] }
+  }
+  if (type === 'if_else') {
+    return {
+      ...base,
+      left: '{{#知识判定.canAnswer#}}',
+      op: '==',
+      right: true
+    }
   }
   if (type === 'ontology') {
     return { ...base, skills: ['ontology'] }
@@ -340,47 +400,187 @@ function updateInputValue(name: string, value: unknown) {
     name === 'recover' ||
     name === 'skills' ||
     name === 'memoryWindowTurns' ||
-    name === 'text'
+    name === 'text' ||
+    name === 'result' ||
+    name === 'left' ||
+    name === 'op' ||
+    name === 'right'
   ) {
     updateNodeConfig(name, value)
   }
 }
 
-function availableVarPaths(currentNodeId: string): Array<{ path: string; label: string }> {
-  const paths: Array<{ path: string; label: string }> = SYS_VARS.map((item) => ({
+type VarPathItem = { path: string; label: string; group: string }
+
+function availableVarPaths(currentNodeId: string): VarPathItem[] {
+  void portsEpoch.value
+  const upstream = upstreamNodeIds(currentNodeId, edges.value)
+  const paths: VarPathItem[] = sysVars().map((item) => ({
     path: item.path,
-    label: item.label
+    label: item.label,
+    group: '系统'
   }))
   for (const node of nodes.value) {
-    const data = nodeData(node)
-    if (node.id === currentNodeId) {
+    if (node.id === currentNodeId || !upstream.has(node.id)) {
       continue
     }
+    const data = nodeData(node)
+    const title = String(data.title || node.id).trim() || String(node.id)
+    const group = `${title}（${catalogItem(data.flowType).title}）`
     for (const port of portsFor(data.flowType).outputs) {
+      const base = `${title}.${port.name}`
+      const typeHint = port.dataType ? ` · ${port.dataType}` : ''
       paths.push({
-        path: `${String(node.id)}.${port.name}`,
-        label: `${data.title || node.id}.${port.label}`
+        path: base,
+        label: `${port.label}${typeHint}`,
+        group
       })
+      if (port.dataType === 'Object' && port.fields?.length) {
+        for (const field of port.fields) {
+          paths.push({
+            path: `${base}.${field.name}`,
+            label: `${port.label}.${field.label}${field.dataType ? ` · ${field.dataType}` : ''}`,
+            group
+          })
+        }
+      }
+      if (port.dataType === 'Array[Object]' && port.fields?.length) {
+        for (const field of port.fields) {
+          paths.push({
+            path: `${base}.0.${field.name}`,
+            label: `${port.label}[0].${field.label}${field.dataType ? ` · ${field.dataType}` : ''}`,
+            group
+          })
+        }
+      }
     }
   }
   return paths
+}
+
+/** 本节点写出的字段（仅字段名 + 说明，不含节点名前缀）。 */
+function ownOutputHints(flowType: string): Array<{ name: string; label: string }> {
+  void portsEpoch.value
+  return portsFor(flowType).outputs.map((port) => ({
+    name: port.name,
+    label: port.label || port.name
+  }))
+}
+
+/** 绑定下拉：保留当前已绑路径（如提示词 JSON 字段 canAnswer），即使不在端口目录中。 */
+function bindingVarOptions(currentNodeId: string, currentPath: string | null | undefined): VarPathItem[] {
+  const paths = availableVarPaths(currentNodeId)
+  const cur = (currentPath || '').trim()
+  if (!cur || paths.some((item) => item.path === cur)) {
+    return paths
+  }
+  return [{ path: cur, label: cur, group: '已绑定' }, ...paths]
+}
+
+/** 按节点分组，供提示词「{x} 插入变量」下拉使用。 */
+function varPathGroups(currentNodeId: string): Array<{ group: string; items: VarPathItem[] }> {
+  const map = new Map<string, VarPathItem[]>()
+  for (const item of availableVarPaths(currentNodeId)) {
+    const list = map.get(item.group) || []
+    list.push(item)
+    map.set(item.group, list)
+  }
+  return [...map.entries()].map(([group, items]) => ({ group, items }))
+}
+
+function filteredVarPathGroups(currentNodeId: string): Array<{ group: string; items: VarPathItem[] }> {
+  const q = varPicker.value.filter.trim().toLowerCase()
+  return varPathGroups(currentNodeId)
+    .map((group) => ({
+      group: group.group,
+      items: q
+        ? group.items.filter(
+            (item) =>
+              item.path.toLowerCase().includes(q) ||
+              item.label.toLowerCase().includes(q) ||
+              group.group.toLowerCase().includes(q)
+          )
+        : group.items
+    }))
+    .filter((group) => group.items.length > 0)
+}
+
+function openVarPicker(fieldName: 'systemPrompt' | 'text') {
+  if (props.readonly) {
+    return
+  }
+  const el = fieldName === 'systemPrompt' ? promptTextareaRef.value : answerTextareaRef.value
+  if (el) {
+    rememberPromptCaret(fieldName, el)
+  }
+  varPicker.value = {
+    field: varPicker.value.field === fieldName ? '' : fieldName,
+    filter: ''
+  }
+}
+
+function pickVarIntoPrompt(path: string) {
+  const field = varPicker.value.field
+  if (!field || !path) {
+    return
+  }
+  insertVarIntoPrompt(path, field)
+  varPicker.value = { field: '', filter: '' }
+}
+
+function closeVarPicker() {
+  varPicker.value = { field: '', filter: '' }
 }
 
 function skillAllowed(flowType: string, skillId: AskSkillId): boolean {
   return skillsBindableOn(flowType).some((skill) => skill.id === skillId)
 }
 
-function insertVarIntoPrompt(path: string) {
+function rememberPromptCaret(fieldName: 'systemPrompt' | 'text', el: EventTarget | null) {
+  if (!(el instanceof HTMLTextAreaElement)) {
+    return
+  }
+  promptCaretTouched.value[fieldName] = true
+  promptCaret.value[fieldName] = {
+    start: el.selectionStart ?? el.value.length,
+    end: el.selectionEnd ?? el.value.length
+  }
+}
+
+function insertVarIntoPrompt(path: string, fieldName: 'systemPrompt' | 'text' = 'systemPrompt') {
   if (!editingNode.value || !path) {
     return
   }
   const data = nodeData(editingNode.value)
   const current = String(
-    inputValue(data.config, 'systemPrompt', data.config.systemPrompt || '') ?? ''
+    inputValue(data.config, fieldName, data.config[fieldName] || '') ?? ''
   )
   const snippet = asRef(path)
-  const next = current ? `${current}\n${snippet}` : snippet
-  updateInputValue('systemPrompt', next)
+  const el = fieldName === 'systemPrompt' ? promptTextareaRef.value : answerTextareaRef.value
+  let start = promptCaret.value[fieldName].start
+  let end = promptCaret.value[fieldName].end
+  if (el && document.activeElement === el) {
+    start = el.selectionStart ?? start
+    end = el.selectionEnd ?? end
+  } else if (!promptCaretTouched.value[fieldName]) {
+    start = current.length
+    end = current.length
+  }
+  start = Math.max(0, Math.min(start, current.length))
+  end = Math.max(start, Math.min(end, current.length))
+  const next = current.slice(0, start) + snippet + current.slice(end)
+  updateInputValue(fieldName, next)
+  const caretPos = start + snippet.length
+  promptCaretTouched.value[fieldName] = true
+  promptCaret.value[fieldName] = { start: caretPos, end: caretPos }
+  nextTick(() => {
+    const box = fieldName === 'systemPrompt' ? promptTextareaRef.value : answerTextareaRef.value
+    if (!box) {
+      return
+    }
+    box.focus()
+    box.setSelectionRange(caretPos, caretPos)
+  })
 }
 
 function updateNodeConfig(key: string, value: unknown) {
@@ -431,13 +631,30 @@ function updateNodeTitle(title: string) {
   if (!editingNode.value) {
     return
   }
+  const trimmed = title.trim()
+  if (!trimmed) {
+    localError.value = '节点名称不能为空'
+    return
+  }
+  if (/[#.{}]/.test(trimmed)) {
+    localError.value = '节点名称不能包含 # . { }'
+    return
+  }
   const id = editingNode.value.id
+  const duplicated = nodes.value.some(
+    (node) => node.id !== id && String(nodeData(node).title || '').trim() === trimmed
+  )
+  if (duplicated) {
+    localError.value = `节点名称不能重复：${trimmed}`
+    return
+  }
+  localError.value = ''
   nodes.value = nodes.value.map((node) => {
     if (node.id !== id) {
       return node
     }
     const data = nodeData(node)
-    return { ...node, data: { ...data, title } }
+    return { ...node, data: { ...data, title: trimmed } }
   })
   commit()
 }
@@ -461,25 +678,87 @@ function updateNodePrompt(prompt: string) {
 }
 
 function updateEdgeWhen(when: string) {
-  if (!editingEdge.value) {
+  if (!editingEdge.value || props.readonly) {
     return
   }
-  const id = editingEdge.value.id
-  edges.value = edges.value.map((edge) =>
-    edge.id === id
-      ? {
-          ...edge,
-          data: { ...(edge.data || {}), when },
-          label: when === 'default' ? '' : when,
-          animated: when !== 'default'
-        }
-      : edge
+  const current = editingEdge.value
+  const clash = edges.value.some(
+    (edge) =>
+      edge.id !== current.id &&
+      edge.source === current.source &&
+      edge.target === current.target &&
+      String(edge.data?.when || 'default') === when
   )
+  if (clash) {
+    return
+  }
+  const nextId = `e-${current.source}-${current.target}-${when}`
+  edges.value = withParallelEdgeLayout(
+    edges.value.map((edge) =>
+      edge.id === current.id
+        ? {
+            ...edge,
+            id: nextId,
+            data: { ...(edge.data || {}), when },
+            label: edgeWhenLabel(when),
+            animated: when !== 'default'
+          }
+        : edge
+    )
+  )
+  editingEdgeId.value = nextId
+  selectedEdgeId.value = nextId
   commit()
 }
 
-const selectedData = computed(() => nodeData(editingNode.value))
-const selectedSummary = computed(() => nodeData(selectedNode.value))
+function edgeWhenChoices(edge: { source?: string } | null) {
+  const source = nodes.value.find((node) => node.id === edge?.source)
+  return edgeWhenOptionsFor(nodeData(source).flowType)
+}
+
+function edgeEndpointTitle(nodeId: string) {
+  const node = nodes.value.find((item) => item.id === nodeId)
+  return String(nodeData(node).title || nodeId)
+}
+
+const selectedData = computed(() => {
+  void portsEpoch.value
+  return nodeData(editingNode.value)
+})
+
+const selectedPorts = computed(() => {
+  void portsEpoch.value
+  return portsFor(selectedData.value.flowType)
+})
+
+/** LLM 节点：记忆 / 提示词 / 技能已有专用区，不再重复列出端口表单。 */
+const HIDDEN_INPUT_PORTS: Record<string, string[]> = {
+  llm_chat: ['query', 'memoryWindowTurns', 'skills', 'systemPrompt'],
+  start: ['memoryWindowTurns'],
+  insight: ['skills'],
+  ontology: ['skills']
+}
+
+const visibleInputPorts = computed(() => {
+  const flowType = selectedData.value.flowType
+  const hidden = new Set(HIDDEN_INPUT_PORTS[flowType] ?? [])
+  if (skillsBindableOn(flowType).length) {
+    hidden.add('skills')
+  }
+  if (flowType === 'if_else') {
+    const op = String(
+      inputValue(
+        selectedData.value.config,
+        'op',
+        selectedPorts.value.defaultInputs.op ?? '=='
+      ) ?? ''
+    )
+    if (op === 'empty' || op === 'not_empty') {
+      hidden.add('right')
+    }
+  }
+  return selectedPorts.value.inputs.filter((p) => !hidden.has(p.name))
+})
 </script>
 
 <template>
@@ -503,7 +782,7 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
           <small>{{ item.description }}</small>
         </span>
       </button>
-      <p class="hint">拖到画布添加节点；单击选中，双击或点「配置」打开属性（避免一点就改）。</p>
+      <p class="hint">拖到画布添加；单击节点即可配置（可改节点名称）。</p>
     </aside>
 
     <div
@@ -540,25 +819,22 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
     <aside class="inspector" aria-label="节点属性">
       <template v-if="editingNode">
         <div class="inspector-head">
-          <h3>配置节点</h3>
+          <div class="name-block">
+            <span class="type-badge">{{ catalogItem(selectedData.flowType).title }}</span>
+            <input
+              class="node-name"
+              :value="selectedData.title"
+              type="text"
+              maxlength="64"
+              :disabled="readonly"
+              placeholder="节点名称（不可重复）"
+              @change="updateNodeTitle(($event.target as HTMLInputElement).value)"
+            />
+          </div>
           <button type="button" class="ghost" @click="closeInspector">关闭</button>
         </div>
-        <label>
-          类型
-          <input :value="catalogItem(selectedData.flowType).title" type="text" readonly />
-        </label>
-        <label>
-          标题
-          <input
-            :value="selectedData.title"
-            type="text"
-            maxlength="64"
-            :disabled="readonly"
-            @change="updateNodeTitle(($event.target as HTMLInputElement).value)"
-          />
-        </label>
         <label v-if="selectedData.flowType === 'start' || selectedData.flowType === 'llm_chat'">
-          对话记忆（最近 N 条消息）
+          对话记忆（最近 N 条）
           <input
             :value="
               Number(
@@ -585,24 +861,21 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
                   )
             "
           />
-          <small v-if="selectedData.flowType === 'llm_chat'" class="hint">
-            仅作用于本 LLM 节点；覆盖开始节点窗口。
-          </small>
         </label>
         <fieldset
-          v-if="portsFor(selectedData.flowType).inputs.length"
+          v-if="visibleInputPorts.length"
           class="skills"
           :disabled="readonly"
         >
           <legend>输入</legend>
           <label
-            v-for="port in portsFor(selectedData.flowType).inputs"
+            v-for="port in visibleInputPorts"
             :key="port.name"
             class="io-field"
           >
             <span>
               <strong>{{ port.label }}</strong>
-              <small>{{ port.description }}</small>
+              <small v-if="port.dataType">{{ port.dataType }}</small>
             </span>
             <template v-if="port.name === 'topK'">
               <input
@@ -627,52 +900,103 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
                 启用
               </label>
             </template>
-            <template v-else-if="port.name === 'skills'">
-              <span class="hint">见下方「工具技能」</span>
-            </template>
-            <template v-else-if="port.name === 'systemPrompt' || port.name === 'text'">
-              <textarea
-                rows="4"
-                :value="
-                  String(
-                    inputValue(
-                      selectedData.config,
-                      port.name,
-                      selectedData.config[port.name] || portsFor(selectedData.flowType).defaultInputs[port.name] || ''
-                    )
-                  )
-                "
+            <template v-else-if="port.name === 'op'">
+              <select
+                :value="String(inputValue(selectedData.config, 'op', selectedPorts.defaultInputs.op ?? '==') ?? '==')"
                 :disabled="readonly"
-                @change="
-                  updateInputValue(port.name, ($event.target as HTMLTextAreaElement).value)
-                "
-              />
-              <label v-if="port.name === 'systemPrompt'" class="inline">
-                插入变量
-                <select
-                  :disabled="readonly"
-                  @change="
-                    insertVarIntoPrompt(($event.target as HTMLSelectElement).value);
-                    ($event.target as HTMLSelectElement).value = ''
-                  "
-                >
-                  <option value="">选择…</option>
-                  <option
-                    v-for="item in availableVarPaths(editingNode.id)"
-                    :key="item.path"
-                    :value="item.path"
-                  >
-                    {{ item.path }}
-                  </option>
-                </select>
-              </label>
+                @change="updateInputValue('op', ($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="item in IF_ELSE_OPS" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </option>
+              </select>
             </template>
-            <template v-else-if="port.name === 'memoryWindowTurns'">
-              <span class="hint">见上方「对话记忆」</span>
+            <template v-else-if="port.name === 'text'">
+              <div class="prompt-box">
+                <div class="prompt-tools">
+                  <span class="char-count">{{
+                    String(
+                      inputValue(
+                        selectedData.config,
+                        'text',
+                        selectedData.config.text || selectedPorts.defaultInputs.text || ''
+                      ) ?? ''
+                    ).length
+                  }}</span>
+                  <button
+                    type="button"
+                    class="var-btn"
+                    title="插入变量"
+                    :disabled="readonly"
+                    :class="{ open: varPicker.field === 'text' }"
+                    @mousedown.prevent="openVarPicker('text')"
+                  >
+                    {x}
+                  </button>
+                </div>
+                <textarea
+                  ref="answerTextareaRef"
+                  rows="4"
+                  :value="
+                    String(
+                      inputValue(
+                        selectedData.config,
+                        port.name,
+                        selectedData.config[port.name] || selectedPorts.defaultInputs[port.name] || ''
+                      )
+                    )
+                  "
+                  :disabled="readonly"
+                  @click="rememberPromptCaret('text', $event.target)"
+                  @keyup="rememberPromptCaret('text', $event.target)"
+                  @select="rememberPromptCaret('text', $event.target)"
+                  @blur="rememberPromptCaret('text', $event.target)"
+                  @input="
+                    rememberPromptCaret('text', $event.target);
+                    updateInputValue('text', ($event.target as HTMLTextAreaElement).value)
+                  "
+                />
+                <div v-if="varPicker.field === 'text'" class="var-picker" @mousedown.prevent>
+                  <input
+                    v-model="varPicker.filter"
+                    type="search"
+                    class="var-filter"
+                    placeholder="搜索变量"
+                    autofocus
+                  />
+                  <div class="var-picker-body">
+                    <template v-if="filteredVarPathGroups(editingNode.id).length">
+                      <div
+                        v-for="group in filteredVarPathGroups(editingNode.id)"
+                        :key="group.group"
+                        class="var-group"
+                      >
+                        <div class="var-group-title">{{ group.group }}</div>
+                        <button
+                          v-for="item in group.items"
+                          :key="item.path"
+                          type="button"
+                          class="var-item"
+                          @mousedown.prevent="pickVarIntoPrompt(item.path)"
+                        >
+                          <span class="var-x">{x}</span>
+                          <span class="var-label">{{ item.label }}</span>
+                          <code>{{ item.path }}</code>
+                        </button>
+                      </div>
+                    </template>
+                    <p v-else class="hint">无上游变量（请先连线上游节点）</p>
+                  </div>
+                </div>
+              </div>
             </template>
             <template v-else>
               <select
-                :value="parseRef(inputValue(selectedData.config, port.name, portsFor(selectedData.flowType).defaultInputs[port.name])) || ''"
+                :value="
+                  parseRef(
+                    inputValue(selectedData.config, port.name, selectedPorts.defaultInputs[port.name])
+                  ) || ''
+                "
                 :disabled="readonly"
                 @change="
                   updateInputValue(
@@ -683,13 +1007,18 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
                   )
                 "
               >
-                <option value="">（字面量 / 空）</option>
+                <option value="">固定值</option>
                 <option
-                  v-for="item in availableVarPaths(editingNode.id)"
+                  v-for="item in bindingVarOptions(
+                    editingNode.id,
+                    parseRef(
+                      inputValue(selectedData.config, port.name, selectedPorts.defaultInputs[port.name])
+                    )
+                  )"
                   :key="item.path"
                   :value="item.path"
                 >
-                  {{ item.path }} — {{ item.label }}
+                  {{ item.group }} / {x} {{ item.label }}
                 </option>
               </select>
               <input
@@ -697,7 +1026,7 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
                 type="text"
                 :value="String(inputValue(selectedData.config, port.name, '') ?? '')"
                 :disabled="readonly"
-                placeholder="字面量或 {{#sys.query#}}"
+                :placeholder="port.name === 'right' ? '例如 true / 0' : '固定值'"
                 @change="updateInputValue(port.name, ($event.target as HTMLInputElement).value)"
               />
             </template>
@@ -705,17 +1034,94 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
         </fieldset>
 
         <fieldset
-          v-if="portsFor(selectedData.flowType).outputs.length"
+          v-if="selectedData.flowType === 'llm_chat'"
           class="skills"
+          :disabled="readonly"
         >
-          <legend>输出</legend>
-          <ul class="io-out">
-            <li v-for="port in portsFor(selectedData.flowType).outputs" :key="port.name">
-              <code>{{ editingNode.id }}.{{ port.name }}</code>
-              <small>{{ port.label }} — {{ port.description }}</small>
-            </li>
-          </ul>
-          <p class="hint">下游可用双花括号 #节点ID.字段# 语法引用（与 Dify 相同）。</p>
+          <legend>SYSTEM 提示词</legend>
+          <div class="prompt-box">
+            <div class="prompt-tools">
+              <span class="char-count">{{
+                String(
+                  inputValue(
+                    selectedData.config,
+                    'systemPrompt',
+                    selectedData.config.systemPrompt ||
+                      selectedPorts.defaultInputs.systemPrompt ||
+                      ''
+                  ) ?? ''
+                ).length
+              }}</span>
+              <button
+                type="button"
+                class="var-btn"
+                title="插入变量"
+                :disabled="readonly"
+                :class="{ open: varPicker.field === 'systemPrompt' }"
+                @mousedown.prevent="openVarPicker('systemPrompt')"
+              >
+                {x}
+              </button>
+            </div>
+            <textarea
+              ref="promptTextareaRef"
+              rows="8"
+              :value="
+                String(
+                  inputValue(
+                    selectedData.config,
+                    'systemPrompt',
+                    selectedData.config.systemPrompt ||
+                      portsFor('llm_chat').defaultInputs.systemPrompt ||
+                      selectedPorts.defaultInputs.systemPrompt ||
+                      ''
+                  )
+                )
+              "
+              :disabled="readonly"
+              placeholder="在这里写提示词，点右上角 {x} 插入变量"
+              @click="rememberPromptCaret('systemPrompt', $event.target)"
+              @keyup="rememberPromptCaret('systemPrompt', $event.target)"
+              @select="rememberPromptCaret('systemPrompt', $event.target)"
+              @blur="rememberPromptCaret('systemPrompt', $event.target)"
+              @input="
+                rememberPromptCaret('systemPrompt', $event.target);
+                updateInputValue('systemPrompt', ($event.target as HTMLTextAreaElement).value)
+              "
+            />
+            <div v-if="varPicker.field === 'systemPrompt'" class="var-picker" @mousedown.prevent>
+              <input
+                v-model="varPicker.filter"
+                type="search"
+                class="var-filter"
+                placeholder="搜索变量"
+                autofocus
+              />
+              <div class="var-picker-body">
+                <template v-if="filteredVarPathGroups(editingNode.id).length">
+                  <div
+                    v-for="group in filteredVarPathGroups(editingNode.id)"
+                    :key="group.group"
+                    class="var-group"
+                  >
+                    <div class="var-group-title">{{ group.group }}</div>
+                    <button
+                      v-for="item in group.items"
+                      :key="item.path"
+                      type="button"
+                      class="var-item"
+                      @mousedown.prevent="pickVarIntoPrompt(item.path)"
+                    >
+                      <span class="var-x">{x}</span>
+                      <span class="var-label">{{ item.label }}</span>
+                      <code>{{ item.path }}</code>
+                    </button>
+                  </div>
+                </template>
+                <p v-else class="hint">无上游变量（请先连线上游节点）</p>
+              </div>
+            </div>
+          </div>
         </fieldset>
 
         <fieldset
@@ -723,7 +1129,7 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
           class="skills"
           :disabled="readonly"
         >
-          <legend>工具技能（自由绑定）</legend>
+          <legend>工具技能</legend>
           <label
             v-for="skill in skillsBindableOn(selectedData.flowType)"
             :key="skill.id"
@@ -738,18 +1144,24 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
             <span>
               <strong>{{ skill.label }}</strong>
               <small>{{ skill.description }}</small>
-              <ul class="tool-list">
-                <li v-for="tool in skill.tools" :key="tool.name">
-                  <code>{{ tool.name }}</code> {{ tool.label }}
-                </li>
-              </ul>
-              <small v-if="selectedData.flowType === 'llm_chat' && skill.id === 'sql'" class="hint">
-                勾选后走联邦 SQL（原「SQL 洞察」节点能力）。
-              </small>
             </span>
           </label>
-          <p class="hint">已有工具按技能包展示；勾选即绑定到本节点运行时。</p>
         </fieldset>
+        <div v-if="ownOutputHints(selectedData.flowType).length" class="out-block">
+          <div class="out-title">本节点输出</div>
+          <ul class="out-list">
+            <li v-for="item in ownOutputHints(selectedData.flowType)" :key="item.name">
+              <code>{{ item.name }}</code>
+              <span>{{ item.label }}</span>
+            </li>
+          </ul>
+          <p v-if="selectedData.flowType === 'llm_chat'" class="hint">
+            JSON 字段会写入；澄清会并入 answer.clarify，下游用「节点名.字段」引用。
+          </p>
+          <p v-else-if="selectedData.flowType === 'ontology'" class="hint">
+            澄清会并入 context.clarify。
+          </p>
+        </div>
         <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除节点</button>
       </template>
       <template v-else-if="editingEdge">
@@ -757,39 +1169,28 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
           <h3>配置连线</h3>
           <button type="button" class="ghost" @click="closeInspector">关闭</button>
         </div>
+        <p class="hint">
+          {{ edgeEndpointTitle(editingEdge.source) }} → {{ edgeEndpointTitle(editingEdge.target) }}
+        </p>
         <label>
-          条件
+          分支
           <select
             :value="String(editingEdge.data?.when || 'default')"
             :disabled="readonly"
             @change="updateEdgeWhen(($event.target as HTMLSelectElement).value)"
           >
-            <option v-for="opt in EDGE_WHEN_OPTIONS" :key="opt.value" :value="opt.value">
+            <option v-for="opt in edgeWhenChoices(editingEdge)" :key="opt.value" :value="opt.value">
               {{ opt.label }}
             </option>
           </select>
         </label>
-        <p class="hint">{{ editingEdge.source }} → {{ editingEdge.target }}</p>
         <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除连线</button>
-      </template>
-      <template v-else-if="selectedNode">
-        <h3>已选中</h3>
-        <p class="sel-title">{{ selectedSummary.title || selectedNode.id }}</p>
-        <p class="hint">{{ catalogItem(selectedSummary.flowType).title }} · 单击仅选中</p>
-        <button type="button" class="primary" @click="openNodeInspector(selectedNode.id)">配置</button>
-        <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除节点</button>
-        <p class="hint">也可双击节点打开配置。</p>
-      </template>
-      <template v-else-if="selectedEdge">
-        <h3>已选中连线</h3>
-        <p class="hint">{{ selectedEdge.source }} → {{ selectedEdge.target }}</p>
-        <button type="button" class="primary" @click="openEdgeInspector(selectedEdge.id)">配置</button>
-        <button type="button" class="danger" :disabled="readonly" @click="removeSelected">删除连线</button>
-        <p class="hint">也可双击连线打开配置。</p>
       </template>
       <template v-else>
         <h3>属性</h3>
-        <p class="hint">单击选中节点/连线；双击或点「配置」再编辑，避免误触改参。</p>
+        <p class="hint">
+          单击节点配置；变量只能引用上游出参；从条件/本体等拖线会自动标分支。
+        </p>
       </template>
     </aside>
   </div>
@@ -798,9 +1199,9 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
 <style scoped>
 .dag {
   display: grid;
-  grid-template-columns: 168px minmax(0, 1fr) 200px;
+  grid-template-columns: 168px minmax(0, 1fr) minmax(280px, 340px);
   min-height: 420px;
-  height: min(62vh, 560px);
+  height: min(70vh, 640px);
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
@@ -819,19 +1220,192 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
 
 .inspector-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
 }
 
-.inspector-head h3 {
-  margin: 0;
+.out-block {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
 }
 
-.sel-title {
+.out-title {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.out-list {
+  list-style: none;
   margin: 0;
-  font-size: 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.out-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.out-list code {
+  font-size: 11px;
+  min-width: 7em;
+}
+
+.out-list span {
+  color: var(--muted);
+}
+
+.name-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.type-badge {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.node-name {
+  font-size: 15px;
   font-weight: 600;
+  padding: 6px 8px;
+}
+
+.prompt-box {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.prompt-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.char-count {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.var-btn {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.var-btn:hover:not(:disabled),
+.var-btn.open {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.var-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.prompt-box textarea {
+  border: none;
+  border-radius: 0;
+  width: 100%;
+  resize: vertical;
+  background: transparent;
+}
+
+.var-picker {
+  position: absolute;
+  right: 8px;
+  top: 34px;
+  z-index: 20;
+  width: min(280px, calc(100% - 16px));
+  max-height: 260px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.var-filter {
+  margin: 0;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.var-picker-body {
+  overflow: auto;
+  max-height: 220px;
+  padding: 4px 0 8px;
+}
+
+.var-group-title {
+  padding: 6px 10px 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.var-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.var-item:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.var-x {
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.var-label {
+  font-size: 12px;
+}
+
+.var-item code {
+  grid-column: 2;
+  font-size: 10px;
+  color: var(--muted);
 }
 
 .inspector .primary,
@@ -917,6 +1491,25 @@ const selectedSummary = computed(() => nodeData(selectedNode.value))
 .io-out small {
   display: block;
   color: var(--muted);
+}
+
+.io-fields {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 2px solid var(--line);
+}
+
+.io-fields code {
+  font-size: 10px;
+}
+
+.io-fields small {
+  display: inline;
+  margin-left: 6px;
 }
 
 .skill-block .tool-list {

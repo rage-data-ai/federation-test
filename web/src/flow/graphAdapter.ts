@@ -1,5 +1,5 @@
 import type { FlowGraph } from '../types'
-import { catalogItem } from './nodeCatalog'
+import { catalogItem, edgeWhenLabel } from './nodeCatalog'
 
 export type DagNodeData = {
   flowType: string
@@ -21,10 +21,12 @@ export type DagCanvasEdge = {
   id: string
   source: string
   target: string
+  type?: string
   label?: string
   data: { when: string }
   animated: boolean
   markerEnd: string
+  pathOptions?: { offset?: number; borderRadius?: number }
 }
 
 const DEFAULT_GAP_X = 220
@@ -59,19 +61,47 @@ export function graphToVueFlow(graph: FlowGraph): { nodes: DagCanvasNode[]; edge
       targetPosition: 'left'
     }
   })
-  const edges: DagCanvasEdge[] = graph.edges.map((edge, index) => {
-    const when = edge.when && String(edge.when).trim() ? String(edge.when).trim() : 'default'
+  const edges: DagCanvasEdge[] = withParallelEdgeLayout(
+    graph.edges.map((edge, index) => {
+      const when = edge.when && String(edge.when).trim() ? String(edge.when).trim() : 'default'
+      return {
+        id: `e-${edge.from}-${edge.to}-${when}-${index}`,
+        source: edge.from,
+        target: edge.to,
+        label: edgeWhenLabel(when),
+        data: { when },
+        animated: when !== 'default',
+        markerEnd: 'arrowclosed'
+      }
+    })
+  )
+  return { nodes, edges }
+}
+
+/**
+ * 同起终点多条分支边错开绘制，避免「出错/默认」叠成一条只看见其中一个。
+ */
+export function withParallelEdgeLayout<T extends DagCanvasEdge>(edges: T[]): T[] {
+  const groups = new Map<string, number[]>()
+  edges.forEach((edge, index) => {
+    const key = `${edge.source}=>${edge.target}`
+    const list = groups.get(key) || []
+    list.push(index)
+    groups.set(key, list)
+  })
+  return edges.map((edge, index) => {
+    const idxs = groups.get(`${edge.source}=>${edge.target}`) || [index]
+    if (idxs.length < 2) {
+      return { ...edge, type: edge.type || 'default', pathOptions: undefined }
+    }
+    const pos = idxs.indexOf(index)
+    const offset = Math.round((pos - (idxs.length - 1) / 2) * 40)
     return {
-      id: `e-${edge.from}-${edge.to}-${when}-${index}`,
-      source: edge.from,
-      target: edge.to,
-      label: when === 'default' ? '' : when,
-      data: { when },
-      animated: when !== 'default',
-      markerEnd: 'arrowclosed'
+      ...edge,
+      type: 'smoothstep',
+      pathOptions: { offset, borderRadius: 8 }
     }
   })
-  return { nodes, edges }
 }
 
 /** Vue Flow 状态写回网关 FlowGraph；并做环检测。 */
@@ -109,13 +139,60 @@ export function vueFlowToGraph(
   }
   assertAcyclic(graph)
   assertHasEnd(graph)
+  assertUniqueTitles(graph)
   return graph
+}
+
+export function assertUniqueTitles(graph: FlowGraph) {
+  const seen = new Set<string>()
+  for (const node of graph.nodes) {
+    const title = String(node.title || '').trim()
+    if (!title) {
+      throw new Error(`节点名称不能为空：${node.id}`)
+    }
+    if (/[#.{}]/.test(title)) {
+      throw new Error(`节点名称不能包含 # . { }：${title}`)
+    }
+    if (seen.has(title)) {
+      throw new Error(`节点名称不能重复：${title}`)
+    }
+    seen.add(title)
+  }
 }
 
 export function assertHasEnd(graph: FlowGraph) {
   if (!graph.nodes.some((node) => node.type === 'end')) {
     throw new Error('流程需要至少一个结束节点')
   }
+}
+
+/**
+ * 当前节点全部上游（沿入边回溯，不含自身）。
+ * 用于变量选择器：只能引用上游出参。
+ */
+export function upstreamNodeIds(
+  nodeId: string,
+  edges: Array<{ source: string; target: string }>
+): Set<string> {
+  const incoming = new Map<string, string[]>()
+  for (const edge of edges) {
+    const list = incoming.get(edge.target) || []
+    list.push(edge.source)
+    incoming.set(edge.target, list)
+  }
+  const seen = new Set<string>()
+  const stack = [...(incoming.get(nodeId) || [])]
+  while (stack.length) {
+    const id = stack.pop()!
+    if (seen.has(id) || id === nodeId) {
+      continue
+    }
+    seen.add(id)
+    for (const prev of incoming.get(id) || []) {
+      stack.push(prev)
+    }
+  }
+  return seen
 }
 
 /** Kahn：有环则抛错。 */

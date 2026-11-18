@@ -26,8 +26,7 @@ const meta = computed(() => catalogItem(data.value.flowType))
   >
     <Handle v-if="data.flowType !== 'start'" id="in" type="target" :position="Position.Left" />
     <div class="kind">{{ meta.title }}</div>
-    <div class="title">{{ data.title }}</div>
-    <p v-if="meta.description" class="desc">{{ meta.description }}</p>
+    <div class="title">{{ data.title || meta.title }}</div>
     <Handle v-if="data.flowType !== 'end'" id="out" type="source" :position="Position.Right" />
   </div>
 </template>

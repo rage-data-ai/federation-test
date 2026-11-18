@@ -14,7 +14,7 @@ import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowNode;
 class FlowGraphTest {
 
     @Test
-    void nextPrefersExactOutcomeThenDefault() {
+    void nextTreatsContinueAndClarifyAsDefault() {
         FlowGraph graph = FlowGraph.of(
                 "a",
                 List.of(
@@ -22,10 +22,35 @@ class FlowGraphTest {
                         new FlowNode("b", "llm_chat", "b", Map.of()),
                         new FlowNode("c", "end", "c", Map.of())),
                 List.of(
-                        new FlowEdge("a", "b", "continue"),
-                        new FlowEdge("a", "c", "default")));
+                        new FlowEdge("a", "b", "default"),
+                        new FlowEdge("a", "c", "error")));
         assertEquals("b", graph.next("a", "continue"));
-        assertEquals("c", graph.next("a", "answered"));
+        assertEquals("b", graph.next("a", "clarify"));
+        assertEquals("b", graph.next("a", "default"));
+        assertEquals("c", graph.next("a", "error"));
+    }
+
+    @Test
+    void nextMapsLegacyContinueAndClarifyEdgesToDefault() {
+        FlowGraph graph = FlowGraph.of(
+                "a",
+                List.of(
+                        new FlowNode("a", "start", "a", Map.of()),
+                        new FlowNode("b", "llm_chat", "b", Map.of()),
+                        new FlowNode("c", "end", "c", Map.of())),
+                List.of(new FlowEdge("a", "b", "continue")));
+        assertEquals("b", graph.next("a", "default"));
+        assertEquals("b", graph.next("a", "continue"));
+        assertEquals("b", graph.next("a", "clarify"));
+
+        FlowGraph clarifyEdge = FlowGraph.of(
+                "a",
+                List.of(
+                        new FlowNode("a", "start", "a", Map.of()),
+                        new FlowNode("b", "llm_chat", "b", Map.of()),
+                        new FlowNode("c", "end", "c", Map.of())),
+                List.of(new FlowEdge("a", "b", "clarify")));
+        assertEquals("b", clarifyEdge.next("a", "default"));
     }
 
     @Test

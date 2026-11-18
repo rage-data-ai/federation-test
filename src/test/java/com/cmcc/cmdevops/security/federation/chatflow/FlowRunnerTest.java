@@ -55,12 +55,14 @@ class FlowRunnerTest {
         AskRunRecorder recorder = mock(AskRunRecorder.class);
         when(askService.beginRun(any(), any())).thenReturn(recorder);
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
-                .thenReturn(AskStageResult.of("continue", Map.of("answered", false)));
+                .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
+        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+                .thenReturn(AskStageResult.of("default", Map.of("canAnswer", false, "answer", "no")));
         when(askService.runOntology(any(), any(), any(), any()))
                 .thenReturn(AskStageResult.of("continue"));
         when(askService.runMetadata(any(), any(), any(), eq(true)))
                 .thenReturn(AskStageResult.of("continue", Map.of("tables", 1)));
-        when(askService.runInsight(any(), any(), any(), any()))
+        when(askService.runInsight(any(), any(), any(), any(), any()))
                 .thenReturn(AskStageResult.of("answered", Map.of("answer", "ok", "sql", "select 1")));
 
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
@@ -70,20 +72,25 @@ class FlowRunnerTest {
 
         verify(askService, never()).ask(any(), any());
         verify(askService).runKnowledge(any(), eq(recorder), any(AskFlowState.class), eq(5));
+        verify(askService).runLlmChat(any(), eq(recorder), any(), any(), any());
         verify(askService).runOntology(any(), eq(recorder), any(AskFlowState.class), any());
         verify(askService).runMetadata(any(), eq(recorder), any(AskFlowState.class), eq(true));
-        verify(askService).runInsight(any(), eq(recorder), any(AskFlowState.class), any());
+        verify(askService).runInsight(any(), eq(recorder), any(AskFlowState.class), any(), any());
         verify(askService).finishRun(recorder);
         assertTrue(events.contains("vars"));
     }
 
     @Test
-    void knowledgeAnsweredShortCircuitsToEnd() {
+    void llmJsonCanAnswerThenIfElseGoesToEnd() {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
         when(askService.beginRun(any(), any())).thenReturn(recorder);
+        List<Map<String, Object>> hits = List.of(Map.of("id", 1L, "score", 0.9, "question", "q1"));
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
-                .thenReturn(AskStageResult.of("answered", Map.of("answer", "hit")));
+                .thenReturn(AskStageResult.of("default", Map.of("result", hits)));
+        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+                .thenReturn(AskStageResult.of(
+                        "default", Map.of("canAnswer", true, "answer", "hit")));
 
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
         PublishedApp app = new PublishedApp("app-1", "问数", 1L, "fv-1", DefaultFlows.builtinAsk());
@@ -91,8 +98,16 @@ class FlowRunnerTest {
         });
 
         verify(askService).runKnowledge(any(), any(), any(), anyInt());
+        verify(askService).runLlmChat(any(), eq(recorder), any(), any(), any());
         verify(askService, never()).runOntology(any(), any(), any(), any());
-        verify(askService, never()).runInsight(any(), any(), any(), any());
+        verify(askService, never()).runInsight(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void ifElseComparesHitCount() {
+        assertEquals("true", FlowRunner.evaluateIfElse(Map.of("left", 2, "op", ">", "right", 0)).outcome());
+        assertEquals("false", FlowRunner.evaluateIfElse(Map.of("left", 0, "op", ">", "right", 0)).outcome());
+        assertEquals("true", FlowRunner.evaluateIfElse(Map.of("left", List.of(1), "op", "not_empty")).outcome());
     }
 
     @Test
@@ -158,7 +173,7 @@ class FlowRunnerTest {
         when(askService.beginRun(any(), any())).thenReturn(recorder);
         when(askService.runOntology(any(), any(), any(), any())).thenReturn(AskStageResult.of("continue"));
         when(askService.runMetadata(any(), any(), any(), eq(true))).thenReturn(AskStageResult.of("continue"));
-        when(askService.runInsight(any(), any(), any(), any()))
+        when(askService.runInsight(any(), any(), any(), any(), any()))
                 .thenReturn(AskStageResult.of("answered", Map.of("answer", "n", "sql", "select 1", "rowCount", 1L)));
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
         FlowGraph graph = FlowGraph.of(
@@ -180,7 +195,7 @@ class FlowRunnerTest {
                 new AskRequest("q", List.of()),
                 (event, data) -> {
                 });
-        verify(askService).runInsight(any(), eq(recorder), any(AskFlowState.class), any());
+        verify(askService).runInsight(any(), eq(recorder), any(AskFlowState.class), any(), eq("hi"));
         verify(askService, never()).runLlmChat(any(), any(), any(), any(), any());
     }
 
@@ -235,7 +250,7 @@ class FlowRunnerTest {
         AskRunRecorder recorder = mock(AskRunRecorder.class);
         when(askService.beginRun(any(), any())).thenReturn(recorder);
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
-                .thenReturn(AskStageResult.of("answered"));
+                .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
         FederationProperties props = new FederationProperties();
         props.getAsk().setHistoryWindowTurns(50);
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), props);
@@ -247,7 +262,6 @@ class FlowRunnerTest {
                         new FlowNode("end", "end", "结束", Map.of())),
                 List.of(
                         new FlowEdge("start", "knowledge", "default"),
-                        new FlowEdge("knowledge", "end", "answered"),
                         new FlowEdge("knowledge", "end", "default")));
         PublishedApp app = new PublishedApp("app-mem", "记忆", 1L, "fv-mem", graph);
         List<Turn> history = List.of(

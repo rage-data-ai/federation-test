@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowModels.FlowDraft;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowModels.FlowVersion;
+import com.cmcc.cmdevops.security.federation.chatflow.FlowNodePorts;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.RequireRole;
@@ -69,7 +70,13 @@ public class FlowController {
                         "name",
                         "智能问数",
                         "description",
-                        "知识库 → 本体 → 元数据 → SQL 洞察（四阶段 DAG）"),
+                        "知识库 → 大模型判定 → 条件分流 → 本体/元数据/SQL"),
                 Map.of("id", "llm_chat", "name", "简单对话", "description", "仅大模型回复，不跑联邦 SQL"));
+    }
+
+    /** 节点入参/出参与系统变量目录（解析权威在后端 FlowNodePorts）。 */
+    @GetMapping("/node-ports")
+    public Map<String, Object> nodePorts() {
+        return FlowNodePorts.catalog();
     }
 }

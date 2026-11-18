@@ -20,14 +20,15 @@ export const SKILL_CATALOG: SkillCatalogItem[] = [
   {
     id: 'knowledge',
     label: '知识库检索',
-    description: '召回已审核知识问答对',
+    description: '召回已审核知识问答对（由知识库节点固定调用，不在此勾选）',
     tools: [{ name: 'searchKnowledge', label: '按问题检索知识' }],
-    bindableOn: ['llm_chat', 'knowledge']
+    /** 知识库节点强制走检索；不在面板里作为可选技能展示。 */
+    bindableOn: []
   },
   {
     id: 'ontology',
     label: '本体工具',
-    description: '业务语义检索与可回答性预检',
+    description: '业务语义检索与可回答性预检（本体节点固定启用，不在此勾选）',
     tools: [
       { name: 'listConcepts', label: '列出业务概念' },
       { name: 'searchEntities', label: '关键词检索实体' },
@@ -37,7 +38,8 @@ export const SKILL_CATALOG: SkillCatalogItem[] = [
       { name: 'getBusinessContext', label: '确定性业务上下文' },
       { name: 'checkAnswerable', label: '可回答性预检' }
     ],
-    bindableOn: ['llm_chat', 'ontology']
+    /** 本体节点强制走本体工具；仅大模型节点可额外勾选。 */
+    bindableOn: ['llm_chat']
   },
   {
     id: 'preference',

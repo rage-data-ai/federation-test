@@ -69,7 +69,7 @@ public class FlowRunner {
             switch (node.type()) {
                 case "start" -> {
                     lastOutcome = "default";
-                    pool.putNode(node.id(), Map.of(
+                    pool.putNode(node, Map.of(
                             "query", pool.sys().get("query"),
                             "history", pool.sys().get("history"),
                             "conversation_id", pool.sys().get("conversation_id")));
@@ -80,7 +80,12 @@ public class FlowRunner {
                 case "builtin_ask" -> {
                     askService.ask(requestWithQuery(scoped, inputs), listener);
                     lastOutcome = "default";
-                    pool.putNode(node.id(), Map.of("outcome", lastOutcome));
+                    pool.putNode(node, Map.of("outcome", lastOutcome));
+                }
+                case "if_else" -> {
+                    AskStageResult result = evaluateIfElse(inputs);
+                    lastOutcome = result.outcome();
+                    pool.putNode(node, result.outputs());
                 }
                 case "llm_chat", "insight" -> {
                     AskRunRecorder recorder = askService.beginRun(scoped, listener);
@@ -88,7 +93,7 @@ public class FlowRunner {
                         AskStageResult result =
                                 runResolvedLlm(node, scoped, recorder, inputs, pool, new AskFlowState());
                         lastOutcome = result.outcome();
-                        pool.putNode(node.id(), result.outputs());
+                        pool.putNode(node, result.outputs());
                     } catch (RuntimeException e) {
                         askService.failAndFinish(recorder, e);
                         throw e;
@@ -100,7 +105,7 @@ public class FlowRunner {
                     try {
                         AskStageResult result = runAnswerNode(inputs, pool, recorder);
                         lastOutcome = result.outcome();
-                        pool.putNode(node.id(), result.outputs());
+                        pool.putNode(node, result.outputs());
                     } catch (RuntimeException e) {
                         askService.failAndFinish(recorder, e);
                         throw e;
@@ -132,7 +137,7 @@ public class FlowRunner {
                 switch (node.type()) {
                     case "start" -> {
                         lastOutcome = "default";
-                        pool.putNode(node.id(), Map.of(
+                        pool.putNode(node, Map.of(
                                 "query", pool.sys().get("query"),
                                 "history", pool.sys().get("history"),
                                 "conversation_id", pool.sys().get("conversation_id")));
@@ -145,14 +150,11 @@ public class FlowRunner {
                         int topK = FlowVarRefs.asInt(inputs, "topK", AskKnowledgeService.DEFAULT_TOP_K);
                         result = askService.runKnowledge(nodeRequest, recorder, state, topK);
                     }
+                    case "if_else" -> result = runIfElse(node, inputs, pool, recorder);
                     case "ontology" -> {
+                        // 本体节点固定启用本体工具，不在面板勾选。
                         result = askService.runOntology(
-                                nodeRequest,
-                                recorder,
-                                state,
-                                AskSkillIds.normalize(
-                                        FlowVarRefs.asSkills(inputs, "skills", AskSkillIds.DEFAULT_ONTOLOGY),
-                                        AskSkillIds.DEFAULT_ONTOLOGY));
+                                nodeRequest, recorder, state, AskSkillIds.DEFAULT_ONTOLOGY);
                         state.markOntologyPrepared();
                     }
                     case "metadata" -> {
@@ -168,7 +170,7 @@ public class FlowRunner {
                 }
                 if (result != null) {
                     lastOutcome = result.outcome();
-                    pool.putNode(node.id(), result.outputs());
+                    pool.putNode(node, result.outputs());
                     emitVars(listener, node.id(), result.outputs(), pool);
                 }
                 String next = graph.next(nodeId, lastOutcome);
@@ -176,7 +178,10 @@ public class FlowRunner {
                     if (!"answered".equals(lastOutcome)
                             && !"clarify".equals(lastOutcome)
                             && !"error".equals(lastOutcome)
-                            && !"default".equals(lastOutcome)) {
+                            && !"default".equals(lastOutcome)
+                            && !"true".equals(lastOutcome)
+                            && !"false".equals(lastOutcome)
+                            && !"continue".equals(lastOutcome)) {
                         listener.emit(
                                 "error",
                                 Map.of("message", "流程在节点 " + nodeId + " 后没有出口（outcome=" + lastOutcome + ")"));
@@ -192,6 +197,38 @@ public class FlowRunner {
         } finally {
             askService.finishRun(recorder);
         }
+    }
+
+    private AskStageResult runIfElse(
+            FlowNode node, Map<String, Object> inputs, FlowVariablePool pool, AskListener listener) {
+        AskStageResult result = evaluateIfElse(inputs);
+        listener.emit(
+                "stage",
+                Map.of(
+                        "name",
+                        "if_else",
+                        "message",
+                        "条件 " + node.title() + " → " + result.outcome(),
+                        "outcome",
+                        result.outcome()));
+        return result;
+    }
+
+    static AskStageResult evaluateIfElse(Map<String, Object> inputs) {
+        Object left = inputs.get("left");
+        String op = FlowVarRefs.asString(inputs, "op", ">");
+        Object right = inputs.get("right");
+        boolean ok = FlowVarRefs.compare(left, op, right);
+        Map<String, Object> outputs = new LinkedHashMap<>();
+        outputs.put("result", ok);
+        if (left != null) {
+            outputs.put("left", left);
+        }
+        outputs.put("op", op);
+        if (right != null) {
+            outputs.put("right", right);
+        }
+        return AskStageResult.of(ok ? "true" : "false", outputs);
     }
 
     private static AskStageResult runAnswerNode(
@@ -242,7 +279,8 @@ public class FlowRunner {
                     forLlm,
                     listener,
                     state,
-                    insightAlias && skillSet.isEmpty() ? AskSkillIds.DEFAULT_INSIGHT : skillSet);
+                    insightAlias && skillSet.isEmpty() ? AskSkillIds.DEFAULT_INSIGHT : skillSet,
+                    system);
         }
         return askService.runLlmChat(forLlm, listener, system, skillSet, knowledgeTools);
     }
@@ -288,6 +326,10 @@ public class FlowRunner {
         copyIfAbsent(configured, node.config(), "systemPrompt");
         copyIfAbsent(configured, node.config(), "recover");
         copyIfAbsent(configured, node.config(), "memoryWindowTurns");
+        copyIfAbsent(configured, node.config(), "result");
+        copyIfAbsent(configured, node.config(), "left");
+        copyIfAbsent(configured, node.config(), "op");
+        copyIfAbsent(configured, node.config(), "right");
         return FlowVarRefs.resolveInputs(spec.defaultInputs(), configured, pool);
     }
 
@@ -318,7 +360,8 @@ public class FlowRunner {
         boolean hasBuiltin = graph.nodes().stream().anyMatch(node -> "builtin_ask".equals(node.type()));
         boolean hasStages = graph.nodes().stream().anyMatch(node -> DefaultFlows.isAskStageType(node.type()));
         if (hasBuiltin && hasStages) {
-            throw new IllegalArgumentException("流程不能同时包含 builtin_ask 与 knowledge/ontology/metadata/insight 阶段节点");
+            throw new IllegalArgumentException(
+                    "流程不能同时包含 builtin_ask 与 knowledge/ontology/metadata/insight/if_else 阶段节点");
         }
     }
 

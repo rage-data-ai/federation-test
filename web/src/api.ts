@@ -349,6 +349,31 @@ export function listFlowTemplates() {
   return request<FlowTemplate[]>('/api/v1/flows/templates')
 }
 
+export type FlowNodePortDto = {
+  name: string
+  label: string
+  description: string
+  dataType?: string
+  fields?: FlowNodePortDto[]
+}
+
+export type FlowNodePortsCatalogDto = {
+  sysVars: Array<{ path: string; label: string }>
+  ports: Record<
+    string,
+    {
+      inputs: FlowNodePortDto[]
+      outputs: FlowNodePortDto[]
+      defaultInputs: Record<string, unknown>
+    }
+  >
+}
+
+/** 节点入参/出参目录（后端 FlowNodePorts 为权威）。 */
+export function getFlowNodePorts() {
+  return request<FlowNodePortsCatalogDto>('/api/v1/flows/node-ports')
+}
+
 export function listFlows() {
   return request<FlowDraft[]>('/api/v1/flows')
 }
