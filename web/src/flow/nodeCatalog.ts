@@ -82,7 +82,7 @@ const LEGACY_NODES: Record<string, NodeCatalogItem> = {
 
 /**
  * 边条件：value 与运行时 outcome 对齐；short 画在连线上。
- * 默认线上不写字；continue/clarify 与 default 同义（旧图兼容，不进新建选项）。
+ * 默认线上不写字；continue 与 default 同义；clarify 可单独分边（本体澄清对齐黑盒 ask）。
  */
 export const EDGE_WHEN_OPTIONS = [
   { value: 'default', label: '默认', short: '' },
@@ -90,16 +90,16 @@ export const EDGE_WHEN_OPTIONS = [
   { value: 'false', label: '否', short: '否' },
   { value: 'error', label: '出错', short: '出错' },
   { value: 'answered', label: '已回答', short: '已答' },
-  { value: 'clarify', label: '默认', short: '' },
+  { value: 'clarify', label: '澄清', short: '澄清' },
   { value: 'continue', label: '默认', short: '' }
 ] as const
 
 export type EdgeWhenValue = (typeof EDGE_WHEN_OPTIONS)[number]['value']
 
-/** 各节点类型可画的分支（不含 continue/clarify：与 default 同义）。 */
+/** 各节点类型可画的分支（continue 仍与 default 同义，不进新建选项）。 */
 const EDGE_WHEN_BY_SOURCE: Record<string, EdgeWhenValue[]> = {
   if_else: ['true', 'false', 'default'],
-  ontology: ['default'],
+  ontology: ['default', 'clarify'],
   metadata: ['error', 'default'],
   llm_chat: ['default'],
   insight: ['default'],
@@ -111,7 +111,7 @@ const EDGE_WHEN_BY_SOURCE: Record<string, EdgeWhenValue[]> = {
 }
 
 export function edgeWhenMeta(when: string): (typeof EDGE_WHEN_OPTIONS)[number] {
-  const value = when === 'continue' || when === 'clarify' ? 'default' : when
+  const value = when === 'continue' ? 'default' : when
   return EDGE_WHEN_OPTIONS.find((item) => item.value === value) || EDGE_WHEN_OPTIONS[0]
 }
 

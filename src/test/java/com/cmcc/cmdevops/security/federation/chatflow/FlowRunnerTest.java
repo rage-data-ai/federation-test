@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -101,6 +102,31 @@ class FlowRunnerTest {
         verify(askService).runLlmChat(any(), eq(recorder), any(), any(), any());
         verify(askService, never()).runOntology(any(), any(), any(), any());
         verify(askService, never()).runInsight(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void ontologyClarifyStopsLikeBlackBoxAsk() {
+        AskService askService = mock(AskService.class);
+        AskRunRecorder recorder = mock(AskRunRecorder.class);
+        when(askService.beginRun(any(), any())).thenReturn(recorder);
+        when(askService.runKnowledge(any(), any(), any(), anyInt()))
+                .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
+        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+                .thenReturn(AskStageResult.of("default", Map.of("canAnswer", false)));
+        when(askService.runOntology(any(), any(), any(), any()))
+                .thenReturn(AskStageResult.of(
+                        "clarify",
+                        Map.of("clarify", Map.of("question", "哪类？", "options", List.of("告警")))));
+
+        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        PublishedApp app = new PublishedApp("app-1", "问数", 1L, "fv-1", DefaultFlows.builtinAsk());
+        runner.run(app, new AskRequest("q", List.of()), (event, data) -> {
+        });
+
+        verify(askService).runOntology(any(), eq(recorder), any(AskFlowState.class), any());
+        verify(askService, never()).runMetadata(any(), any(), any(), anyBoolean());
+        verify(askService, never()).runInsight(any(), any(), any(), any(), any());
+        verify(askService).finishRun(recorder);
     }
 
     @Test

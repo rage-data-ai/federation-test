@@ -79,7 +79,11 @@ public final class FlowNodePorts {
                 new Spec(
                         List.of(new Port("query", "查询文本", "默认绑定 sys.query", "String")),
                         List.of(
-                                new Port("outcome", "分流条件", "default（澄清也走默认）", "String"),
+                                new Port(
+                                        "outcome",
+                                        "分流条件",
+                                        "default=继续 / clarify=需澄清（默认图接结束）",
+                                        "String"),
                                 new Port(
                                         "context",
                                         "业务上下文",
