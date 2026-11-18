@@ -481,6 +481,8 @@ export function createAskKnowledge(body: {
   caliber?: Array<Record<string, unknown>>
   evidence?: Record<string, unknown>
   kind?: string
+  year?: string | null
+  version?: string | null
 }) {
   return request<AskKnowledge>('/api/v1/ask/knowledge', {
     method: 'POST',

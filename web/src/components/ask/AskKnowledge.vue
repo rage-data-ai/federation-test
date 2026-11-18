@@ -39,7 +39,14 @@ const busy = ref(false)
 const error = ref('')
 let latest = 0
 
-const draft = reactive({ question: '', answer: '', sql: '', kind: 'smart_ask' as AskKnowledgeKind })
+const draft = reactive({
+  question: '',
+  answer: '',
+  sql: '',
+  kind: 'smart_ask' as AskKnowledgeKind,
+  year: String(new Date().getFullYear()),
+  version: '1.0.0'
+})
 const reviewing = reactive<{ id: number; status: AskKnowledgeStatus; note: string }>({
   id: 0,
   status: 'approved',
@@ -93,11 +100,15 @@ async function submitDraft() {
       question,
       answer,
       sql: draft.sql.trim() || null,
-      kind: draft.kind
+      kind: draft.kind,
+      year: draft.year.trim() || null,
+      version: draft.version.trim() || null
     })
     draft.question = ''
     draft.answer = ''
     draft.sql = ''
+    draft.year = String(new Date().getFullYear())
+    draft.version = '1.0.0'
     await load()
   } catch (e) {
     error.value = errMessage(e)
@@ -173,12 +184,36 @@ function hitQuestion(hit: AskKnowledgeMatch): string {
   return hit.knowledge?.question || hit.question || ''
 }
 
+function answerBody(stored: string | undefined | null, question: string): string {
+  if (!stored) {
+    return ''
+  }
+  const prefix = `问：${question}\n答：`
+  if (stored.startsWith(prefix)) {
+    return stored.slice(prefix.length)
+  }
+  const idx = stored.indexOf('\n答：')
+  return idx >= 0 ? stored.slice(idx + '\n答：'.length) : stored
+}
+
 function hitAnswer(hit: AskKnowledgeMatch): string {
-  return hit.knowledge?.answerPair?.answer || hit.answer || ''
+  const question = hitQuestion(hit)
+  const raw = hit.knowledge?.answerPair?.answer || hit.answer || ''
+  return answerBody(raw, question)
+}
+
+function hitMeta(hit: AskKnowledgeMatch): string {
+  const year = hit.knowledge?.year || hit.year || ''
+  const version = hit.knowledge?.version || hit.version || ''
+  return [year && `年 ${year}`, version && `v${version}`].filter(Boolean).join(' · ')
 }
 
 function hitId(hit: AskKnowledgeMatch): number | string {
   return hit.knowledge?.id ?? hit.id ?? '—'
+}
+
+function itemAnswerBody(item: AskKnowledge): string {
+  return answerBody(item.answerPair?.answer, item.question)
 }
 
 async function removeItem(item: AskKnowledge) {
@@ -207,7 +242,7 @@ async function removeItem(item: AskKnowledge) {
       </label>
       <label>
         答案
-        <textarea v-model="draft.answer" rows="2" maxlength="8000" placeholder="自然语言结论" />
+        <textarea v-model="draft.answer" rows="2" maxlength="8000" placeholder="自然语言结论（入库时拼成问/答对）" />
       </label>
       <label>
         类型
@@ -215,6 +250,16 @@ async function removeItem(item: AskKnowledge) {
           <option v-for="(label, key) in KIND_LABEL" :key="key" :value="key">{{ label }}</option>
         </select>
       </label>
+      <div class="recall-row">
+        <label class="inline">
+          年份
+          <input v-model="draft.year" maxlength="16" placeholder="2026" />
+        </label>
+        <label class="inline">
+          版本
+          <input v-model="draft.version" maxlength="32" placeholder="1.0.0" />
+        </label>
+      </div>
       <label>
         SQL（可选）
         <textarea v-model="draft.sql" rows="2" maxlength="8000" placeholder="对应查询 SQL" />
@@ -227,7 +272,7 @@ async function removeItem(item: AskKnowledge) {
     <section class="recall" aria-labelledby="recall-title">
       <header class="recall-head">
         <h2 id="recall-title">召回测试</h2>
-        <p class="hint">输入问题，直接查看向量召回命中与分数（不跑大模型判定）。仅检索「已通过」知识。</p>
+        <p class="hint">输入问题，直接查看向量召回命中与分数（不跑大模型判定）。命中优先展示 Milvus 问答对 / year / version。</p>
       </header>
       <form class="recall-form" aria-label="知识召回测试" @submit.prevent="runRecallTest">
         <label>
@@ -269,6 +314,7 @@ async function removeItem(item: AskKnowledge) {
           <div class="meta">
             <span class="score">#{{ index + 1 }} · score {{ hitScore(hit) }}</span>
             <span class="hint">id {{ hitId(hit) }}</span>
+            <span v-if="hitMeta(hit)" class="hint">{{ hitMeta(hit) }}</span>
           </div>
           <p class="content"><b>问</b> {{ hitQuestion(hit) }}</p>
           <p class="content"><b>答</b> {{ hitAnswer(hit) }}</p>
@@ -311,7 +357,12 @@ async function removeItem(item: AskKnowledge) {
         </div>
 
         <p class="content"><b>问</b> {{ item.question }}</p>
-        <p class="content"><b>答</b> {{ item.answerPair.answer }}</p>
+        <p class="content"><b>答</b> {{ itemAnswerBody(item) }}</p>
+        <p v-if="item.year || item.version" class="hint">
+          {{ item.year ? `年 ${item.year}` : '' }}
+          {{ item.year && item.version ? ' · ' : '' }}
+          {{ item.version ? `v${item.version}` : '' }}
+        </p>
         <pre v-if="item.answerPair.sql" class="sql">{{ item.answerPair.sql }}</pre>
 
         <p v-if="item.reviewNote" class="reply">

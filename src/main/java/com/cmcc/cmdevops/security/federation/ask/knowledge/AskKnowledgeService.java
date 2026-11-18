@@ -1,5 +1,7 @@
 package com.cmcc.cmdevops.security.federation.ask.knowledge;
 
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,15 +20,19 @@ import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 
 /**
- * 共享知识库：好评待审入库、人工维护、按问题检索。谁都能看已通过的；待审与驳回仅管理员（提出人可看自己提交的）。
+ * 共享知识库：好评待审入库、人工维护、按问题检索。
+ * MySQL/Milvus 的 answer 均为「问：…\n答：…」问答对；召回优先使用 Milvus 返回的 answer/year/version。
  */
 @Service
 public class AskKnowledgeService {
 
     public static final int MAX_QUESTION = 2000;
-    public static final int MAX_ANSWER = 8000;
+    public static final int MAX_ANSWER_BODY = 8000;
+    public static final int MAX_ANSWER = MAX_QUESTION + MAX_ANSWER_BODY + 16;
     public static final int MAX_SQL = 8000;
     public static final int MAX_NOTE = 1000;
+    public static final int MAX_YEAR = 16;
+    public static final int MAX_VERSION = 32;
     public static final int DEFAULT_TOP_K = 5;
 
     private final AskKnowledgeStore store;
@@ -52,7 +58,9 @@ public class AskKnowledgeService {
             Map<String, Object> evidence,
             String kind,
             String status,
-            String reviewNote) {
+            String reviewNote,
+            String year,
+            String version) {
     }
 
     public record Match(AskKnowledge knowledge, double score) {
@@ -63,7 +71,7 @@ public class AskKnowledgeService {
         String question = run != null && run.question() != null && !run.question().isBlank()
                 ? run.question()
                 : requireText(suggestionContent, "问题", MAX_QUESTION);
-        String answer = requireText(suggestionContent, "答案", MAX_ANSWER);
+        String answerBody = requireText(suggestionContent, "答案", MAX_ANSWER_BODY);
         long now = clock.getAsLong();
         Map<String, Object> evidence = new LinkedHashMap<>();
         if (run != null) {
@@ -76,8 +84,11 @@ public class AskKnowledgeService {
         evidence.put("fromSuggestion", true);
         return store.save(new AskKnowledge(
                 0,
-                question,
-                new AnswerPair(answer, run == null ? null : run.sql(), List.of()),
+                question.strip(),
+                new AnswerPair(
+                        KnowledgeQaPair.format(question, answerBody),
+                        run == null ? null : run.sql(),
+                        List.of()),
                 evidence,
                 run == null ? null : run.id(),
                 AskKnowledge.KIND_SMART_ASK,
@@ -85,6 +96,8 @@ public class AskKnowledgeService {
                 GatewayUser.current().name(),
                 null,
                 null,
+                defaultYear(now),
+                AskKnowledge.DEFAULT_VERSION,
                 now,
                 now));
     }
@@ -112,11 +125,13 @@ public class AskKnowledgeService {
         List<Map<String, Object>> caliber = run.evidence() != null && run.evidence().get("caliber") instanceof List<?> list
                 ? (List<Map<String, Object>>) list
                 : List.of();
+        String question = requireText(run.question(), "问题", MAX_QUESTION);
+        String answerBody = requireText(run.answer(), "答案", MAX_ANSWER_BODY);
         return store.save(new AskKnowledge(
                 0,
-                requireText(run.question(), "问题", MAX_QUESTION),
+                question,
                 new AnswerPair(
-                        requireText(run.answer(), "答案", MAX_ANSWER),
+                        KnowledgeQaPair.format(question, answerBody),
                         run.sql() == null || run.sql().isBlank() ? null : requireText(run.sql(), "SQL", MAX_SQL),
                         caliber),
                 evidence,
@@ -126,6 +141,8 @@ public class AskKnowledgeService {
                 GatewayUser.current().name(),
                 null,
                 null,
+                defaultYear(now),
+                AskKnowledge.DEFAULT_VERSION,
                 now,
                 now));
     }
@@ -136,7 +153,7 @@ public class AskKnowledgeService {
             String sql,
             List<Map<String, Object>> caliber,
             Map<String, Object> evidence) {
-        return create(question, answer, sql, caliber, evidence, AskKnowledge.KIND_SMART_ASK);
+        return create(question, answer, sql, caliber, evidence, AskKnowledge.KIND_SMART_ASK, null, null);
     }
 
     public AskKnowledge create(
@@ -146,13 +163,30 @@ public class AskKnowledgeService {
             List<Map<String, Object>> caliber,
             Map<String, Object> evidence,
             String kind) {
+        return create(question, answer, sql, caliber, evidence, kind, null, null);
+    }
+
+    public AskKnowledge create(
+            String question,
+            String answer,
+            String sql,
+            List<Map<String, Object>> caliber,
+            Map<String, Object> evidence,
+            String kind,
+            String year,
+            String version) {
         long now = clock.getAsLong();
         boolean admin = GatewayUser.current().hasRole(GatewayRole.ADMIN);
+        String q = requireText(question, "问题", MAX_QUESTION);
+        String pair = KnowledgeQaPair.format(q, requireText(answer, "答案", MAX_ANSWER_BODY));
+        if (pair.length() > MAX_ANSWER) {
+            throw new IllegalArgumentException("问答对过长（最多 " + MAX_ANSWER + " 字）");
+        }
         AskKnowledge saved = store.save(new AskKnowledge(
                 0,
-                requireText(question, "问题", MAX_QUESTION),
+                q,
                 new AnswerPair(
-                        requireText(answer, "答案", MAX_ANSWER),
+                        pair,
                         sql == null || sql.isBlank() ? null : requireText(sql, "SQL", MAX_SQL),
                         caliber == null ? List.of() : caliber),
                 evidence == null ? Map.of() : evidence,
@@ -162,6 +196,8 @@ public class AskKnowledgeService {
                 GatewayUser.current().name(),
                 admin ? GatewayUser.current().name() : null,
                 null,
+                normalizeYear(year, now),
+                normalizeVersion(version),
                 now,
                 now));
         syncVector(saved);
@@ -209,11 +245,16 @@ public class AskKnowledgeService {
         String sql = current.answerPair().sql();
         List<Map<String, Object>> caliber = current.answerPair().caliber();
         Map<String, Object> evidence = current.evidence();
+        String year = current.year();
+        String version = current.versionOrDefault();
         if (patch.question() != null) {
             question = requireText(patch.question(), "问题", MAX_QUESTION);
         }
         if (patch.answer() != null) {
-            answer = requireText(patch.answer(), "答案", MAX_ANSWER);
+            answer = KnowledgeQaPair.format(question, requireText(patch.answer(), "答案", MAX_ANSWER_BODY));
+        } else if (patch.question() != null) {
+            // 问题变更时，用原答句重拼问答对，保持 MySQL/Milvus answer 一致
+            answer = KnowledgeQaPair.format(question, KnowledgeQaPair.answerBody(answer, current.question()));
         }
         if (patch.sql() != null) {
             sql = patch.sql().isBlank() ? null : requireText(patch.sql(), "SQL", MAX_SQL);
@@ -223,6 +264,12 @@ public class AskKnowledgeService {
         }
         if (patch.evidence() != null) {
             evidence = patch.evidence();
+        }
+        if (patch.year() != null) {
+            year = normalizeYear(patch.year(), clock.getAsLong());
+        }
+        if (patch.version() != null) {
+            version = normalizeVersion(patch.version());
         }
 
         String kind = current.kindOrDefault();
@@ -261,6 +308,8 @@ public class AskKnowledgeService {
                 current.createdBy(),
                 reviewedBy,
                 reviewNote,
+                year,
+                version,
                 current.createdAt(),
                 clock.getAsLong());
         if (same(current, updated)) {
@@ -294,21 +343,78 @@ public class AskKnowledgeService {
         if (hits.isEmpty()) {
             return List.of();
         }
-        Map<Long, Double> scores = new LinkedHashMap<>();
+        Map<Long, KnowledgeVectorIndex.Hit> byId = new LinkedHashMap<>();
         for (KnowledgeVectorIndex.Hit hit : hits) {
-            scores.put(hit.id(), hit.score());
+            byId.putIfAbsent(hit.id(), hit);
         }
-        List<AskKnowledge> items = store.findByIds(new ArrayList<>(scores.keySet()));
-        List<Match> matches = new ArrayList<>();
+        List<AskKnowledge> items = store.findByIds(new ArrayList<>(byId.keySet()));
+        Map<Long, AskKnowledge> mysqlById = new LinkedHashMap<>();
         for (AskKnowledge item : items) {
-            if (AskKnowledge.APPROVED.equals(item.status()) && kindFilter.equals(item.kindOrDefault())) {
-                matches.add(new Match(item, scores.getOrDefault(item.id(), 0.0)));
-                if (matches.size() >= Math.max(1, topK)) {
-                    break;
+            mysqlById.put(item.id(), item);
+        }
+        List<Match> matches = new ArrayList<>();
+        for (KnowledgeVectorIndex.Hit hit : byId.values()) {
+            AskKnowledge mysql = mysqlById.get(hit.id());
+            if (mysql != null) {
+                if (!AskKnowledge.APPROVED.equals(mysql.status()) || !kindFilter.equals(mysql.kindOrDefault())) {
+                    continue;
                 }
+                // Milvus 带回的问答对 / year / version 覆盖展示字段，与库内保持同构
+                AskKnowledge merged = mergeHit(mysql, hit);
+                matches.add(new Match(merged, hit.score()));
+            } else if (!hit.answer().isBlank()) {
+                // 向量库有、MySQL 暂缺：仍可召回（仅 Milvus 字段）
+                matches.add(new Match(fromHit(hit, kindFilter), hit.score()));
+            }
+            if (matches.size() >= Math.max(1, topK)) {
+                break;
             }
         }
         return matches;
+    }
+
+    private static AskKnowledge mergeHit(AskKnowledge mysql, KnowledgeVectorIndex.Hit hit) {
+        String answer = hit.answer() == null || hit.answer().isBlank()
+                ? mysql.answerPair().answer()
+                : hit.answer();
+        String year = hit.year() == null || hit.year().isBlank() ? mysql.year() : hit.year();
+        String version = hit.version() == null || hit.version().isBlank()
+                ? mysql.versionOrDefault()
+                : hit.version();
+        String question = hit.question() == null || hit.question().isBlank() ? mysql.question() : hit.question();
+        return new AskKnowledge(
+                mysql.id(),
+                question,
+                new AnswerPair(answer, mysql.answerPair().sql(), mysql.answerPair().caliber()),
+                mysql.evidence(),
+                mysql.sourceRunId(),
+                mysql.kindOrDefault(),
+                mysql.status(),
+                mysql.createdBy(),
+                mysql.reviewedBy(),
+                mysql.reviewNote(),
+                year,
+                version,
+                mysql.createdAt(),
+                mysql.updatedAt());
+    }
+
+    private static AskKnowledge fromHit(KnowledgeVectorIndex.Hit hit, String kind) {
+        return new AskKnowledge(
+                hit.id(),
+                hit.question(),
+                new AnswerPair(hit.answer(), null, List.of()),
+                Map.of(),
+                null,
+                kind,
+                AskKnowledge.APPROVED,
+                "milvus",
+                null,
+                null,
+                hit.year(),
+                hit.version() == null || hit.version().isBlank() ? AskKnowledge.DEFAULT_VERSION : hit.version(),
+                0L,
+                0L);
     }
 
     private static String normalizeKind(String kind) {
@@ -319,16 +425,41 @@ public class AskKnowledgeService {
         return value;
     }
 
-    /** 审核通过后把问题向量写入索引；驳回或待审则从索引去掉。向量同步失败不阻断业务。 */
+    private static String normalizeYear(String year, long epochMs) {
+        if (year == null || year.isBlank()) {
+            return defaultYear(epochMs);
+        }
+        String value = year.strip();
+        if (value.length() > MAX_YEAR) {
+            throw new IllegalArgumentException("年份过长（最多 " + MAX_YEAR + " 字）");
+        }
+        return value;
+    }
+
+    private static String normalizeVersion(String version) {
+        if (version == null || version.isBlank()) {
+            return AskKnowledge.DEFAULT_VERSION;
+        }
+        String value = version.strip();
+        if (value.length() > MAX_VERSION) {
+            throw new IllegalArgumentException("版本过长（最多 " + MAX_VERSION + " 字）");
+        }
+        return value;
+    }
+
+    private static String defaultYear(long epochMs) {
+        return String.valueOf(Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC).getYear());
+    }
+
+    /** 审核通过后把问答对与向量写入索引；驳回或待审则从索引去掉。 */
     void syncVector(AskKnowledge item) {
         try {
             if (AskKnowledge.APPROVED.equals(item.status())) {
-                vectors.upsert(item.id(), item.question());
+                vectors.upsert(item);
             } else {
                 vectors.delete(item.id());
             }
         } catch (RuntimeException e) {
-            // 审核/CRUD 不因向量库短暂不可用而失败；有 Milvus 时无内存兜底，恢复后需重审或重建索引。
             org.slf4j.LoggerFactory.getLogger(AskKnowledgeService.class)
                     .warn("知识向量同步失败 id={}: {}", item.id(), e.toString());
         }
@@ -350,7 +481,9 @@ public class AskKnowledgeService {
                 && Objects.equals(a.evidence(), b.evidence())
                 && Objects.equals(a.status(), b.status())
                 && Objects.equals(a.reviewNote(), b.reviewNote())
-                && Objects.equals(a.reviewedBy(), b.reviewedBy());
+                && Objects.equals(a.reviewedBy(), b.reviewedBy())
+                && Objects.equals(a.yearOrDefault(), b.yearOrDefault())
+                && Objects.equals(a.versionOrDefault(), b.versionOrDefault());
     }
 
     private static String requireText(String value, String label, int max) {
@@ -359,12 +492,12 @@ public class AskKnowledgeService {
         }
         String text = value.strip();
         if (text.length() > max) {
-            throw new IllegalArgumentException(label + "不能超过 " + max + " 字");
+            throw new IllegalArgumentException(label + "过长（最多 " + max + " 字）");
         }
         return text;
     }
 
-    private static ResponseStatusException forbidden(String reason) {
-        return new ResponseStatusException(HttpStatus.FORBIDDEN, reason);
+    private static ResponseStatusException forbidden(String message) {
+        return new ResponseStatusException(HttpStatus.FORBIDDEN, message);
     }
 }

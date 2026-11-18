@@ -61,7 +61,7 @@ class JdbcAskKnowledgeStoreIT {
         AskKnowledge saved = store.save(new AskKnowledge(
                 0,
                 "最近一天高危告警有多少？",
-                new AnswerPair("12", "SELECT 1", List.of(Map.of("item", "高危"))),
+                new AnswerPair("问：最近一天高危告警有多少？\n答：12", "SELECT 1", List.of(Map.of("item", "高危"))),
                 Map.of("sourceRunId", "run-1"),
                 "run-1",
                 AskKnowledge.KIND_SMART_ASK,
@@ -69,6 +69,8 @@ class JdbcAskKnowledgeStoreIT {
                 "alice",
                 null,
                 null,
+                "2026",
+                "1.0.0",
                 1_000,
                 1_000));
 
@@ -88,6 +90,8 @@ class JdbcAskKnowledgeStoreIT {
                 saved.createdBy(),
                 "root",
                 "ok",
+                saved.year(),
+                saved.version(),
                 saved.createdAt(),
                 2_000));
         assertEquals(AskKnowledge.APPROVED, store.find(saved.id()).orElseThrow().status());

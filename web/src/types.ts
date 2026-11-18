@@ -336,7 +336,7 @@ export type AskAnswerPair = {
   caliber: Array<Record<string, unknown>>
 }
 
-/** 共享知识正本；检索只对 question，答案对与证据从这里取。 */
+/** 共享知识正本；answerPair.answer 为「问：…\n答：…」问答对，与 Milvus answer 一致。 */
 export type AskKnowledge = {
   id: number
   question: string
@@ -348,6 +348,8 @@ export type AskKnowledge = {
   createdBy: string
   reviewedBy: string | null
   reviewNote: string | null
+  year?: string | null
+  version?: string | null
   createdAt: number
   updatedAt: number
 }
@@ -362,6 +364,8 @@ export type AskKnowledgePatch = {
   kind?: AskKnowledgeKind
   status?: AskKnowledgeStatus
   reviewNote?: string | null
+  year?: string | null
+  version?: string | null
 }
 
 /** 知识检索命中（search 接口与 SSE knowledge 事件共用字段）。 */
@@ -370,6 +374,8 @@ export type AskKnowledgeMatch = {
   score?: number
   question?: string
   answer?: string
+  year?: string
+  version?: string
   sql?: string | null
   caliber?: Array<Record<string, unknown>>
   evidence?: Record<string, unknown>

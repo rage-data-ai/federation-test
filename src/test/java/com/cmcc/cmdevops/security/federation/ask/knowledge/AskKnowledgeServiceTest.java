@@ -58,7 +58,7 @@ class AskKnowledgeServiceTest {
         assertEquals(1, service.search("最近一天高危告警有多少？", 3).size());
 
         AskKnowledge rejected = service.update(created.id(),
-                new KnowledgePatch(null, null, null, null, null, null, AskKnowledge.REJECTED, "口径过时"));
+                new KnowledgePatch(null, null, null, null, null, null, AskKnowledge.REJECTED, "口径过时", null, null));
         assertEquals(AskKnowledge.REJECTED, rejected.status());
         assertTrue(service.search("最近一天高危告警有多少？", 3).isEmpty());
     }
@@ -69,7 +69,7 @@ class AskKnowledgeServiceTest {
         AskKnowledge pending = store.save(new AskKnowledge(
                 0,
                 "待审问题",
-                new AnswerPair("答案", null, List.of()),
+                new AnswerPair(KnowledgeQaPair.format("待审问题", "答案"), null, List.of()),
                 Map.of(),
                 null,
                 AskKnowledge.KIND_SMART_ASK,
@@ -77,13 +77,26 @@ class AskKnowledgeServiceTest {
                 "alice",
                 null,
                 null,
+                "2026",
+                AskKnowledge.DEFAULT_VERSION,
                 1,
                 1));
-        vectors.upsert(pending.id(), pending.question());
+        vectors.upsert(pending);
 
-        AskKnowledge approved = service.create("已通过问题", "答案", null, List.of(), Map.of(), AskKnowledge.KIND_SMART_ASK);
+        AskKnowledge approved = service.create(
+                "已通过问题", "答案", null, List.of(), Map.of(), AskKnowledge.KIND_SMART_ASK, "2026", "1.2.0");
         assertEquals(1, service.search("已通过问题", 5).size());
         assertEquals(approved.id(), service.search("已通过问题", 5).get(0).knowledge().id());
+        assertTrue(approved.answerPair().answer().startsWith("问："));
+        assertEquals("2026", approved.yearOrDefault());
+        assertEquals("1.2.0", approved.versionOrDefault());
+    }
+
+    @Test
+    void qaPairHelpersRoundTrip() {
+        String pair = KnowledgeQaPair.format("最近告警？", "共 3 条");
+        assertEquals("问：最近告警？\n答：共 3 条", pair);
+        assertEquals("共 3 条", KnowledgeQaPair.answerBody(pair, "最近告警？"));
     }
 
     private static AskRun answeredRun(String id, String user, String question) {

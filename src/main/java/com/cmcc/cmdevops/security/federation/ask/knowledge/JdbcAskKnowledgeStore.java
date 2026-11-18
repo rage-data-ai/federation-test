@@ -28,6 +28,11 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
     private static final TypeReference<List<Map<String, Object>>> MAP_LIST = new TypeReference<>() {
     };
 
+    private static final String SELECT_COLS = """
+            id, question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
+            created_by, reviewed_by, review_note, year, version, created_at, updated_at
+            """;
+
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
 
@@ -39,11 +44,14 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
     @Override
     public AskKnowledge save(AskKnowledge item) {
         String kind = item.kindOrDefault();
+        String version = item.versionOrDefault();
+        String year = blankToNull(item.year());
         if (item.id() > 0) {
             jdbc.update("""
                     UPDATE fed_ask_knowledge
                     SET question = ?, answer = ?, sql_text = ?, caliber = ?, evidence = ?, source_run_id = ?,
-                        kind = ?, status = ?, created_by = ?, reviewed_by = ?, review_note = ?, updated_at = ?
+                        kind = ?, status = ?, created_by = ?, reviewed_by = ?, review_note = ?,
+                        year = ?, version = ?, updated_at = ?
                     WHERE id = ?
                     """,
                     item.question(),
@@ -57,6 +65,8 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
                     item.createdBy(),
                     item.reviewedBy(),
                     item.reviewNote(),
+                    year,
+                    version,
                     item.updatedAt(),
                     item.id());
             return find(item.id()).orElseThrow();
@@ -66,8 +76,8 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
             PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO fed_ask_knowledge
                       (question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
-                       created_by, reviewed_by, review_note, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       created_by, reviewed_by, review_note, year, version, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
             statement.setString(1, item.question());
             statement.setString(2, item.answerPair().answer());
@@ -80,8 +90,10 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
             statement.setString(9, item.createdBy());
             statement.setString(10, item.reviewedBy());
             statement.setString(11, item.reviewNote());
-            statement.setLong(12, item.createdAt());
-            statement.setLong(13, item.updatedAt());
+            statement.setString(12, year);
+            statement.setString(13, version);
+            statement.setLong(14, item.createdAt());
+            statement.setLong(15, item.updatedAt());
             return statement;
         }, keys);
         Number key = keys.getKey();
@@ -93,28 +105,24 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
 
     @Override
     public Optional<AskKnowledge> find(long id) {
-        List<AskKnowledge> rows = jdbc.query("""
-                SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
-                       created_by, reviewed_by, review_note, created_at, updated_at
-                FROM fed_ask_knowledge WHERE id = ?
-                """, mapper(), id);
+        List<AskKnowledge> rows = jdbc.query(
+                "SELECT " + SELECT_COLS + " FROM fed_ask_knowledge WHERE id = ?",
+                mapper(),
+                id);
         return rows.stream().findFirst();
     }
 
     @Override
     public List<AskKnowledge> list(String status) {
         if (status == null || status.isBlank()) {
-            return jdbc.query("""
-                    SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
-                           created_by, reviewed_by, review_note, created_at, updated_at
-                    FROM fed_ask_knowledge ORDER BY updated_at DESC
-                    """, mapper());
+            return jdbc.query(
+                    "SELECT " + SELECT_COLS + " FROM fed_ask_knowledge ORDER BY updated_at DESC",
+                    mapper());
         }
-        return jdbc.query("""
-                SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
-                       created_by, reviewed_by, review_note, created_at, updated_at
-                FROM fed_ask_knowledge WHERE status = ? ORDER BY updated_at DESC
-                """, mapper(), status);
+        return jdbc.query(
+                "SELECT " + SELECT_COLS + " FROM fed_ask_knowledge WHERE status = ? ORDER BY updated_at DESC",
+                mapper(),
+                status);
     }
 
     @Override
@@ -124,10 +132,8 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
         }
         String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
         List<AskKnowledge> rows = jdbc.query("""
-                SELECT id, question, answer, sql_text, caliber, evidence, source_run_id, kind, status,
-                       created_by, reviewed_by, review_note, created_at, updated_at
-                FROM fed_ask_knowledge WHERE id IN (%s)
-                """.formatted(placeholders), mapper(), ids.toArray());
+                SELECT %s FROM fed_ask_knowledge WHERE id IN (%s)
+                """.formatted(SELECT_COLS, placeholders), mapper(), ids.toArray());
         Map<Long, AskKnowledge> byId = new LinkedHashMap<>();
         for (AskKnowledge row : rows) {
             byId.put(row.id(), row);
@@ -164,9 +170,15 @@ public class JdbcAskKnowledgeStore implements AskKnowledgeStore {
                     rs.getString("created_by"),
                     rs.getString("reviewed_by"),
                     rs.getString("review_note"),
+                    rs.getString("year"),
+                    rs.getString("version"),
                     rs.getLong("created_at"),
                     rs.getLong("updated_at"));
         };
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.strip();
     }
 
     private String write(Object value) {
