@@ -43,6 +43,7 @@ build/
 .env
 .env.local
 web/.env.local
+src/main/resources/application-dev.yml
 
 ### Gateway local catalog store ###
 data/

@@ -1,4 +1,4 @@
-# 本地开发示例：复制并按环境修改，或通过环境变量覆盖。
+# 复制为 application-dev.yml 后按环境修改（该文件已 gitignore）。
 # 启动：SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run
 
 federation:
