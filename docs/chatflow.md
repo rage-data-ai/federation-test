@@ -65,11 +65,11 @@ POST   /api/v1/ask                   { question, history, conversationId?, appId
 ## 默认图
 
 ```text
-智能问数 (rev≥17，对齐黑盒 AskService.ask):
+智能问数 (rev≥18):
   start → knowledge → llm_kb → if_kb ─true→ end
-                                   └false→ ontology ─clarify→ end
-                                                 └default→ metadata ─error→ end
-                                                                   └default→ llm_chat(+sql) → end
+                                   └false→ ontology → metadata ─error→ end
+                                                        └default→ llm_chat(+sql) → end
+  （本体澄清仍 emit，默认继续元数据；元数据出错才停）
 
 简单对话:  start ──default──► llm_chat ──default──► end
 

@@ -18,7 +18,7 @@
 
 ### Changed
 
-- 默认智能问数 DAG（rev 17）对齐黑盒 ask：本体 `clarify` 单独接到结束，不再误入元数据/SQL；`continue` 仍等同 default
+- 默认智能问数 DAG（rev 18）与黑盒 ask：本体澄清继续元数据，元数据出错再停；`continue` 仍等同 default；clarify 可另画边
 - 知识库 Milvus 字段扩展为 `dense_vector`（←question）/`sparse_vector`/`answer`（问答对）/`year`/`version`；MySQL `answer` 与之同构；智能问数与召回测试优先用这些字段
 - Compose 拆成两套：`docker-compose.yml` 全家桶（含 Milvus + 网关/控制台），`docker-compose.deps.yml` 仅依赖供本机跑后端/前端
 - 控制台「模型」可配置知识库嵌入（endpoint / model / key → `fed_ask_embed`），保存后热更新，不必只靠环境变量

@@ -285,9 +285,8 @@ public class AskService {
             if (Boolean.TRUE.equals(judged.outputs().get("canAnswer"))) {
                 return;
             }
-            if ("clarify".equals(runOntology(request, recorder, state, AskSkillIds.DEFAULT_ONTOLOGY).outcome())) {
-                return;
-            }
+            // 本体澄清只 emit，不中断；元数据出错再停（与默认 DAG 一致）
+            runOntology(request, recorder, state, AskSkillIds.DEFAULT_ONTOLOGY);
             if ("error".equals(runMetadata(request, recorder, state, true).outcome())) {
                 return;
             }

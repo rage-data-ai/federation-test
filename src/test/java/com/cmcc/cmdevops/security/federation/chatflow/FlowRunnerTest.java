@@ -105,7 +105,7 @@ class FlowRunnerTest {
     }
 
     @Test
-    void ontologyClarifyStopsLikeBlackBoxAsk() {
+    void ontologyClarifyContinuesToMetadata() {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
         when(askService.beginRun(any(), any())).thenReturn(recorder);
@@ -117,6 +117,8 @@ class FlowRunnerTest {
                 .thenReturn(AskStageResult.of(
                         "clarify",
                         Map.of("clarify", Map.of("question", "哪类？", "options", List.of("告警")))));
+        when(askService.runMetadata(any(), any(), any(), anyBoolean()))
+                .thenReturn(AskStageResult.of("error", Map.of("tables", 0)));
 
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
         PublishedApp app = new PublishedApp("app-1", "问数", 1L, "fv-1", DefaultFlows.builtinAsk());
@@ -124,7 +126,7 @@ class FlowRunnerTest {
         });
 
         verify(askService).runOntology(any(), eq(recorder), any(AskFlowState.class), any());
-        verify(askService, never()).runMetadata(any(), any(), any(), anyBoolean());
+        verify(askService).runMetadata(any(), eq(recorder), any(AskFlowState.class), eq(true));
         verify(askService, never()).runInsight(any(), any(), any(), any(), any());
         verify(askService).finishRun(recorder);
     }

@@ -82,7 +82,7 @@ public final class FlowNodePorts {
                                 new Port(
                                         "outcome",
                                         "分流条件",
-                                        "default=继续 / clarify=需澄清（默认图接结束）",
+                                        "default=继续（澄清默认也走这条）；可另画 clarify",
                                         "String"),
                                 new Port(
                                         "context",

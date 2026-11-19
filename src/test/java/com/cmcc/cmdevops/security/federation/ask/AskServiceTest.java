@@ -216,14 +216,17 @@ class AskServiceTest {
 
         service(model, rows()).ask(new AskRequest("漏洞趋势怎么样", List.of()), this::record);
 
-        assertEquals("clarify", events.get(events.size() - 1));
-        Clarify clarify = (Clarify) payloads.get(payloads.size() - 1);
+        int clarifyAt = events.indexOf("clarify");
+        assertTrue(clarifyAt >= 0);
+        Clarify clarify = (Clarify) payloads.get(clarifyAt);
         assertEquals(List.of("告警", "资产"), clarify.options());
         assertTrue(model.toolResults().get(0).contains("mysql70.tsoc.asset"));
+        // 澄清后继续元数据；空概念映射不到表 → 元数据出错停，不跑 SQL
+        assertTrue(events.indexOf("error") > clarifyAt);
         assertTrue(executed.isEmpty());
 
         AskRun run = recordedRun();
-        assertEquals(AskRun.CLARIFY, run.status());
+        assertEquals(AskRun.ERROR, run.status());
         assertEquals(clarify, run.evidence().get("clarify"));
         assertNull(run.answer());
     }

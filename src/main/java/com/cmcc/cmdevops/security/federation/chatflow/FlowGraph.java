@@ -34,8 +34,8 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
 
     /**
      * 按条件选下一条边；无精确匹配时走 default。
-     * {@code continue} 与 default 同义；{@code clarify} 可单独分边（对齐黑盒 ask：本体澄清即停）。
-     * 无 clarify 边时澄清仍回落到 default（如大模型→结束）。
+     * {@code continue} 与 default 同义；{@code clarify} 默认可回落 default（本体澄清继续元数据），
+     * 也可单独画 clarify 边（自定义图）。
      */
     public String next(String fromId, String outcome) {
         String want = normalizeWhen(outcome);

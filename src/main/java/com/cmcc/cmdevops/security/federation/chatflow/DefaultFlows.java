@@ -17,7 +17,7 @@ public final class DefaultFlows {
     public static final String DEFAULT_FLOW_ID = "flow-builtin-ask";
 
     /** 内置问数图修订号；迁移器据此强制升级。 */
-    public static final int BUILTIN_ASK_REVISION = 17;
+    public static final int BUILTIN_ASK_REVISION = 18;
 
     /** 大模型+SQL：只引用上游本体 / 元数据出参（运行时再叠内置 SQL 规则）。 */
     public static final String SQL_LLM_PROMPT = """
@@ -55,14 +55,13 @@ public final class DefaultFlows {
 
     /**
      * 智能问数：检索 → llm_chat（提示词约定 JSON/canAnswer）→ if_else 分流 → 本体/元数据/SQL 或结束。
-     * 对齐黑盒 {@code AskService.ask}：知识可答即停；本体澄清即停；元数据出错即停。
+     * 知识可答即停；本体澄清仍走元数据（仍 emit clarify）；元数据出错即停。
      *
      * <pre>
      * start → knowledge → llm_kb → if_kb
      *                                  ├─true  → end（判定节点已发 answer）
-     *                                  └─false → ontology ─clarify→ end
-     *                                                    └─default→ metadata ─error→ end
-     *                                                                      └─default→ llm(sql) → end
+     *                                  └─false → ontology → metadata ─error→ end
+     *                                                          └─default→ llm(sql) → end
      * </pre>
      */
     public static FlowGraph builtinAsk() {
@@ -190,8 +189,7 @@ public final class DefaultFlows {
                         new FlowEdge("if_kb", "end", "true"),
                         new FlowEdge("if_kb", "ontology", "false"),
                         new FlowEdge("if_kb", "ontology", "default"),
-                        // 对齐黑盒 ask：本体澄清即停（仍 emit clarify）；可答才进元数据/SQL
-                        new FlowEdge("ontology", "end", "clarify"),
+                        // 本体澄清≡默认：仍 emit clarify，继续元数据；元数据出错再停
                         new FlowEdge("ontology", "metadata", "default"),
                         new FlowEdge("metadata", "end", "error"),
                         new FlowEdge("metadata", "llm", "default"),

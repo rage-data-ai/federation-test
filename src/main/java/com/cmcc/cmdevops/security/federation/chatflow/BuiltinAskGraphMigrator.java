@@ -9,7 +9,7 @@ import com.cmcc.cmdevops.security.federation.chatflow.FlowModels.FlowDraft;
 import com.cmcc.cmdevops.security.federation.chatflow.FlowModels.FlowVersion;
 
 /**
- * 将内置「智能问数」升级为当前默认 DAG（检索 → llm_chat/canAnswer → if_else → 本体澄清即停 / 元数据 → 大模型+SQL）。
+ * 将内置「智能问数」升级为当前默认 DAG（检索 → llm_chat/canAnswer → if_else → 本体→元数据 → 大模型+SQL）。
  */
 final class BuiltinAskGraphMigrator {
 
