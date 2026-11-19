@@ -73,8 +73,8 @@ const LEGACY_NODES: Record<string, NodeCatalogItem> = {
   },
   builtin_ask: {
     type: 'builtin_ask',
-    title: '智能问数（整段）',
-    description: '兼容旧图整段管线',
+    title: '智能问数（已移除）',
+    description: '请迁移为白盒阶段图；运行时会拒绝',
     addable: false,
     color: '#6ea8fe'
   }

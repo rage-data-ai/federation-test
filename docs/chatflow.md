@@ -19,7 +19,7 @@
 ### 阶段 1 — 流程骨架 + 发布应用最小闭环（本分支）
 
 - 域模型与表：Flow / Flow Version / App / App Release；`fed_ask_run.app_id`
-- 内置模板：「智能问数」=`start → builtin_ask → end`；「简单对话」=`start → llm_chat → end`
+- 内置模板：「智能问数」=白盒 DAG（知识/判定/本体/元数据/SQL）；「简单对话」=`start → llm_chat → end`
 - API：流程 CRUD、发布版本；应用 CRUD、发布；列表已发布应用
 - 运行：`AskRequest.appId` → 解析当前 Release → `FlowRunner` 执行图
 - 控制台：「应用」模块：选模板创建、编辑节点配置、发布、打开对话（复用 Ask 流）
@@ -73,7 +73,7 @@ POST   /api/v1/ask                   { question, history, conversationId?, appId
 
 简单对话:  start ──default──► llm_chat ──default──► end
 
-兼容: 旧 Release 仍可为 start → builtin_ask → end
+`builtin_ask` 黑盒节点已删除；启动时 migrator 会把内置应用升到白盒 DAG。
 ```
 
 ## 验收（阶段 1）

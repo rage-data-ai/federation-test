@@ -196,23 +196,6 @@ public final class DefaultFlows {
                         new FlowEdge("llm", "end", "default")));
     }
 
-    /** 旧版单节点智能问数（兼容已发布 Release）。 */
-    public static FlowGraph legacyBuiltinAsk() {
-        return FlowGraph.of(
-                "start",
-                List.of(
-                        new FlowNode(
-                                "start",
-                                "start",
-                                "开始",
-                                Map.of("x", 40, "y", 120, "memoryWindowTurns", 12)),
-                        new FlowNode("ask", "builtin_ask", "智能问数", Map.of("x", 260, "y", 120)),
-                        new FlowNode("end", "end", "结束", Map.of("x", 500, "y", 120))),
-                List.of(
-                        new FlowEdge("start", "ask", "default"),
-                        new FlowEdge("ask", "end", "default")));
-    }
-
     public static FlowGraph llmChat() {
         return FlowGraph.of(
                 "start",

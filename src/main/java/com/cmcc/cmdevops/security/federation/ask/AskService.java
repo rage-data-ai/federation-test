@@ -56,17 +56,6 @@ public class AskService {
 
     private static final Logger log = LoggerFactory.getLogger(AskService.class);
 
-    static final String KNOWLEDGE_PROMPT = """
-            你是问数助手。下面给出用户问题，以及知识库按问题召回的若干条（answer 为「问：…\\n答：…」问答对，另含 year/version、SQL 与证据摘要）。
-            判断是否能仅凭这些知识直接回答当前问题：
-            - 能：复用或微调知识中的结论；若知识含 SQL 且时间范围等仍适用，可沿用；不要编造知识里没有的数字。
-            - 不能：例如时间范围、过滤条件、口径与知识明显不符，或需要重新查库。
-            最后只输出一个 JSON 对象，不要其它文字：
-            {"status":"answered","answer":"中文结论","sql":"可空，沿用的 SQL","knowledgeId":1}
-            或
-            {"status":"continue","reason":"为什么不能直接答"}
-            """;
-
     static final String EXPLORER_PROMPT = """
             你是安全运营本体的检索助手，只负责把用户问题对应到本体实体，不写 SQL。
             用工具 listConcepts、searchEntities、describeEntity、findPaths、listDefinedConcepts、checkAnswerable 探索本体，
@@ -248,9 +237,6 @@ public class AskService {
                         List<String> options) {
     }
 
-    record KnowledgeReply(String status, String answer, String sql, Long knowledgeId, String reason) {
-    }
-
     /** 公开的廉价可回答性预检，供 API / 控制台在发问前调用。 */
     public AnswerabilityChecker.Answerability answerability(String question) {
         BusinessContext context = ontologyTools.businessContext(question, Set.of());
@@ -265,38 +251,6 @@ public class AskService {
                     result.matchedTerms(), gaps, result.suggestion());
         }
         return result;
-    }
-
-    public void ask(AskRequest request, AskListener listener) {
-        if (request == null || request.question() == null || request.question().isBlank()) {
-            throw new IllegalArgumentException("问题不能为空");
-        }
-        llm.model();
-        AskRunRecorder recorder = beginRun(request, listener);
-        AskFlowState state = new AskFlowState();
-        try {
-            AskStageResult retrieved =
-                    runKnowledge(request, recorder, state, AskKnowledgeService.DEFAULT_TOP_K);
-            Object hits = retrieved.outputs().get("result");
-            if (hits == null) {
-                hits = retrieved.outputs().get("hits");
-            }
-            AskStageResult judged = runKnowledgeJudge(request, recorder, hits);
-            if (Boolean.TRUE.equals(judged.outputs().get("canAnswer"))) {
-                return;
-            }
-            // 本体澄清只 emit，不中断；元数据出错再停（与默认 DAG 一致）
-            runOntology(request, recorder, state, AskSkillIds.DEFAULT_ONTOLOGY);
-            if ("error".equals(runMetadata(request, recorder, state, true).outcome())) {
-                return;
-            }
-            runInsight(request, recorder, state, AskSkillIds.DEFAULT_INSIGHT);
-        } catch (RuntimeException e) {
-            recorder.failed(e);
-            throw e;
-        } finally {
-            finishRun(recorder);
-        }
     }
 
     /** ChatFlow 白盒：打开一次 run 信封（只发一次 run 事件）。 */
@@ -340,36 +294,6 @@ public class AskService {
      */
     public AskStageResult runKnowledge(AskRequest request, AskListener listener, AskFlowState state, int topK) {
         Map<String, Object> outputs = retrieveKnowledge(request, listener, Math.max(1, topK));
-        return AskStageResult.of("default", outputs);
-    }
-
-    /**
-     * 黑盒 {@link #ask} 用的知识判定：根据召回 hits 调模型；能答则写出 answer。
-     * ChatFlow 的 llm_chat 不再走此路径，改由提示词约定 JSON 字段（如 canAnswer）经通用解析写出。
-     */
-    public AskStageResult runKnowledgeJudge(AskRequest request, AskListener listener, Object hitsRaw) {
-        return runKnowledgeJudge(request, listener, hitsRaw, null);
-    }
-
-    public AskStageResult runKnowledgeJudge(
-            AskRequest request, AskListener listener, Object hitsRaw, String systemPrompt) {
-        List<Map<String, Object>> hits = coerceHitMaps(hitsRaw);
-        Map<String, Object> base = new LinkedHashMap<>();
-        if (hits.isEmpty()) {
-            base.put("canAnswer", false);
-            base.put("reason", "无召回");
-            listener.emit("stage", stage("llm", "知识判定：无召回，canAnswer=false"));
-            return AskStageResult.of("default", base);
-        }
-        listener.emit("stage", stage("llm", "知识判定：大模型判断能否直接作答"));
-        Map<String, Object> judged = judgeKnowledgeHits(request, listener, hits, systemPrompt);
-        if (judged == null) {
-            base.put("canAnswer", false);
-            base.put("reason", "模型判定不可直接答或解析失败");
-            return AskStageResult.of("default", base);
-        }
-        Map<String, Object> outputs = new LinkedHashMap<>(judged);
-        outputs.put("canAnswer", true);
         return AskStageResult.of("default", outputs);
     }
 
@@ -664,6 +588,9 @@ public class AskService {
         if (outputs.containsKey("canAnswer")) {
             payload.put("canAnswer", outputs.get("canAnswer"));
         }
+        if (outputs.get("knowledgeId") != null) {
+            payload.put("knowledgeId", outputs.get("knowledgeId"));
+        }
         Clarify clarified = clarifyFrom(outputs.get("clarify"));
         if (clarified != null) {
             listener.emit("clarify", clarified);
@@ -824,51 +751,6 @@ public class AskService {
         return knowledgeOutputs(payload);
     }
 
-    /**
-     * 对已召回 result 做大模型判定；能答则 emit answer 并返回输出，否则 null。
-     * {@code systemPrompt} 可含已插值的 {@code {{#knowledge.result#}}}；为空则用内置模板并追加 JSON。
-     */
-    private Map<String, Object> judgeKnowledgeHits(
-            AskRequest request, AskListener listener, List<Map<String, Object>> payload, String systemPrompt) {
-        String hitsJson = writeJson(payload);
-        String prompt = systemPrompt == null || systemPrompt.isBlank() ? KNOWLEDGE_PROMPT : systemPrompt.strip();
-        if (!prompt.contains(hitsJson) && !promptContainsKnowledgePayload(prompt)) {
-            prompt = prompt + "\n\n召回知识（JSON）：\n" + hitsJson;
-        }
-        String raw = llm.model().chat(prompt + "\n\n用户问题：\n" + request.question().strip());
-        KnowledgeReply reply;
-        try {
-            reply = read(raw, KnowledgeReply.class);
-        } catch (IllegalStateException e) {
-            log.warn("知识判定返回无法解析，继续下游: {}", JsonReply.abbreviate(raw, 500));
-            return null;
-        }
-        if (reply == null || !"answered".equals(reply.status()) || reply.answer() == null || reply.answer().isBlank()) {
-            return null;
-        }
-        Map<String, Object> usedHit = payload.stream()
-                .filter(row -> reply.knowledgeId() != null
-                        && reply.knowledgeId().equals(asLong(row.get("id"))))
-                .findFirst()
-                .orElse(payload.get(0));
-        String fallbackSql = usedHit.get("sql") == null ? null : String.valueOf(usedHit.get("sql"));
-        Object caliber = usedHit.get("caliber") == null ? List.of() : usedHit.get("caliber");
-        Map<String, Object> answer = new LinkedHashMap<>();
-        answer.put("answer", reply.answer());
-        answer.put("sql", reply.sql() != null && !reply.sql().isBlank() ? reply.sql() : fallbackSql);
-        answer.put("caliber", caliber);
-        answer.put(
-                "steps",
-                List.of("命中知识 #" + usedHit.get("id") + "：" + usedHit.getOrDefault("question", "")));
-        answer.put("knowledgeId", usedHit.get("id"));
-        listener.emit("answer", answer);
-        Map<String, Object> outputs = new LinkedHashMap<>();
-        outputs.put("answer", reply.answer());
-        outputs.put("sql", answer.get("sql"));
-        outputs.put("knowledgeId", usedHit.get("id"));
-        return outputs;
-    }
-
     private static Map<String, Object> knowledgeEmptyOutputs() {
         return new LinkedHashMap<>(Map.of("result", List.of()));
     }
@@ -877,16 +759,6 @@ public class AskService {
         Map<String, Object> outputs = new LinkedHashMap<>();
         outputs.put("result", payload);
         return outputs;
-    }
-
-    /** 提示词里是否已含检索结果（插值后的 JSON 或字段名）。 */
-    private static boolean promptContainsKnowledgePayload(String prompt) {
-        if (prompt == null || prompt.isBlank()) {
-            return false;
-        }
-        return prompt.contains("\"question\"")
-                || prompt.contains("\"answer\"")
-                || prompt.contains("召回知识");
     }
 
     /**
@@ -908,44 +780,6 @@ public class AskService {
         row.put("version", item.versionOrDefault());
         row.put("sourceRunId", item.sourceRunId() == null ? "" : item.sourceRunId());
         return row;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> coerceHitMaps(Object hitsRaw) {
-        if (!(hitsRaw instanceof List<?> list) || list.isEmpty()) {
-            return List.of();
-        }
-        List<Map<String, Object>> hits = new ArrayList<>();
-        for (Object item : list) {
-            if (item instanceof Map<?, ?> map) {
-                Map<String, Object> copy = new LinkedHashMap<>();
-                map.forEach((k, v) -> copy.put(String.valueOf(k), v));
-                hits.add(copy);
-            }
-        }
-        return hits;
-    }
-
-    private static Long asLong(Object value) {
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        if (value instanceof String text && !text.isBlank()) {
-            try {
-                return Long.parseLong(text.strip());
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
-        }
-        return null;
-    }
-
-    private String writeJson(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JacksonException e) {
-            return String.valueOf(value);
-        }
     }
 
     private ExplorerReply explore(String dialogue, BusinessContext context) {

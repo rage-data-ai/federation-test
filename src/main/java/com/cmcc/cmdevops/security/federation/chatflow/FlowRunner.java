@@ -77,11 +77,8 @@ public class FlowRunner {
                 case "end" -> {
                     return;
                 }
-                case "builtin_ask" -> {
-                    askService.ask(requestWithQuery(scoped, inputs), listener);
-                    lastOutcome = "default";
-                    pool.putNode(node, Map.of("outcome", lastOutcome));
-                }
+                case "builtin_ask" -> throw new IllegalArgumentException(
+                        "builtin_ask 已移除，请发布白盒问数图（knowledge/ontology/metadata/llm_chat）");
                 case "if_else" -> {
                     AskStageResult result = evaluateIfElse(inputs);
                     lastOutcome = result.outcome();
@@ -165,7 +162,8 @@ public class FlowRunner {
                     case "insight", "llm_chat" ->
                             result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool, state);
                     case "answer" -> result = runAnswerNode(inputs, pool, recorder);
-                    case "builtin_ask" -> throw new IllegalArgumentException("白盒阶段图不应包含 builtin_ask");
+                    case "builtin_ask" -> throw new IllegalArgumentException(
+                            "builtin_ask 已移除，请使用 knowledge/ontology/metadata/llm_chat 白盒图");
                     default -> throw new IllegalArgumentException("暂不支持的节点类型：" + node.type());
                 }
                 if (result != null) {
@@ -358,10 +356,9 @@ public class FlowRunner {
 
     static void assertCompatibleAskNodes(FlowGraph graph) {
         boolean hasBuiltin = graph.nodes().stream().anyMatch(node -> "builtin_ask".equals(node.type()));
-        boolean hasStages = graph.nodes().stream().anyMatch(node -> DefaultFlows.isAskStageType(node.type()));
-        if (hasBuiltin && hasStages) {
+        if (hasBuiltin) {
             throw new IllegalArgumentException(
-                    "流程不能同时包含 builtin_ask 与 knowledge/ontology/metadata/insight/if_else 阶段节点");
+                    "builtin_ask 已移除，请迁移为 knowledge → llm_chat → if_else → ontology → metadata → llm_chat(sql)");
         }
     }
 
