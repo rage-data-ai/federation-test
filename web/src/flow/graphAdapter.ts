@@ -81,7 +81,7 @@ export function graphToVueFlow(graph: FlowGraph): { nodes: DagCanvasNode[]; edge
 /**
  * 同起终点多条分支边错开绘制，避免「出错/默认」叠成一条只看见其中一个。
  */
-export function withParallelEdgeLayout<T extends DagCanvasEdge>(edges: T[]): T[] {
+export function withParallelEdgeLayout(edges: DagCanvasEdge[]): DagCanvasEdge[] {
   const groups = new Map<string, number[]>()
   edges.forEach((edge, index) => {
     const key = `${edge.source}=>${edge.target}`

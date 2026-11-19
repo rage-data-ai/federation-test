@@ -34,7 +34,8 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
 
     /**
      * 按条件选下一条边；无精确匹配时走 default。
-     * {@code continue} / {@code clarify} 与 default 同义（澄清仍发事件，DAG 沿默认路走）。
+     * {@code continue} 与 default 同义；{@code clarify} 默认可回落 default（本体澄清继续元数据），
+     * 也可单独画 clarify 边（自定义图）。
      */
     public String next(String fromId, String outcome) {
         String want = normalizeWhen(outcome);
@@ -59,7 +60,7 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
             return "default";
         }
         String w = when.strip();
-        if ("continue".equalsIgnoreCase(w) || "clarify".equalsIgnoreCase(w)) {
+        if ("continue".equalsIgnoreCase(w)) {
             return "default";
         }
         return w;

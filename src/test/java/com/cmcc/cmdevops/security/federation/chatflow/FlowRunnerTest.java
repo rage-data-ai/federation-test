@@ -4,12 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -70,7 +70,6 @@ class FlowRunnerTest {
         List<String> events = new ArrayList<>();
         runner.run(app, new AskRequest("q", List.of()), (event, data) -> events.add(event));
 
-        verify(askService, never()).ask(any(), any());
         verify(askService).runKnowledge(any(), eq(recorder), any(AskFlowState.class), eq(5));
         verify(askService).runLlmChat(any(), eq(recorder), any(), any(), any());
         verify(askService).runOntology(any(), eq(recorder), any(AskFlowState.class), any());
@@ -104,6 +103,33 @@ class FlowRunnerTest {
     }
 
     @Test
+    void ontologyClarifyContinuesToMetadata() {
+        AskService askService = mock(AskService.class);
+        AskRunRecorder recorder = mock(AskRunRecorder.class);
+        when(askService.beginRun(any(), any())).thenReturn(recorder);
+        when(askService.runKnowledge(any(), any(), any(), anyInt()))
+                .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
+        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+                .thenReturn(AskStageResult.of("default", Map.of("canAnswer", false)));
+        when(askService.runOntology(any(), any(), any(), any()))
+                .thenReturn(AskStageResult.of(
+                        "clarify",
+                        Map.of("clarify", Map.of("question", "哪类？", "options", List.of("告警")))));
+        when(askService.runMetadata(any(), any(), any(), anyBoolean()))
+                .thenReturn(AskStageResult.of("error", Map.of("tables", 0)));
+
+        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        PublishedApp app = new PublishedApp("app-1", "问数", 1L, "fv-1", DefaultFlows.builtinAsk());
+        runner.run(app, new AskRequest("q", List.of()), (event, data) -> {
+        });
+
+        verify(askService).runOntology(any(), eq(recorder), any(AskFlowState.class), any());
+        verify(askService).runMetadata(any(), eq(recorder), any(AskFlowState.class), eq(true));
+        verify(askService, never()).runInsight(any(), any(), any(), any(), any());
+        verify(askService).finishRun(recorder);
+    }
+
+    @Test
     void ifElseComparesHitCount() {
         assertEquals("true", FlowRunner.evaluateIfElse(Map.of("left", 2, "op", ">", "right", 0)).outcome());
         assertEquals("false", FlowRunner.evaluateIfElse(Map.of("left", 0, "op", ">", "right", 0)).outcome());
@@ -111,35 +137,24 @@ class FlowRunnerTest {
     }
 
     @Test
-    void legacyBuiltinAskStillDelegates() {
-        AskService askService = mock(AskService.class);
-        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
-        PublishedApp app = new PublishedApp("app-legacy", "旧问数", 1L, "fv-1", DefaultFlows.legacyBuiltinAsk());
-        runner.run(app, new AskRequest("q", List.of()), (event, data) -> {
-        });
-        verify(askService, times(1)).ask(any(AskRequest.class), any());
-    }
-
-    @Test
-    void mixedBuiltinAndStagesRejected() {
-        FlowGraph mixed = FlowGraph.of(
+    void builtinAskNodeRejected() {
+        FlowGraph legacy = FlowGraph.of(
                 "start",
                 List.of(
                         new FlowNode("start", "start", "开始", Map.of()),
                         new FlowNode("ask", "builtin_ask", "整段", Map.of()),
-                        new FlowNode("knowledge", "knowledge", "知识库", Map.of()),
                         new FlowNode("end", "end", "结束", Map.of())),
                 List.of(
                         new FlowEdge("start", "ask", "default"),
-                        new FlowEdge("ask", "knowledge", "default"),
-                        new FlowEdge("knowledge", "end", "default")));
+                        new FlowEdge("ask", "end", "default")));
         AskService askService = mock(AskService.class);
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
-        PublishedApp app = new PublishedApp("app-x", "混用", 1L, "fv-x", mixed);
-        assertThrows(
+        PublishedApp app = new PublishedApp("app-legacy", "旧问数", 1L, "fv-1", legacy);
+        IllegalArgumentException thrown = assertThrows(
                 IllegalArgumentException.class,
                 () -> runner.run(app, new AskRequest("q", List.of()), (event, data) -> {
                 }));
+        assertTrue(thrown.getMessage().contains("builtin_ask 已移除"));
     }
 
     @Test

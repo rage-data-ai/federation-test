@@ -79,7 +79,11 @@ public final class FlowNodePorts {
                 new Spec(
                         List.of(new Port("query", "查询文本", "默认绑定 sys.query", "String")),
                         List.of(
-                                new Port("outcome", "分流条件", "default（澄清也走默认）", "String"),
+                                new Port(
+                                        "outcome",
+                                        "分流条件",
+                                        "default=继续（澄清默认也走这条）；可另画 clarify",
+                                        "String"),
                                 new Port(
                                         "context",
                                         "业务上下文",
@@ -143,12 +147,6 @@ public final class FlowNodePorts {
                                 new Port("outcome", "结果条件", "default", "String"),
                                 new Port("answer", "回复文本", "", "String")),
                         Map.of("text", "{{#sys.query#}}")));
-        SPECS.put(
-                "builtin_ask",
-                new Spec(
-                        List.of(new Port("query", "查询文本", "默认绑定 sys.query", "String")),
-                        List.of(new Port("outcome", "结果条件", "default", "String")),
-                        Map.of("query", "{{#sys.query#}}")));
         SPECS.put("end", new Spec(List.of(), List.of(), Map.of()));
     }
 

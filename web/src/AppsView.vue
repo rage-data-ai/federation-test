@@ -72,7 +72,7 @@ async function create() {
     })
     name.value = ''
     description.value = ''
-    message.value = `已创建草稿「${app.name}」，编辑画布后发布即可在问数里选用`
+    message.value = `已创建草稿「${app.name}」，编辑画布并发布后可在「应用广场」打开`
     await refresh()
     await open(app)
   } catch (e) {
@@ -191,7 +191,7 @@ async function publish() {
   message.value = ''
   try {
     await publishApp(selected.value.id)
-    message.value = '已发布，可在问数页选择该应用'
+    message.value = '已发布，可在「应用广场」打开对话'
     await refresh()
     selected.value = apps.value.find((item) => item.id === selected.value?.id) || selected.value
     if (selected.value) {
@@ -250,7 +250,7 @@ function statusLabel(status: string) {
     <header class="module-head">
       <div class="head-main">
         <h1 id="apps-title">问数应用</h1>
-        <p class="hint">创建、编辑、发布与删除应用；拖拽编排流程后可在「智能问数」里选用。</p>
+        <p class="hint">创建、编辑与发布应用；发布后请到「应用广场」打开对话。侧栏「智能问数」固定为内置应用。</p>
       </div>
     </header>
 
@@ -314,7 +314,7 @@ function statusLabel(status: string) {
               :disabled="!!busy"
               @click="emit('open-app', selected.id)"
             >
-              在问数中打开
+              打开对话
             </button>
             <button
               v-if="canDeleteSelected"

@@ -17,36 +17,43 @@ import { useAskLlmStatus } from './composables/useAskLlmStatus'
 import type { AskRunView, PublishedApp } from './types'
 import { errMessage } from './types'
 
+const BUILTIN_APP_ID = 'app-builtin-ask'
+
 const props = defineProps<{ appId?: string }>()
 
 const { status, statusError, ready, needsKey, openLlmSettings } = useAskLlmStatus()
-const selectedAppId = ref(props.appId || '')
+/** 侧栏「智能问数」固定内置；从应用广场传入 appId 时锁定该应用。 */
+const selectedAppId = ref(props.appId?.trim() || BUILTIN_APP_ID)
 const publishedApps = ref<PublishedApp[]>([])
 const appError = ref('')
 const { turns, draft, busy, scroller, send, stop, clearTurns, restoreConversation, onKey } =
   useAskStream(selectedAppId)
 
+const activeAppName = computed(() => {
+  const hit = publishedApps.value.find((app) => app.appId === selectedAppId.value)
+  if (hit) {
+    return hit.appName
+  }
+  return selectedAppId.value === BUILTIN_APP_ID ? '智能问数' : selectedAppId.value
+})
+const isCustomApp = computed(
+  () => !!selectedAppId.value && selectedAppId.value !== BUILTIN_APP_ID
+)
+
 watch(
   () => props.appId,
   (id) => {
-    if (id && id !== selectedAppId.value) {
-      selectedAppId.value = id
+    const next = id?.trim() || BUILTIN_APP_ID
+    if (next !== selectedAppId.value) {
+      selectedAppId.value = next
       clearTurns()
     }
   }
 )
 
-watch(selectedAppId, () => {
-  clearTurns()
-})
-
 onMounted(async () => {
   try {
     publishedApps.value = await listPublishedApps()
-    if (!selectedAppId.value && publishedApps.value.length) {
-      const builtin = publishedApps.value.find((app) => app.appId === 'app-builtin-ask')
-      selectedAppId.value = builtin?.appId || publishedApps.value[0].appId
-    }
   } catch (e) {
     appError.value = errMessage(e)
   }
@@ -82,7 +89,8 @@ function startNewConversation() {
   <section class="ask" aria-labelledby="ask-title">
     <header class="module-head">
       <div class="head-main">
-        <h1 id="ask-title">智能问数</h1>
+        <h1 id="ask-title">{{ isCustomApp ? activeAppName : '智能问数' }}</h1>
+        <p v-if="isCustomApp" class="app-badge" aria-label="当前应用">已发布应用 · {{ selectedAppId }}</p>
         <nav class="views" aria-label="问数视图">
           <button
             v-for="item in VIEWS"
@@ -98,14 +106,6 @@ function startNewConversation() {
         </nav>
       </div>
       <div class="head-side" :class="{ offstage: view !== 'chat' }">
-        <label v-if="view === 'chat'" class="app-pick">
-          <span class="sr-only">应用</span>
-          <select v-model="selectedAppId" :disabled="busy" aria-label="问数应用">
-            <option v-for="app in publishedApps" :key="app.appId" :value="app.appId">
-              {{ app.appName }}
-            </option>
-          </select>
-        </label>
         <button v-if="status && !ready" class="link" type="button" @click="openLlmSettings">{{ needsKey ? '填写 API Key' : '未配置，去设置' }}</button>
         <span v-else-if="status" class="head-note">{{ status.protocol }} · {{ status.model }}</span>
         <button type="button" :disabled="busy || !turns.length" @click="startNewConversation">新对话</button>
@@ -311,18 +311,15 @@ function startNewConversation() {
 
 .head-main {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 10px 16px;
 }
 
-.app-pick select {
-  max-width: 180px;
-  padding: 4px 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--text);
-  font-size: 13px;
+.app-badge {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .pad {

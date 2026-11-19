@@ -17,7 +17,7 @@ public final class DefaultFlows {
     public static final String DEFAULT_FLOW_ID = "flow-builtin-ask";
 
     /** 内置问数图修订号；迁移器据此强制升级。 */
-    public static final int BUILTIN_ASK_REVISION = 16;
+    public static final int BUILTIN_ASK_REVISION = 18;
 
     /** 大模型+SQL：只引用上游本体 / 元数据出参（运行时再叠内置 SQL 规则）。 */
     public static final String SQL_LLM_PROMPT = """
@@ -55,11 +55,13 @@ public final class DefaultFlows {
 
     /**
      * 智能问数：检索 → llm_chat（提示词约定 JSON/canAnswer）→ if_else 分流 → 本体/元数据/SQL 或结束。
+     * 知识可答即停；本体澄清仍走元数据（仍 emit clarify）；元数据出错即停。
      *
      * <pre>
      * start → knowledge → llm_kb → if_kb
      *                                  ├─true  → end（判定节点已发 answer）
-     *                                  └─false → ontology → metadata → llm(sql) → end
+     *                                  └─false → ontology → metadata ─error→ end
+     *                                                          └─default→ llm(sql) → end
      * </pre>
      */
     public static FlowGraph builtinAsk() {
@@ -187,28 +189,11 @@ public final class DefaultFlows {
                         new FlowEdge("if_kb", "end", "true"),
                         new FlowEdge("if_kb", "ontology", "false"),
                         new FlowEdge("if_kb", "ontology", "default"),
-                        // 澄清≡默认：仍 emit clarify，DAG 一条默认边走元数据；元数据只分 error/默认
+                        // 本体澄清≡默认：仍 emit clarify，继续元数据；元数据出错再停
                         new FlowEdge("ontology", "metadata", "default"),
                         new FlowEdge("metadata", "end", "error"),
                         new FlowEdge("metadata", "llm", "default"),
                         new FlowEdge("llm", "end", "default")));
-    }
-
-    /** 旧版单节点智能问数（兼容已发布 Release）。 */
-    public static FlowGraph legacyBuiltinAsk() {
-        return FlowGraph.of(
-                "start",
-                List.of(
-                        new FlowNode(
-                                "start",
-                                "start",
-                                "开始",
-                                Map.of("x", 40, "y", 120, "memoryWindowTurns", 12)),
-                        new FlowNode("ask", "builtin_ask", "智能问数", Map.of("x", 260, "y", 120)),
-                        new FlowNode("end", "end", "结束", Map.of("x", 500, "y", 120))),
-                List.of(
-                        new FlowEdge("start", "ask", "default"),
-                        new FlowEdge("ask", "end", "default")));
     }
 
     public static FlowGraph llmChat() {

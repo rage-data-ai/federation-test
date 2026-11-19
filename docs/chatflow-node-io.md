@@ -13,7 +13,7 @@ start → 知识库 → 知识判定(llm_chat) → 能否用知识作答(canAnsw
                                                       └─默认→ 大模型(sql) → end
 ```
 
-澄清不单独分边：`continue` / `clarify` 运行时都等同 `default`（仍会 `emit clarify` 给前端）。本体→元数据只画一条默认边。元数据本身不澄清，只分出错/默认；澄清若发生在大模型阶段，同样走默认边到结束。
+`continue` 等同 `default`；本体澄清仍 `emit clarify`，默认图沿默认边继续元数据（可自定义 clarify 边）。元数据出错即停；大模型澄清且无 clarify 边时回落默认边到结束。
 
 1. **知识库**：只检索，写出唯一出参 `result`（`Array[Object]`）
 2. **知识判定**：普通 `llm_chat`；提示词插入 `{{#知识库.result#}}`，并约定模型输出含 `canAnswer` 的 JSON

@@ -7,7 +7,7 @@ describe('edge when catalog', () => {
     expect(edgeWhenLabel('false')).toBe('否')
     expect(edgeWhenLabel('continue')).toBe('')
     expect(edgeWhenLabel('default')).toBe('')
-    expect(edgeWhenLabel('clarify')).toBe('')
+    expect(edgeWhenLabel('clarify')).toBe('澄清')
     expect(edgeWhenLabel('error')).toBe('出错')
   })
 
@@ -26,7 +26,10 @@ describe('edge when catalog', () => {
       'true',
       'false'
     ])
-    expect(edgeWhenOptionsFor('ontology').map((item) => item.value)).toEqual(['default'])
+    expect(edgeWhenOptionsFor('ontology').map((item) => item.value)).toEqual([
+      'default',
+      'clarify'
+    ])
     expect(edgeWhenOptionsFor('metadata').map((item) => item.value)).toEqual([
       'default',
       'error'
