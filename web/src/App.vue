@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, provide, reactive, ref, type Component } from 'vue'
-// askAppId：从「问数应用」跳进问数页时带上已发布应用 id
+// askAppId：从「应用广场 / 问数应用」打开对话时带上已发布应用 id
 import {
   ApiError,
   authChangePassword,
@@ -33,6 +33,7 @@ import DatasourceView from './DatasourceView.vue'
 import KnowledgeView from './KnowledgeView.vue'
 import LoginView from './LoginView.vue'
 import OntologyView from './OntologyView.vue'
+import PublishedAppsView from './PublishedAppsView.vue'
 import SetupView from './SetupView.vue'
 import UsersView from './UsersView.vue'
 import { AGENT_MODELS, findModel } from './models'
@@ -54,7 +55,8 @@ const MODULES: ModuleDef[] = [
   { key: 'ontology', label: '本体建模', short: '本体', icon: '◈', component: OntologyView },
   { key: 'knowledge', label: '知识库', short: '知识', icon: '▣', component: KnowledgeView },
   { key: 'ask', label: '智能问数', short: '问数', icon: '✦', component: AskView },
-  { key: 'apps', label: '问数应用', short: '应用', icon: '◇', component: AppsView },
+  { key: 'plaza', label: '应用广场', short: '广场', icon: '▦', component: PublishedAppsView },
+  { key: 'apps', label: '问数应用', short: '编排', icon: '◇', component: AppsView },
   { key: 'users', label: '用户管理', short: '用户', icon: '☺', component: UsersView, adminOnly: true }
 ]
 
@@ -487,6 +489,10 @@ async function testLlmConfig() {
 }
 
 function open(key: string) {
+  if (key === 'ask') {
+    // 侧栏点「智能问数」始终进内置应用，不沿用广场选中的 appId
+    askAppId.value = ''
+  }
   active.value = key
   localStorage.setItem('module', key)
 }
@@ -549,7 +555,12 @@ function cycleTheme() {
 
     <main id="main-stage" class="stage" tabindex="-1">
       <KeepAlive>
-        <AskView v-if="activeKey === 'ask'" :key="'ask'" :app-id="askAppId" />
+        <AskView v-if="activeKey === 'ask'" :key="askAppId || 'ask-builtin'" :app-id="askAppId" />
+        <PublishedAppsView
+          v-else-if="activeKey === 'plaza'"
+          :key="'plaza'"
+          @open-app="openAskApp"
+        />
         <AppsView v-else-if="activeKey === 'apps'" :key="'apps'" @open-app="openAskApp" />
         <component :is="current" v-else :key="activeKey" />
       </KeepAlive>
