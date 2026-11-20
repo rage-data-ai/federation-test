@@ -13,19 +13,33 @@ const props = defineProps<{
 const data = computed<DagNodeData>(() => ({
   flowType: props.data?.flowType || 'llm_chat',
   title: props.data?.title || props.id,
-  config: props.data?.config || {}
+  config: props.data?.config || {},
+  runStatus: props.data?.runStatus || 'idle'
 }))
 const meta = computed(() => catalogItem(data.value.flowType))
+const runStatus = computed(() => data.value.runStatus || 'idle')
 </script>
 
 <template>
   <div
     class="card"
-    :class="{ selected, start: data.flowType === 'start', end: data.flowType === 'end' }"
+    :class="{
+      selected,
+      start: data.flowType === 'start',
+      end: data.flowType === 'end',
+      running: runStatus === 'running',
+      ok: runStatus === 'ok',
+      errored: runStatus === 'error'
+    }"
     :style="{ '--node-accent': meta.color }"
   >
     <Handle v-if="data.flowType !== 'start'" id="in" type="target" :position="Position.Left" />
-    <div class="kind">{{ meta.title }}</div>
+    <div class="kind">
+      {{ meta.title }}
+      <em v-if="runStatus === 'running'">运行中</em>
+      <em v-else-if="runStatus === 'ok'">完成</em>
+      <em v-else-if="runStatus === 'error'">出错</em>
+    </div>
     <div class="title">{{ data.title || meta.title }}</div>
     <Handle v-if="data.flowType !== 'end'" id="out" type="source" :position="Position.Right" />
   </div>
@@ -47,9 +61,41 @@ const meta = computed(() => catalogItem(data.value.flowType))
   border-color: var(--accent);
 }
 
+.card.running {
+  border-color: var(--accent);
+  box-shadow:
+    inset 3px 0 0 var(--node-accent, var(--accent)),
+    0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.card.ok {
+  border-color: var(--ok, #2a9d6a);
+}
+
+.card.errored {
+  border-color: var(--err, #c44);
+}
+
 .kind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--muted);
+}
+
+.kind em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.card.ok .kind em {
+  color: var(--ok, #2a9d6a);
+}
+
+.card.errored .kind em {
+  color: var(--err, #c44);
 }
 
 .title {

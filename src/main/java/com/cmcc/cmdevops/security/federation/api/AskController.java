@@ -128,6 +128,30 @@ public class AskController {
         return emitter;
     }
 
+    /**
+     * 编排预览：可读草稿或请求内 graph；SSE 含 node_start/node_finish；不落正式问数历史。
+     */
+    @RequireRole(GatewayRole.QUERY)
+    @PostMapping(value = "/ask/preview", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter preview(@RequestBody ChatflowRuntime.PreviewAskRequest request) {
+        SseEmitter emitter = new SseEmitter(TIMEOUT_MS);
+        GatewayUser user = GatewayUser.current();
+        Thread.ofVirtual().name("ask-preview-", 0).start(() -> {
+            GatewayUser.set(user);
+            try {
+                chatflowRuntime.preview(request, (event, data) -> send(emitter, event, data));
+            } catch (RuntimeException e) {
+                log.warn("问数预览失败: {}", e.getMessage(), e);
+                send(emitter, "error", Map.of("message", e.getMessage() == null ? e.toString() : e.getMessage()));
+            } finally {
+                send(emitter, "done", Map.of());
+                emitter.complete();
+                GatewayUser.clear();
+            }
+        });
+        return emitter;
+    }
+
     private static void send(SseEmitter emitter, String event, Object data) {
         try {
             emitter.send(SseEmitter.event().name(event).data(data, MediaType.APPLICATION_JSON));

@@ -11,6 +11,8 @@ import {
   updateFlow
 } from './api'
 import FlowDagEditor from './components/flow/FlowDagEditor.vue'
+import FlowPreviewPanel from './components/flow/FlowPreviewPanel.vue'
+import type { NodeRunStatus } from './flow/graphAdapter'
 import type { ChatApp, FlowDraft, FlowGraph, FlowTemplate } from './types'
 import { errMessage } from './types'
 
@@ -33,6 +35,10 @@ const template = ref('llm_chat')
 const busy = ref('')
 const error = ref('')
 const message = ref('')
+const showPreview = ref(true)
+const previewNodeStatuses = ref<Record<string, NodeRunStatus>>({})
+const previewActiveEdges = ref<string[]>([])
+const previewPanel = ref<{ inspect: (nodeId: string) => void } | null>(null)
 
 const emit = defineEmits<{ 'open-app': [appId: string] }>()
 
@@ -40,6 +46,23 @@ const readonly = computed(() => false)
 const canDeleteSelected = computed(
   () => !!selected.value && selected.value.id !== BUILTIN_APP_ID
 )
+
+function onPreviewNodeStatuses(statuses: Record<string, NodeRunStatus>) {
+  previewNodeStatuses.value = statuses
+}
+
+function onPreviewActiveEdges(keys: string[]) {
+  previewActiveEdges.value = keys
+}
+
+function onEditorSelectNode(nodeId: string) {
+  previewPanel.value?.inspect(nodeId)
+}
+
+function clearPreviewRunState() {
+  previewNodeStatuses.value = {}
+  previewActiveEdges.value = []
+}
 
 onMounted(async () => {
   try {
@@ -88,6 +111,7 @@ async function open(app: ChatApp) {
   error.value = ''
   message.value = ''
   dirty.value = false
+  clearPreviewRunState()
   try {
     const draft = await getFlow(app.flowId)
     // Clone before assigning into refs — structuredClone cannot clone Vue proxies.
@@ -307,6 +331,9 @@ function statusLabel(status: string) {
           <div class="actions">
             <button type="button" :disabled="!!busy || !metaDirty" @click="saveMeta">保存信息</button>
             <button type="button" :disabled="!!busy || !dirty" @click="saveGraph">保存草稿</button>
+            <button type="button" @click="showPreview = !showPreview">
+              {{ showPreview ? '收起预览' : '打开预览' }}
+            </button>
             <button class="primary" type="button" :disabled="!!busy" @click="publish">发布应用</button>
             <button
               v-if="selected.status === 'published'"
@@ -355,12 +382,26 @@ function statusLabel(status: string) {
           </label>
         </form>
 
-        <FlowDagEditor
-          :key="flow.id"
-          v-model="draftGraph"
-          :readonly="readonly"
-          @change="onGraphChange"
-        />
+        <div class="editor-row">
+          <FlowDagEditor
+            :key="flow.id"
+            v-model="draftGraph"
+            :readonly="readonly"
+            :node-statuses="previewNodeStatuses"
+            :active-edge-keys="previewActiveEdges"
+            @change="onGraphChange"
+            @select-node="onEditorSelectNode"
+          />
+          <FlowPreviewPanel
+            v-if="showPreview"
+            ref="previewPanel"
+            :app-id="selected.id"
+            :graph="draftGraph"
+            :dirty="dirty"
+            @update:node-statuses="onPreviewNodeStatuses"
+            @update:active-edges="onPreviewActiveEdges"
+          />
+        </div>
 
         <div v-if="showJson" class="json-panel">
           <label class="graph">
@@ -514,6 +555,32 @@ textarea {
   min-width: 0;
   padding: 12px 16px 16px;
   overflow: auto;
+}
+
+.editor-row {
+  display: flex;
+  flex: 1;
+  min-height: 420px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.editor-row :deep(.dag) {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  min-height: 420px;
+  border: 0;
+  border-radius: 0;
+}
+
+@media (max-width: 1100px) {
+  .editor-row {
+    flex-direction: column;
+  }
 }
 
 .detail.empty {

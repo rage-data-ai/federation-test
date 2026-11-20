@@ -10,11 +10,12 @@
 
 ## 决策
 
-1. **领域对象**：Flow（草稿图）→ Flow Version（发布快照）→ App（入口）→ App Release（钉死某版本）。运行只读 Release，不读草稿。
-2. **第一期节点**：`start` / `builtin_ask`（整段现有问数）/ `llm_chat`（无 SQL 的通用回复）/ `end`。边条件：`default`、`answered`、`clarify`、`continue`、`error`。后续再拆 `knowledge` / `ontology` / `metadata` / `insight` 为独立节点，默认流程图可平滑迁移。
-3. **兼容入口**：`POST /api/v1/ask` 增加可选 `appId`；缺省走内置「智能问数」应用的当前发布。控制台「问数」模块行为不变。
-4. **存储**：MySQL 表 `fed_flow` / `fed_flow_version` / `fed_app` / `fed_app_release`；`fed_ask_run` 增加可空 `app_id`。图结构以 JSON 存节点与边。
-5. **不做（本期）**：可视化拖拽画布（先提供模板 + 节点列表编辑）、租户/工作空间隔离、应用级独立知识库与本体、Webhook/HTTP 节点、多渠道发布。
+1. **领域对象**：Flow（草稿图）→ Flow Version（发布快照）→ App（入口）→ App Release（钉死某版本）。**生产运行只读 Release，不读草稿。**
+2. **预览通道（补充）**：`POST /api/v1/ask/preview` 可读草稿或请求内 `graph`，供编排页调试；须带 `preview` 标记且默认不落正式问数历史。详见 `docs/chatflow-preview.md`。
+3. **节点**：白盒阶段图（knowledge / ontology / metadata / llm_chat / if_else 等）；旧 `builtin_ask` 已移除。
+4. **兼容入口**：`POST /api/v1/ask` 可选 `appId`；缺省走内置「智能问数」当前发布。
+5. **存储**：MySQL 表 `fed_flow` / `fed_flow_version` / `fed_app` / `fed_app_release`；`fed_ask_run` 可空 `app_id`。
+6. **不做（预览 P2 之前）**：单步断点、开始节点自定义会话变量表单、对外发布令牌、HTTP/Webhook 节点。
 
 ## 后果
 

@@ -330,6 +330,11 @@ export function askStream(body: unknown, onEvent: SseHandler, signal?: AbortSign
   return postEvents('/api/v1/ask', body, onEvent, signal)
 }
 
+/** 编排预览：可读草稿/脏图；SSE 含 node_start/node_finish。 */
+export function askPreviewStream(body: unknown, onEvent: SseHandler, signal?: AbortSignal) {
+  return postEvents('/api/v1/ask/preview', body, onEvent, signal)
+}
+
 /** 廉价可回答性预检（不跑 LLM / SQL）。 */
 export function askAnswerable(question: string) {
   return request<{
