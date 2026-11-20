@@ -53,7 +53,7 @@ class FlowRunnerTest {
     void stageGraphRunsWhiteBoxPerNode() {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
-        when(askService.beginRun(any(), any())).thenReturn(recorder);
+        when(askService.beginRun(any(), any(), anyBoolean())).thenReturn(recorder);
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
                 .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
         when(askService.runLlmChat(any(), any(), any(), any(), any()))
@@ -83,7 +83,7 @@ class FlowRunnerTest {
     void llmJsonCanAnswerThenIfElseGoesToEnd() {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
-        when(askService.beginRun(any(), any())).thenReturn(recorder);
+        when(askService.beginRun(any(), any(), anyBoolean())).thenReturn(recorder);
         List<Map<String, Object>> hits = List.of(Map.of("id", 1L, "score", 0.9, "question", "q1"));
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
                 .thenReturn(AskStageResult.of("default", Map.of("result", hits)));
@@ -106,7 +106,7 @@ class FlowRunnerTest {
     void ontologyClarifyContinuesToMetadata() {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
-        when(askService.beginRun(any(), any())).thenReturn(recorder);
+        when(askService.beginRun(any(), any(), anyBoolean())).thenReturn(recorder);
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
                 .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
         when(askService.runLlmChat(any(), any(), any(), any(), any()))
@@ -162,7 +162,7 @@ class FlowRunnerTest {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
         AskListener[] outer = new AskListener[1];
-        when(askService.beginRun(any(), any())).thenAnswer(invocation -> {
+        when(askService.beginRun(any(), any(), anyBoolean())).thenAnswer(invocation -> {
             outer[0] = invocation.getArgument(1);
             outer[0].emit("run", Map.of("runId", "r1", "conversationId", "c1"));
             return recorder;
@@ -185,7 +185,7 @@ class FlowRunnerTest {
     void llmChatWithSqlSkillDelegatesToInsight() {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
-        when(askService.beginRun(any(), any())).thenReturn(recorder);
+        when(askService.beginRun(any(), any(), anyBoolean())).thenReturn(recorder);
         when(askService.runOntology(any(), any(), any(), any())).thenReturn(AskStageResult.of("continue"));
         when(askService.runMetadata(any(), any(), any(), eq(true))).thenReturn(AskStageResult.of("continue"));
         when(askService.runInsight(any(), any(), any(), any(), any()))
@@ -218,7 +218,7 @@ class FlowRunnerTest {
     void llmChatMemoryWindowOverridesHistory() {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
-        when(askService.beginRun(any(), any())).thenReturn(recorder);
+        when(askService.beginRun(any(), any(), anyBoolean())).thenReturn(recorder);
         when(askService.runLlmChat(any(), any(), any(), any(), any()))
                 .thenReturn(AskStageResult.of("default", Map.of("answer", "ok")));
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
@@ -263,7 +263,7 @@ class FlowRunnerTest {
     void startNodeMemoryWindowTrimsHistory() {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
-        when(askService.beginRun(any(), any())).thenReturn(recorder);
+        when(askService.beginRun(any(), any(), anyBoolean())).thenReturn(recorder);
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
                 .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
         FederationProperties props = new FederationProperties();
@@ -295,6 +295,7 @@ class FlowRunnerTest {
                     assertEquals("a3", req.history().get(1).content());
                     return true;
                 }),
-                any());
+                any(),
+                eq(false));
     }
 }

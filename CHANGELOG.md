@@ -4,6 +4,7 @@
 
 ### Added
 
+- ChatFlow 编排预览：`POST /api/v1/ask/preview` 可读草稿/脏图；SSE `node_start`/`node_finish`；编排页预览抽屉、节点与走过边高亮、出参检查；不落正式问数历史（见 `docs/chatflow-preview.md`）
 - 本地账号：自助注册 / 密码登录（会话默认 24h、有请求续期）、管理员维护用户；控制台登录页与用户管理；见 `docs/auth.md`
 - 问数对话历史：按登录用户列出并回看自己的会话（`/api/v1/ask/conversations`）
 - 问数 ChatFlow 一期：可配置流程 / 发布应用（`docs/chatflow.md`）；`POST /api/v1/ask` 支持 `appId`

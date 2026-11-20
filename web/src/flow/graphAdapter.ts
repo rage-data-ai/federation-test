@@ -1,10 +1,13 @@
 import type { FlowGraph } from '../types'
 import { catalogItem, edgeWhenLabel } from './nodeCatalog'
 
+export type NodeRunStatus = 'idle' | 'running' | 'ok' | 'error'
+
 export type DagNodeData = {
   flowType: string
   title: string
   config: Record<string, unknown>
+  runStatus?: NodeRunStatus
 }
 
 /** Loose canvas shapes — avoid Vue Flow Node/Edge generics (TS2589). */

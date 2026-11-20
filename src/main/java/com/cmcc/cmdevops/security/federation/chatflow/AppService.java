@@ -201,6 +201,34 @@ public class AppService {
         return new PublishedApp(app.id(), app.name(), release.id(), release.flowVersionId(), release.graph());
     }
 
+    /**
+     * 编排预览：应用须存在且未归档；图优先用请求体，否则用当前草稿。
+     * 返回的 {@link PublishedApp} 仅作运行元数据（releaseId=0, flowVersionId=preview）。
+     */
+    public PublishedApp resolveForPreview(String appId, FlowGraph graphOverride) {
+        if (appId == null || appId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "预览必须指定 appId");
+        }
+        App app = get(appId.strip());
+        if (App.ARCHIVED.equals(app.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "应用已归档，无法预览：" + app.id());
+        }
+        FlowGraph graph;
+        if (graphOverride != null) {
+            graph = graphOverride;
+        } else {
+            FlowDraft flow = store.findFlow(app.flowId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "流程不存在：" + app.flowId()));
+            graph = flow.graph();
+        }
+        if (graph == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "预览图为空");
+        }
+        graph.validate();
+        FlowRunner.assertCompatibleAskNodes(graph);
+        return new PublishedApp(app.id(), app.name(), 0L, "preview", graph);
+    }
+
     private static String blank(String name, String fallback) {
         return name == null || name.isBlank() ? fallback : name.strip();
     }

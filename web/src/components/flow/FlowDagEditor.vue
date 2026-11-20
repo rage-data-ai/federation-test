@@ -16,7 +16,8 @@ import {
   upstreamNodeIds,
   vueFlowToGraph,
   withParallelEdgeLayout,
-  type DagNodeData
+  type DagNodeData,
+  type NodeRunStatus
 } from '../../flow/graphAdapter'
 import {
   NODE_CATALOG,
@@ -37,11 +38,16 @@ import '@vue-flow/minimap/dist/style.css'
 const props = defineProps<{
   modelValue: FlowGraph
   readonly?: boolean
+  /** 预览运行态：nodeId → status */
+  nodeStatuses?: Record<string, NodeRunStatus>
+  /** 预览走过的边：`from->to:when` */
+  activeEdgeKeys?: string[]
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [graph: FlowGraph]
   change: [graph: FlowGraph]
+  'select-node': [nodeId: string]
 }>()
 
 /** any[] avoids Vue Flow Node generics (TS2589) while still driving the canvas. */
@@ -109,8 +115,44 @@ function nodeData(node: { id?: string; data?: Partial<DagNodeData> } | null | un
   return {
     flowType: data.flowType || 'llm_chat',
     title: data.title || node?.id || '',
-    config: data.config || {}
+    config: data.config || {},
+    runStatus: data.runStatus || 'idle'
   }
+}
+
+function edgePathKey(edge: { source?: string; target?: string; data?: { when?: string } }) {
+  return `${edge.source || ''}->${edge.target || ''}:${String(edge.data?.when || 'default')}`
+}
+
+function applyNodeStatuses() {
+  const statuses = props.nodeStatuses || {}
+  nodes.value = nodes.value.map((node) => {
+    const status = statuses[node.id] || 'idle'
+    const data = nodeData(node)
+    if (data.runStatus === status) {
+      return node
+    }
+    return { ...node, data: { ...data, runStatus: status } }
+  })
+}
+
+function applyEdgeHighlights() {
+  const active = new Set(props.activeEdgeKeys || [])
+  edges.value = edges.value.map((edge) => {
+    const on = active.has(edgePathKey(edge))
+    const style = on
+      ? { stroke: 'var(--accent)', strokeWidth: 2.5 }
+      : { stroke: undefined, strokeWidth: undefined }
+    const animated = on || Boolean(edge.data?.when && edge.data.when !== 'default')
+    if (
+      edge.animated === animated &&
+      edge.style?.stroke === style.stroke &&
+      edge.style?.strokeWidth === style.strokeWidth
+    ) {
+      return edge
+    }
+    return { ...edge, animated, style }
+  })
 }
 
 watch(
@@ -130,11 +172,25 @@ watch(
     editingEdgeId.value = ''
     localError.value = ''
     lastEmitted.value = fingerprint
+    applyNodeStatuses()
+    applyEdgeHighlights()
     nextTick(() => {
       syncing.value = false
     })
   },
   { immediate: true, deep: true }
+)
+
+watch(
+  () => props.nodeStatuses,
+  () => applyNodeStatuses(),
+  { deep: true }
+)
+
+watch(
+  () => props.activeEdgeKeys,
+  () => applyEdgeHighlights(),
+  { deep: true }
 )
 
 function commit() {
@@ -230,6 +286,7 @@ function openNodeInspector(id: string) {
   promptCaretTouched.value = { systemPrompt: false, text: false }
   promptCaret.value = { systemPrompt: { start: 0, end: 0 }, text: { start: 0, end: 0 } }
   closeVarPicker()
+  emit('select-node', id)
 }
 
 function openEdgeInspector(id: string) {

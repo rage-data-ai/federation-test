@@ -255,6 +255,11 @@ public class AskService {
 
     /** ChatFlow 白盒：打开一次 run 信封（只发一次 run 事件）。 */
     public AskRunRecorder beginRun(AskRequest request, AskListener listener) {
+        return beginRun(request, listener, false);
+    }
+
+    /** @param preview 为 true 时 run 事件带 preview，且应配合 {@link #discardRun} 不落库。 */
+    public AskRunRecorder beginRun(AskRequest request, AskListener listener, boolean preview) {
         if (request == null || request.question() == null || request.question().isBlank()) {
             throw new IllegalArgumentException("问题不能为空");
         }
@@ -267,6 +272,9 @@ public class AskService {
         if (request.appId() != null && !request.appId().isBlank()) {
             run.put("appId", request.appId());
         }
+        if (preview) {
+            run.put("preview", true);
+        }
         listener.emit("run", run);
         return recorder;
     }
@@ -275,9 +283,18 @@ public class AskService {
         saveRun(recorder);
     }
 
+    /** 预览结束：不写正式问数历史。 */
+    public void discardRun(AskRunRecorder recorder) {
+        // no-op：预览只走 SSE，不落 fed_ask_run
+    }
+
     public void failAndFinish(AskRunRecorder recorder, RuntimeException error) {
         recorder.failed(error);
         saveRun(recorder);
+    }
+
+    public void failAndDiscard(AskRunRecorder recorder, RuntimeException error) {
+        recorder.failed(error);
     }
 
     /** 记录失败不影响已经给出的回答。 */
