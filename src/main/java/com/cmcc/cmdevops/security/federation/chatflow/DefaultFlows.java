@@ -17,7 +17,7 @@ public final class DefaultFlows {
     public static final String DEFAULT_FLOW_ID = "flow-builtin-ask";
 
     /** 内置问数图修订号；迁移器据此强制升级。 */
-    public static final int BUILTIN_ASK_REVISION = 20;
+    public static final int BUILTIN_ASK_REVISION = 21;
 
     /** 大模型+SQL：只引用上游本体 / 元数据出参（运行时再叠内置 SQL 规则）。 */
     public static final String SQL_LLM_PROMPT = """
@@ -54,17 +54,15 @@ public final class DefaultFlows {
     }
 
     /**
-     * 智能问数：检索 → llm_chat（提示词约定 JSON/canAnswer）→ if_else 分流 → 本体/元数据/SQL。
-     * 知识可答即停（叶子）；本体澄清仍走元数据（仍 emit clarify）；元数据出错即停；
-     * SQL 洞察节点本身已 {@code emit answer}（含 rows/caliber），故为叶子——不再挂 answer 二次回答
-     *（旧 end 也只是静默终止）。回答节点留给简单对话模板与自定义图。
-     * ChatFlow 无结束节点（对齐 Dify）。
+     * 智能问数默认 DAG（模板名仍叫 builtin_ask，已无黑盒 builtin_ask 节点）：
+     * 上游只写变量池；对话出口用回答节点自由拼接（对齐 Dify Answer）。
+     * ChatFlow 无结束节点。
      *
      * <pre>
      * start → knowledge → llm_kb → if_kb
-     *                                  ├─true  →（叶子；判定节点已发 answer）
+     *                                  ├─true  → answer_kb
      *                                  └─false → ontology → metadata ─error→（叶子）
-     *                                                          └─default→ llm(sql)（叶子）
+     *                                                          └─default→ llm(sql) → answer_sql
      * </pre>
      */
     public static FlowGraph builtinAsk() {
@@ -183,18 +181,45 @@ public final class DefaultFlows {
                                                 "systemPrompt",
                                                 SQL_LLM_PROMPT,
                                                 "skills",
-                                                List.of("sql", "preference"))))),
+                                                List.of("sql", "preference")))),
+                        new FlowNode(
+                                "answer_kb",
+                                "answer",
+                                "知识回答",
+                                Map.of(
+                                        "x",
+                                        880,
+                                        "y",
+                                        40,
+                                        "text",
+                                        "{{#知识判定.answer#}}",
+                                        "inputs",
+                                        Map.of("text", "{{#知识判定.answer#}}"))),
+                        new FlowNode(
+                                "answer_sql",
+                                "answer",
+                                "回答",
+                                Map.of(
+                                        "x",
+                                        1560,
+                                        "y",
+                                        260,
+                                        "text",
+                                        "{{#大模型对话.answer#}}",
+                                        "inputs",
+                                        Map.of("text", "{{#大模型对话.answer#}}")))),
                 List.of(
                         new FlowEdge("start", "knowledge", "default"),
                         new FlowEdge("knowledge", "llm_kb", "default"),
                         new FlowEdge("llm_kb", "if_kb", "default"),
-                        // 知识可答：if_kb 叶子（判定节点已 emit answer）
+                        new FlowEdge("if_kb", "answer_kb", "true"),
                         new FlowEdge("if_kb", "ontology", "false"),
                         new FlowEdge("if_kb", "ontology", "default"),
                         // 本体澄清≡默认：仍 emit clarify，继续元数据；元数据出错再停（叶子）
                         new FlowEdge("ontology", "metadata", "default"),
-                        // SQL 洞察已 emit 富 answer；llm 为叶子（对齐旧 end 静默终止，避免二次回答丢掉 rows）
-                        new FlowEdge("metadata", "llm", "default")));
+                        new FlowEdge("metadata", "llm", "default"),
+                        new FlowEdge("llm", "answer_sql", "default"),
+                        new FlowEdge("llm", "answer_sql", "answered")));
     }
 
     public static FlowGraph llmChat() {
@@ -290,8 +315,10 @@ public final class DefaultFlows {
         if (graph.nodes().stream().anyMatch(node -> "end".equals(node.type()))) {
             return true;
         }
-        // rev19 曾把 SQL llm 接到 answer_sql，会二次 emit 并丢掉 rows；强制升到叶子语义
-        if (graph.nodes().stream().anyMatch(node -> "answer_sql".equals(node.id()))) {
+        // rev21：对话出口用回答节点；缺 answer_kb / answer_sql 则升级
+        boolean hasAnswerKb = graph.nodes().stream().anyMatch(node -> "answer_kb".equals(node.id()));
+        boolean hasAnswerSql = graph.nodes().stream().anyMatch(node -> "answer_sql".equals(node.id()));
+        if (!hasAnswerKb || !hasAnswerSql) {
             return true;
         }
         boolean hasLlmChat = graph.nodes().stream().anyMatch(node -> "llm_chat".equals(node.type()));

@@ -50,7 +50,7 @@ class FlowPreviewTest {
         when(askService.beginRun(any(), any(), eq(true))).thenReturn(recorder);
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
                 .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
-        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+        when(askService.runLlmChat(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenReturn(AskStageResult.of("default", Map.of("canAnswer", false)));
         when(askService.runOntology(any(), any(), any(), any()))
                 .thenReturn(AskStageResult.of("continue", Map.of("context", Map.of())));
@@ -83,7 +83,7 @@ class FlowPreviewTest {
         verify(askService, never()).finishRun(any());
         verify(askService).runOntology(any(), eq(recorder), any(AskFlowState.class), any());
         verify(askService).runMetadata(any(), eq(recorder), any(AskFlowState.class), eq(true));
-        verify(askService, never()).runInsight(any(), any(), any(), any(), any());
+        verify(askService, never()).runInsight(any(), any(), any(), any(), any(), anyBoolean());
     }
 
     @Test
@@ -93,7 +93,7 @@ class FlowPreviewTest {
         when(askService.beginRun(any(), any(), eq(false))).thenReturn(recorder);
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
                 .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
-        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+        when(askService.runLlmChat(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenReturn(AskStageResult.of("default", Map.of("canAnswer", true, "answer", "hit")));
 
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());

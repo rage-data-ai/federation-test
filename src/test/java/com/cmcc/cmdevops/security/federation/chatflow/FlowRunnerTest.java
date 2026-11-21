@@ -56,13 +56,13 @@ class FlowRunnerTest {
         when(askService.beginRun(any(), any(), anyBoolean())).thenReturn(recorder);
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
                 .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
-        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+        when(askService.runLlmChat(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenReturn(AskStageResult.of("default", Map.of("canAnswer", false, "answer", "no")));
         when(askService.runOntology(any(), any(), any(), any()))
                 .thenReturn(AskStageResult.of("continue"));
         when(askService.runMetadata(any(), any(), any(), eq(true)))
                 .thenReturn(AskStageResult.of("continue", Map.of("tables", 1)));
-        when(askService.runInsight(any(), any(), any(), any(), any()))
+        when(askService.runInsight(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenReturn(AskStageResult.of("answered", Map.of("answer", "ok", "sql", "select 1")));
 
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
@@ -71,10 +71,10 @@ class FlowRunnerTest {
         runner.run(app, new AskRequest("q", List.of()), (event, data) -> events.add(event));
 
         verify(askService).runKnowledge(any(), eq(recorder), any(AskFlowState.class), eq(5));
-        verify(askService).runLlmChat(any(), eq(recorder), any(), any(), any());
+        verify(askService).runLlmChat(any(), eq(recorder), any(), any(), any(), anyBoolean());
         verify(askService).runOntology(any(), eq(recorder), any(AskFlowState.class), any());
         verify(askService).runMetadata(any(), eq(recorder), any(AskFlowState.class), eq(true));
-        verify(askService).runInsight(any(), eq(recorder), any(AskFlowState.class), any(), any());
+        verify(askService).runInsight(any(), eq(recorder), any(AskFlowState.class), any(), any(), anyBoolean());
         verify(askService).finishRun(recorder);
         assertTrue(events.contains("vars"));
     }
@@ -87,7 +87,7 @@ class FlowRunnerTest {
         List<Map<String, Object>> hits = List.of(Map.of("id", 1L, "score", 0.9, "question", "q1"));
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
                 .thenReturn(AskStageResult.of("default", Map.of("result", hits)));
-        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+        when(askService.runLlmChat(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenReturn(AskStageResult.of(
                         "default", Map.of("canAnswer", true, "answer", "hit")));
 
@@ -97,9 +97,9 @@ class FlowRunnerTest {
         });
 
         verify(askService).runKnowledge(any(), any(), any(), anyInt());
-        verify(askService).runLlmChat(any(), eq(recorder), any(), any(), any());
+        verify(askService).runLlmChat(any(), eq(recorder), any(), any(), any(), anyBoolean());
         verify(askService, never()).runOntology(any(), any(), any(), any());
-        verify(askService, never()).runInsight(any(), any(), any(), any(), any());
+        verify(askService, never()).runInsight(any(), any(), any(), any(), any(), anyBoolean());
     }
 
     @Test
@@ -109,7 +109,7 @@ class FlowRunnerTest {
         when(askService.beginRun(any(), any(), anyBoolean())).thenReturn(recorder);
         when(askService.runKnowledge(any(), any(), any(), anyInt()))
                 .thenReturn(AskStageResult.of("default", Map.of("result", List.of())));
-        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+        when(askService.runLlmChat(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenReturn(AskStageResult.of("default", Map.of("canAnswer", false)));
         when(askService.runOntology(any(), any(), any(), any()))
                 .thenReturn(AskStageResult.of(
@@ -125,7 +125,7 @@ class FlowRunnerTest {
 
         verify(askService).runOntology(any(), eq(recorder), any(AskFlowState.class), any());
         verify(askService).runMetadata(any(), eq(recorder), any(AskFlowState.class), eq(true));
-        verify(askService, never()).runInsight(any(), any(), any(), any(), any());
+        verify(askService, never()).runInsight(any(), any(), any(), any(), any(), anyBoolean());
         verify(askService).finishRun(recorder);
     }
 
@@ -167,7 +167,7 @@ class FlowRunnerTest {
             outer[0].emit("run", Map.of("runId", "r1", "conversationId", "c1"));
             return recorder;
         });
-        when(askService.runLlmChat(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(askService.runLlmChat(any(), any(), any(), any(), any(), anyBoolean())).thenAnswer(invocation -> {
             outer[0].emit("answer", Map.of("answer", "你好"));
             return AskStageResult.of("default", Map.of("answer", "你好"));
         });
@@ -189,7 +189,7 @@ class FlowRunnerTest {
         when(askService.beginRun(any(), any(), anyBoolean())).thenReturn(recorder);
         when(askService.runOntology(any(), any(), any(), any())).thenReturn(AskStageResult.of("continue"));
         when(askService.runMetadata(any(), any(), any(), eq(true))).thenReturn(AskStageResult.of("continue"));
-        when(askService.runInsight(any(), any(), any(), any(), any()))
+        when(askService.runInsight(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenReturn(AskStageResult.of("answered", Map.of("answer", "n", "sql", "select 1", "rowCount", 1L)));
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
         FlowGraph graph = FlowGraph.of(
@@ -211,8 +211,8 @@ class FlowRunnerTest {
                 new AskRequest("q", List.of()),
                 (event, data) -> {
                 });
-        verify(askService).runInsight(any(), eq(recorder), any(AskFlowState.class), any(), eq("hi"));
-        verify(askService, never()).runLlmChat(any(), any(), any(), any(), any());
+        verify(askService).runInsight(any(), eq(recorder), any(AskFlowState.class), any(), eq("hi"), anyBoolean());
+        verify(askService, never()).runLlmChat(any(), any(), any(), any(), any(), anyBoolean());
     }
 
     @Test
@@ -220,7 +220,7 @@ class FlowRunnerTest {
         AskService askService = mock(AskService.class);
         AskRunRecorder recorder = mock(AskRunRecorder.class);
         when(askService.beginRun(any(), any(), anyBoolean())).thenReturn(recorder);
-        when(askService.runLlmChat(any(), any(), any(), any(), any()))
+        when(askService.runLlmChat(any(), any(), any(), any(), any(), anyBoolean()))
                 .thenReturn(AskStageResult.of("default", Map.of("answer", "ok")));
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
         FlowGraph graph = FlowGraph.of(
@@ -257,7 +257,8 @@ class FlowRunnerTest {
                 any(),
                 any(),
                 any(),
-                any());
+                any(),
+                anyBoolean());
     }
 
     @Test

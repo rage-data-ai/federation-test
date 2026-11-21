@@ -81,6 +81,38 @@ class FlowAnswerNodeTest {
     }
 
     @Test
+    void answerMergesUpstreamSqlRowsFromTemplateRefs() {
+        FlowVariablePool pool = FlowVariablePool.fromRequest(new AskRequest("q", List.of()), "alice");
+        pool.putNode(
+                "大模型对话",
+                Map.of(
+                        "answer",
+                        "结论",
+                        "sql",
+                        "select 1",
+                        "rows",
+                        List.of(List.of("web-01", 5L)),
+                        "caliber",
+                        List.of(Map.of("item", "x"))));
+        FlowNode node = new FlowNode(
+                "ans",
+                "answer",
+                "回答",
+                Map.of("inputs", Map.of("text", "{{#大模型对话.answer#}}")));
+        Map<String, Object> answer = new HashMap<>();
+        FlowRunner.runAnswerNode(node, Map.of(), pool, (event, data) -> {
+            if ("answer".equals(event) && data instanceof Map<?, ?> map) {
+                for (Map.Entry<?, ?> e : map.entrySet()) {
+                    answer.put(String.valueOf(e.getKey()), e.getValue());
+                }
+            }
+        });
+        assertEquals("结论", answer.get("answer"));
+        assertEquals("select 1", answer.get("sql"));
+        assertEquals(List.of(List.of("web-01", 5L)), answer.get("rows"));
+    }
+
+    @Test
     void prefersInputsTextOverTopLevel() {
         FlowVariablePool pool = FlowVariablePool.fromRequest(new AskRequest("q", List.of()), "alice");
         FlowNode node = new FlowNode(

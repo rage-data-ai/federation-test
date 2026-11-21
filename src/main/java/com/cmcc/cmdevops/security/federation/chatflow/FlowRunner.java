@@ -112,11 +112,16 @@ public class FlowRunner {
                     case "llm_chat", "insight" -> {
                         AskRunRecorder recorder = askService.beginRun(scoped, listener, preview);
                         try {
-                            AskStageResult result =
-                                    runResolvedLlm(node, scoped, recorder, inputs, pool, new AskFlowState());
+                            // DAG：先只写变量池；是否发最终 answer 看有无下游
+                            AskStageResult result = runResolvedLlm(
+                                    node, scoped, recorder, inputs, pool, new AskFlowState(), false);
                             lastOutcome = result.outcome();
                             pool.putNode(node, result.outputs());
                             emitVars(listener, node.id(), result.outputs(), pool);
+                            String next = graph.next(nodeId, lastOutcome);
+                            if (next == null) {
+                                emitLeafAnswer(recorder, node, result);
+                            }
                         } catch (RuntimeException e) {
                             emitNodeFinish(listener, node, "error", e.getMessage());
                             if (preview) {
@@ -217,7 +222,8 @@ public class FlowRunner {
                             state.markMetadataPrepared();
                         }
                         case "insight", "llm_chat" ->
-                                result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool, state);
+                                // DAG：中间节点只写池；叶子才由编排发最终 answer
+                                result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool, state, false);
                         case "answer" -> result = runAnswerNode(node, inputs, pool, recorder);
                         case "builtin_ask" -> throw new IllegalArgumentException(
                                 "builtin_ask 已移除，请使用 knowledge/ontology/metadata/llm_chat 白盒图");
@@ -235,6 +241,9 @@ public class FlowRunner {
                 }
                 String next = graph.next(nodeId, lastOutcome);
                 if (next == null) {
+                    if (!"answer".equals(node.type())) {
+                        emitLeafAnswer(recorder, node, result);
+                    }
                     if (!"answered".equals(lastOutcome)
                             && !"clarify".equals(lastOutcome)
                             && !"error".equals(lastOutcome)
@@ -320,8 +329,9 @@ public class FlowRunner {
     }
 
     /**
-     * 回答节点：固定文案 + 上游变量拼接。缺失 / null 变量按空串拼入，不抛错、不中断。
+     * 回答节点：固定文案 + 上游变量拼接（DAG 对话出口）。缺失 / null 变量按空串拼入，不抛错、不中断。
      * 文案取自 {@code config.inputs.text} 或顶层 {@code config.text}（二者等价）。
+     * 若模板引用的上游节点出参含 sql/rows/caliber 等，一并并入最终 answer 事件。
      */
     static AskStageResult runAnswerNode(
             FlowNode node, Map<String, Object> inputs, FlowVariablePool pool, AskListener listener) {
@@ -333,11 +343,88 @@ public class FlowRunner {
         listener.emit("stage", Map.of("name", "answer", "message", "直接输出回答"));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("answer", text);
-        payload.put("sql", null);
-        payload.put("caliber", List.of());
-        payload.put("steps", List.of(Map.of("agent", "answer")));
+        enrichAnswerFromUpstream(payload, template, pool);
+        payload.putIfAbsent("sql", null);
+        payload.putIfAbsent("caliber", List.of());
+        payload.putIfAbsent("steps", List.of(Map.of("agent", "answer")));
         listener.emit("answer", payload);
-        return AskStageResult.of("default", Map.of("answer", text));
+        Map<String, Object> outputs = new LinkedHashMap<>();
+        outputs.put("answer", text);
+        copyIfPresent(outputs, payload, "sql");
+        copyIfPresent(outputs, payload, "rows");
+        copyIfPresent(outputs, payload, "columns");
+        copyIfPresent(outputs, payload, "rowCount");
+        copyIfPresent(outputs, payload, "caliber");
+        return AskStageResult.of("default", outputs);
+    }
+
+    /**
+     * DAG 叶子：中间 llm/insight 未发最终 answer 时，用节点出参补发（无下游回答节点的图）。
+     */
+    static void emitLeafAnswer(AskListener listener, FlowNode node, AskStageResult result) {
+        if (listener == null || result == null || result.outputs() == null) {
+            return;
+        }
+        String outcome = result.outcome();
+        if ("clarify".equals(outcome) || "error".equals(outcome)) {
+            return;
+        }
+        Map<String, Object> outs = result.outputs();
+        if (Boolean.FALSE.equals(outs.get("canAnswer"))) {
+            return;
+        }
+        if (!outs.containsKey("answer") && !outs.containsKey("rows") && !outs.containsKey("sql")) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("answer", outs.getOrDefault("answer", ""));
+        copyIfPresent(payload, outs, "sql");
+        copyIfPresent(payload, outs, "caliber");
+        copyIfPresent(payload, outs, "steps");
+        copyIfPresent(payload, outs, "columns");
+        copyIfPresent(payload, outs, "rows");
+        copyIfPresent(payload, outs, "rowCount");
+        copyIfPresent(payload, outs, "skills");
+        if (node != null) {
+            payload.putIfAbsent("steps", List.of(Map.of("agent", node.type())));
+        }
+        listener.emit("answer", payload);
+    }
+
+    /** 从模板里出现的 {@code {{#节点名.字段#}}} 合并上游富字段（sql/rows 等）。 */
+    static void enrichAnswerFromUpstream(Map<String, Object> payload, String template, FlowVariablePool pool) {
+        if (payload == null || pool == null || template == null || template.isEmpty()) {
+            return;
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\{\\{#([^.}]+)(\\.[^#]+)?#\\}\\}")
+                .matcher(template);
+        java.util.LinkedHashSet<String> titles = new java.util.LinkedHashSet<>();
+        while (matcher.find()) {
+            String title = matcher.group(1);
+            if (title != null && !title.isBlank() && !"sys".equals(title)) {
+                titles.add(title.strip());
+            }
+        }
+        for (String title : titles) {
+            Map<String, Object> ups = pool.node(title);
+            if (ups == null || ups.isEmpty()) {
+                continue;
+            }
+            copyIfAbsent(payload, ups, "sql");
+            copyIfAbsent(payload, ups, "rows");
+            copyIfAbsent(payload, ups, "columns");
+            copyIfAbsent(payload, ups, "rowCount");
+            copyIfAbsent(payload, ups, "caliber");
+            copyIfAbsent(payload, ups, "steps");
+            copyIfAbsent(payload, ups, "knowledgeId");
+            copyIfAbsent(payload, ups, "canAnswer");
+        }
+    }
+
+    private static void copyIfPresent(Map<String, Object> target, Map<String, Object> source, String key) {
+        if (source != null && source.get(key) != null) {
+            target.put(key, source.get(key));
+        }
     }
 
     /**
@@ -376,7 +463,8 @@ public class FlowRunner {
             AskListener listener,
             Map<String, Object> inputs,
             FlowVariablePool pool,
-            AskFlowState state) {
+            AskFlowState state,
+            boolean emitFinalAnswer) {
         String system = FlowVarRefs.asString(
                 inputs,
                 "systemPrompt",
@@ -401,9 +489,10 @@ public class FlowRunner {
                     listener,
                     state,
                     insightAlias && skillSet.isEmpty() ? AskSkillIds.DEFAULT_INSIGHT : skillSet,
-                    system);
+                    system,
+                    emitFinalAnswer);
         }
-        return askService.runLlmChat(forLlm, listener, system, skillSet, knowledgeTools);
+        return askService.runLlmChat(forLlm, listener, system, skillSet, knowledgeTools, emitFinalAnswer);
     }
 
     /** 缺本体/元数据且上游未跑过对应节点时补跑，使单独的「大模型+SQL」也能执行。 */
@@ -457,7 +546,10 @@ public class FlowRunner {
     }
 
     private static void copyIfAbsent(Map<String, Object> target, Map<String, Object> source, String key) {
-        if (!target.containsKey(key) && source.containsKey(key)) {
+        if (target == null || source == null || key == null || target.containsKey(key)) {
+            return;
+        }
+        if (source.containsKey(key) && source.get(key) != null) {
             target.put(key, source.get(key));
         }
     }

@@ -19,7 +19,8 @@
 
 ### Changed
 
-- ChatFlow 对齐 Dify：去掉可添加的「结束」节点；简单对话以 `answer` 收束；智能问数 SQL 洞察为叶子（rev 20，不再挂 `answer_sql` 二次回答）；旧图 `end` 加载/发布时自动剥离（无回复出口时转为 `answer`）
+- ChatFlow 对齐 Dify：去掉可添加的「结束」节点；旧图 `end` 加载/发布时自动剥离（无回复出口时转为 `answer`）
+- DAG 编排：`llm_chat`/insight 有下游时只写变量池，不抢发最终 `answer`；由回答节点拼接（可并入上游 sql/rows）；默认智能问数 rev 21 出口为 `answer_kb` / `answer_sql`
 - 回答节点：`config.text` 与 `config.inputs.text` 互通；模板里 `null`/缺失变量按空串拼接，不抛错（预览与正式问答一致）
 - 默认智能问数 DAG（rev 18）：本体澄清继续元数据，元数据出错再停；删除黑盒 `AskService.ask` / `builtin_ask` 节点（仅保留 migrator 升级旧图）
 - 知识库 Milvus 字段扩展为 `dense_vector`（←question）/`sparse_vector`/`answer`（问答对）/`year`/`version`；MySQL `answer` 与之同构；智能问数与召回测试优先用这些字段

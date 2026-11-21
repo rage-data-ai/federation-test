@@ -8,12 +8,12 @@
 
 ```text
 start → 知识库 → 知识判定(llm_chat) → 能否用知识作答(canAnswer==true)
-                                         ├─是 →（叶子；判定节点已发 answer）
+                                         ├─是 → 知识回答(answer)
                                          └─否 → 本体 → 元数据 ─出错→（叶子）
                                                       └─默认→ 大模型(sql) → 回答(answer)
 ```
 
-ChatFlow **无结束节点**（对齐 Dify Chatflow）：以 `answer` / 已发回复的叶子收束；旧图含 `end` 时加载/发布会自动去掉。`continue` 等同 `default`；本体澄清仍 `emit clarify`，默认图沿默认边继续元数据（可自定义 clarify 边）。元数据出错即停；大模型澄清且无 clarify 边时回落默认边。
+ChatFlow **无结束节点**（对齐 Dify）：上游 `llm_chat`/insight **只写变量池**；有下游时不抢发最终 `answer`，由**回答节点**统一拼接输出（可并入上游 sql/rows）。旧图含 `end` 时加载/发布会自动去掉。`continue` 等同 `default`；本体澄清仍 `emit clarify`。
 
 1. **知识库**：只检索，写出唯一出参 `result`（`Array[Object]`）
 2. **知识判定**：普通 `llm_chat`；提示词插入 `{{#知识库.result#}}`，并约定模型输出含 `canAnswer` 的 JSON
