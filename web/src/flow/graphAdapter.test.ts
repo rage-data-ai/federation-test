@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertAcyclic,
+  assertHasChatExit,
   graphToVueFlow,
+  stripEndNodes,
   upstreamNodeIds,
   vueFlowToGraph,
   withParallelEdgeLayout
@@ -13,11 +15,16 @@ const sample: FlowGraph = {
   nodes: [
     { id: 'start', type: 'start', title: '开始', config: { x: 10, y: 20 } },
     { id: 'chat', type: 'llm_chat', title: '对话', config: { systemPrompt: 'hi' } },
-    { id: 'end', type: 'end', title: '结束', config: {} }
+    {
+      id: 'ans',
+      type: 'answer',
+      title: '回答',
+      config: { inputs: { text: '{{#对话.answer#}}' }, text: '{{#对话.answer#}}' }
+    }
   ],
   edges: [
     { from: 'start', to: 'chat', when: 'default' },
-    { from: 'chat', to: 'end', when: 'answered' }
+    { from: 'chat', to: 'ans', when: 'answered' }
   ]
 }
 
@@ -35,12 +42,33 @@ describe('graphAdapter', () => {
     expect(back.edges.map((edge) => edge.when)).toEqual(['default', 'answered'])
   })
 
+  it('strips legacy end nodes on load and save', () => {
+    const withEnd: FlowGraph = {
+      startNodeId: 'start',
+      nodes: [
+        { id: 'start', type: 'start', title: '开始', config: {} },
+        { id: 'chat', type: 'llm_chat', title: '对话', config: {} },
+        { id: 'end', type: 'end', title: '结束', config: {} }
+      ],
+      edges: [
+        { from: 'start', to: 'chat', when: 'default' },
+        { from: 'chat', to: 'end', when: 'default' }
+      ]
+    }
+    const stripped = stripEndNodes(withEnd)
+    expect(stripped.nodes.some((n) => n.type === 'end')).toBe(false)
+    expect(stripped.nodes).toHaveLength(2)
+    const { nodes } = graphToVueFlow(withEnd)
+    expect(nodes.some((n) => n.data.flowType === 'end')).toBe(false)
+    assertHasChatExit(stripped)
+  })
+
   it('offsets parallel branch edges so same endpoints both show', () => {
     const laid = withParallelEdgeLayout([
       {
         id: 'e1',
         source: 'metadata',
-        target: 'end',
+        target: 'ans',
         data: { when: 'error' },
         label: '出错',
         animated: true,
@@ -49,7 +77,7 @@ describe('graphAdapter', () => {
       {
         id: 'e2',
         source: 'metadata',
-        target: 'end',
+        target: 'ans',
         data: { when: 'default' },
         label: '',
         animated: true,
@@ -84,7 +112,7 @@ describe('graphAdapter', () => {
         startNodeId: 'a',
         nodes: [
           { id: 'a', type: 'start', title: 'a', config: {} },
-          { id: 'b', type: 'end', title: 'b', config: {} }
+          { id: 'b', type: 'answer', title: 'b', config: {} }
         ],
         edges: [
           { from: 'a', to: 'b', when: 'default' },

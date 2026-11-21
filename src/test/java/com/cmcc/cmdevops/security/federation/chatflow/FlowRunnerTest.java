@@ -143,10 +143,10 @@ class FlowRunnerTest {
                 List.of(
                         new FlowNode("start", "start", "开始", Map.of()),
                         new FlowNode("ask", "builtin_ask", "整段", Map.of()),
-                        new FlowNode("end", "end", "结束", Map.of())),
+                        new FlowNode("ans_end", "answer", "回答", Map.of("inputs", Map.of("text", "{{#sys.query#}}")))),
                 List.of(
                         new FlowEdge("start", "ask", "default"),
-                        new FlowEdge("ask", "end", "default")));
+                        new FlowEdge("ask", "ans_end", "default")));
         AskService askService = mock(AskService.class);
         FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
         PublishedApp app = new PublishedApp("app-legacy", "旧问数", 1L, "fv-1", legacy);
@@ -178,7 +178,8 @@ class FlowRunnerTest {
         runner.run(app, new AskRequest("hi", List.of()), (event, data) -> events.add(event));
         assertTrue(events.contains("run"));
         assertTrue(events.contains("answer"));
-        verify(askService).finishRun(recorder);
+        // llm_chat 与后续 answer 各 finish 一次
+        verify(askService, org.mockito.Mockito.times(2)).finishRun(recorder);
     }
 
     @Test
@@ -200,11 +201,11 @@ class FlowRunnerTest {
                                 "llm_chat",
                                 "对话",
                                 Map.of("skills", List.of("sql", "preference"), "systemPrompt", "hi")),
-                        new FlowNode("end", "end", "结束", Map.of())),
+                        new FlowNode("ans_end", "answer", "回答", Map.of("inputs", Map.of("text", "{{#sys.query#}}")))),
                 List.of(
                         new FlowEdge("start", "chat", "default"),
-                        new FlowEdge("chat", "end", "answered"),
-                        new FlowEdge("chat", "end", "default")));
+                        new FlowEdge("chat", "ans_end", "answered"),
+                        new FlowEdge("chat", "ans_end", "default")));
         runner.run(
                 new PublishedApp("app-sql-llm", "SQL对话", 1L, "fv", graph),
                 new AskRequest("q", List.of()),
@@ -231,10 +232,10 @@ class FlowRunnerTest {
                                 "llm_chat",
                                 "对话",
                                 Map.of("memoryWindowTurns", 2, "systemPrompt", "hi", "skills", List.of())),
-                        new FlowNode("end", "end", "结束", Map.of())),
+                        new FlowNode("ans_end", "answer", "回答", Map.of("inputs", Map.of("text", "{{#sys.query#}}")))),
                 List.of(
                         new FlowEdge("start", "chat", "default"),
-                        new FlowEdge("chat", "end", "default")));
+                        new FlowEdge("chat", "ans_end", "default")));
         List<Turn> history = List.of(
                 new Turn("user", "q1"),
                 new Turn("assistant", "a1"),
@@ -274,10 +275,10 @@ class FlowRunnerTest {
                 List.of(
                         new FlowNode("start", "start", "开始", Map.of("memoryWindowTurns", 2)),
                         new FlowNode("knowledge", "knowledge", "知识库", Map.of("topK", 5)),
-                        new FlowNode("end", "end", "结束", Map.of())),
+                        new FlowNode("ans_end", "answer", "回答", Map.of("inputs", Map.of("text", "{{#sys.query#}}")))),
                 List.of(
                         new FlowEdge("start", "knowledge", "default"),
-                        new FlowEdge("knowledge", "end", "default")));
+                        new FlowEdge("knowledge", "ans_end", "default")));
         PublishedApp app = new PublishedApp("app-mem", "记忆", 1L, "fv-mem", graph);
         List<Turn> history = List.of(
                 new Turn("user", "q1"),

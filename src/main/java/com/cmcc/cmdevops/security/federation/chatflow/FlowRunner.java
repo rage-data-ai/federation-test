@@ -58,7 +58,7 @@ public class FlowRunner {
     }
 
     private void run(PublishedApp app, AskRequest request, AskListener listener, boolean preview) {
-        FlowGraph graph = app.graph();
+        FlowGraph graph = FlowGraphMigrations.normalize(app.graph());
         graph.validate();
         assertCompatibleAskNodes(graph);
         AskRequest scoped = withHistoryWindow(graph, withAppMeta(request, app));
@@ -135,7 +135,7 @@ public class FlowRunner {
                     case "answer" -> {
                         AskRunRecorder recorder = askService.beginRun(scoped, listener, preview);
                         try {
-                            AskStageResult result = runAnswerNode(inputs, pool, recorder);
+                            AskStageResult result = runAnswerNode(node, inputs, pool, recorder);
                             lastOutcome = result.outcome();
                             pool.putNode(node, result.outputs());
                             emitVars(listener, node.id(), result.outputs(), pool);
@@ -218,7 +218,7 @@ public class FlowRunner {
                         }
                         case "insight", "llm_chat" ->
                                 result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool, state);
-                        case "answer" -> result = runAnswerNode(inputs, pool, recorder);
+                        case "answer" -> result = runAnswerNode(node, inputs, pool, recorder);
                         case "builtin_ask" -> throw new IllegalArgumentException(
                                 "builtin_ask 已移除，请使用 knowledge/ontology/metadata/llm_chat 白盒图");
                         default -> throw new IllegalArgumentException("暂不支持的节点类型：" + node.type());
@@ -319,10 +319,17 @@ public class FlowRunner {
         return AskStageResult.of(ok ? "true" : "false", outputs);
     }
 
-    private static AskStageResult runAnswerNode(
-            Map<String, Object> inputs, FlowVariablePool pool, AskListener listener) {
-        String template = FlowVarRefs.asString(inputs, "text", "{{#sys.query#}}");
+    /**
+     * 回答节点：固定文案 + 上游变量拼接。缺失 / null 变量按空串拼入，不抛错、不中断。
+     * 文案取自 {@code config.inputs.text} 或顶层 {@code config.text}（二者等价）。
+     */
+    static AskStageResult runAnswerNode(
+            FlowNode node, Map<String, Object> inputs, FlowVariablePool pool, AskListener listener) {
+        String template = answerTextTemplate(node, inputs);
         String text = FlowVarRefs.interpolate(template, pool);
+        if (text == null) {
+            text = "";
+        }
         listener.emit("stage", Map.of("name", "answer", "message", "直接输出回答"));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("answer", text);
@@ -331,6 +338,32 @@ public class FlowRunner {
         payload.put("steps", List.of(Map.of("agent", "answer")));
         listener.emit("answer", payload);
         return AskStageResult.of("default", Map.of("answer", text));
+    }
+
+    /**
+     * 读取用户配置的回答模板。优先未解析的原始模板，避免纯 {@code {{#missing#}}} 被
+     * resolveInputs 收成 null 后误回退到 sys.query。
+     */
+    @SuppressWarnings("unchecked")
+    static String answerTextTemplate(FlowNode node, Map<String, Object> inputs) {
+        Object raw = null;
+        if (node != null && node.config() != null) {
+            Object nested = node.config().get("inputs");
+            if (nested instanceof Map<?, ?> map && map.get("text") != null) {
+                raw = map.get("text");
+            }
+            if (raw == null) {
+                raw = node.config().get("text");
+            }
+        }
+        if (raw == null && inputs != null && inputs.get("text") != null) {
+            // 已解析值：null 变量插值后可能是 ""；纯缺失引用可能仍是 null（上面已排除）
+            raw = inputs.get("text");
+        }
+        if (raw == null) {
+            return "{{#sys.query#}}";
+        }
+        return String.valueOf(raw);
     }
 
     /**
@@ -418,6 +451,8 @@ public class FlowRunner {
         copyIfAbsent(configured, node.config(), "left");
         copyIfAbsent(configured, node.config(), "op");
         copyIfAbsent(configured, node.config(), "right");
+        // answer 模板：顶层 config.text 与 inputs.text 等价（调色板新建曾只写顶层）
+        copyIfAbsent(configured, node.config(), "text");
         return FlowVarRefs.resolveInputs(spec.defaultInputs(), configured, pool);
     }
 

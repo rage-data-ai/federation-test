@@ -19,7 +19,7 @@
 ### 阶段 1 — 流程骨架 + 发布应用最小闭环（本分支）
 
 - 域模型与表：Flow / Flow Version / App / App Release；`fed_ask_run.app_id`
-- 内置模板：「智能问数」=白盒 DAG（知识/判定/本体/元数据/SQL）；「简单对话」=`start → llm_chat → end`
+- 内置模板：「智能问数」=白盒 DAG（知识/判定/本体/元数据/SQL + 回答）；「简单对话」=`start → llm_chat → answer`
 - API：流程 CRUD、发布版本；应用 CRUD、发布；列表已发布应用
 - 运行：`AskRequest.appId` → 解析当前 Release → `FlowRunner` 执行图
 - 控制台：「问数应用」编排发布；「应用广场」只列已发布应用并打开对话；「智能问数」固定内置应用
@@ -70,13 +70,13 @@ POST   /api/v1/ask                   { question, history, conversationId?, appId
 ## 默认图
 
 ```text
-智能问数 (rev≥18):
-  start → knowledge → llm_kb → if_kb ─true→ end
-                                   └false→ ontology → metadata ─error→ end
-                                                        └default→ llm_chat(+sql) → end
-  （本体澄清仍 emit，默认继续元数据；元数据出错才停）
+智能问数 (rev≥19):
+  start → knowledge → llm_kb → if_kb ─true→（叶子；判定已发 answer）
+                                   └false→ ontology → metadata ─error→（叶子）
+                                                        └default→ llm_chat(+sql) → answer
+  （ChatFlow 无 end，对齐 Dify；本体澄清仍 emit，默认继续元数据；元数据出错才停）
 
-简单对话:  start ──default──► llm_chat ──default──► end
+简单对话:  start ──default──► llm_chat ──default──► answer
 
 `builtin_ask` 黑盒节点已删除；启动时 migrator 会把内置应用升到白盒 DAG。
 ```

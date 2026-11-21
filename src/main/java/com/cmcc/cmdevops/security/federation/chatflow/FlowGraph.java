@@ -33,9 +33,13 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
     }
 
     /**
-     * 按条件选下一条边；无精确匹配时走 default。
-     * {@code continue} 与 default 同义；{@code clarify} 默认可回落 default（本体澄清继续元数据），
-     * 也可单独画 clarify 边（自定义图）。
+     * 按条件选下一条边。
+     * <ul>
+     *   <li>{@code continue} 与 {@code default} 同义</li>
+     *   <li>{@code clarify} / {@code answered} / {@code default}：无精确边时可回落 default</li>
+     *   <li>其它 outcome（如 {@code true}/{@code false}/{@code error}）：无精确边即叶子终止（不回落），
+     *       对齐 ChatFlow 无 end 时「未连出的分支即停」</li>
+     * </ul>
      */
     public String next(String fromId, String outcome) {
         String want = normalizeWhen(outcome);
@@ -52,7 +56,12 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
                 fallback = edge.to();
             }
         }
-        return fallback;
+        if ("default".equalsIgnoreCase(want)
+                || "clarify".equalsIgnoreCase(want)
+                || "answered".equalsIgnoreCase(want)) {
+            return fallback;
+        }
+        return null;
     }
 
     static String normalizeWhen(String when) {
@@ -79,9 +88,14 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
                 throw new IllegalArgumentException("边引用了不存在的节点：" + edge.from() + " → " + edge.to());
             }
         }
-        boolean hasEnd = nodes.stream().anyMatch(node -> "end".equals(node.type()));
-        if (!hasEnd) {
-            throw new IllegalArgumentException("流程需要至少一个 end 节点");
+        // ChatFlow 对齐 Dify：不要求 end；须有可产生用户可见回复的节点。
+        boolean hasReply = nodes.stream()
+                .anyMatch(node -> "answer".equals(node.type())
+                        || "llm_chat".equals(node.type())
+                        || "insight".equals(node.type())
+                        || "knowledge".equals(node.type()));
+        if (!hasReply) {
+            throw new IllegalArgumentException("流程需要至少一个回答 / 大模型 / 知识库节点作为对话出口");
         }
         java.util.HashSet<String> titles = new java.util.HashSet<>();
         for (FlowNode node : nodes) {
@@ -118,7 +132,8 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
     }
 
     public static FlowGraph of(String startNodeId, List<FlowNode> nodes, List<FlowEdge> edges) {
-        FlowGraph graph = new FlowGraph(startNodeId, new ArrayList<>(nodes), new ArrayList<>(edges));
+        FlowGraph graph = FlowGraphMigrations.normalize(
+                new FlowGraph(startNodeId, new ArrayList<>(nodes), new ArrayList<>(edges)));
         graph.validate();
         return graph;
     }
