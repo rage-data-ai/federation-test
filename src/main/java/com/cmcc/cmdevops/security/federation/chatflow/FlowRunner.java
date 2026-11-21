@@ -112,16 +112,12 @@ public class FlowRunner {
                     case "llm_chat", "insight" -> {
                         AskRunRecorder recorder = askService.beginRun(scoped, listener, preview);
                         try {
-                            // DAG：先只写变量池；是否发最终 answer 看有无下游
-                            AskStageResult result = runResolvedLlm(
-                                    node, scoped, recorder, inputs, pool, new AskFlowState(), false);
+                            // DAG：上游只写变量池；最终 answer 必须由回答节点发出
+                            AskStageResult result =
+                                    runResolvedLlm(node, scoped, recorder, inputs, pool, new AskFlowState());
                             lastOutcome = result.outcome();
                             pool.putNode(node, result.outputs());
                             emitVars(listener, node.id(), result.outputs(), pool);
-                            String next = graph.next(nodeId, lastOutcome);
-                            if (next == null) {
-                                emitLeafAnswer(recorder, node, result);
-                            }
                         } catch (RuntimeException e) {
                             emitNodeFinish(listener, node, "error", e.getMessage());
                             if (preview) {
@@ -222,8 +218,8 @@ public class FlowRunner {
                             state.markMetadataPrepared();
                         }
                         case "insight", "llm_chat" ->
-                                // DAG：中间节点只写池；叶子才由编排发最终 answer
-                                result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool, state, false);
+                                // 与预览同一套白盒 DAG：上游只写池，不发最终 answer
+                                result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool, state);
                         case "answer" -> result = runAnswerNode(node, inputs, pool, recorder);
                         case "builtin_ask" -> throw new IllegalArgumentException(
                                 "builtin_ask 已移除，请使用 knowledge/ontology/metadata/llm_chat 白盒图");
@@ -241,9 +237,6 @@ public class FlowRunner {
                 }
                 String next = graph.next(nodeId, lastOutcome);
                 if (next == null) {
-                    if (!"answer".equals(node.type())) {
-                        emitLeafAnswer(recorder, node, result);
-                    }
                     if (!"answered".equals(lastOutcome)
                             && !"clarify".equals(lastOutcome)
                             && !"error".equals(lastOutcome)
@@ -358,39 +351,6 @@ public class FlowRunner {
         return AskStageResult.of("default", outputs);
     }
 
-    /**
-     * DAG 叶子：中间 llm/insight 未发最终 answer 时，用节点出参补发（无下游回答节点的图）。
-     */
-    static void emitLeafAnswer(AskListener listener, FlowNode node, AskStageResult result) {
-        if (listener == null || result == null || result.outputs() == null) {
-            return;
-        }
-        String outcome = result.outcome();
-        if ("clarify".equals(outcome) || "error".equals(outcome)) {
-            return;
-        }
-        Map<String, Object> outs = result.outputs();
-        if (Boolean.FALSE.equals(outs.get("canAnswer"))) {
-            return;
-        }
-        if (!outs.containsKey("answer") && !outs.containsKey("rows") && !outs.containsKey("sql")) {
-            return;
-        }
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("answer", outs.getOrDefault("answer", ""));
-        copyIfPresent(payload, outs, "sql");
-        copyIfPresent(payload, outs, "caliber");
-        copyIfPresent(payload, outs, "steps");
-        copyIfPresent(payload, outs, "columns");
-        copyIfPresent(payload, outs, "rows");
-        copyIfPresent(payload, outs, "rowCount");
-        copyIfPresent(payload, outs, "skills");
-        if (node != null) {
-            payload.putIfAbsent("steps", List.of(Map.of("agent", node.type())));
-        }
-        listener.emit("answer", payload);
-    }
-
     /** 从模板里出现的 {@code {{#节点名.字段#}}} 合并上游富字段（sql/rows 等）。 */
     static void enrichAnswerFromUpstream(Map<String, Object> payload, String template, FlowVariablePool pool) {
         if (payload == null || pool == null || template == null || template.isEmpty()) {
@@ -463,8 +423,7 @@ public class FlowRunner {
             AskListener listener,
             Map<String, Object> inputs,
             FlowVariablePool pool,
-            AskFlowState state,
-            boolean emitFinalAnswer) {
+            AskFlowState state) {
         String system = FlowVarRefs.asString(
                 inputs,
                 "systemPrompt",
@@ -482,6 +441,7 @@ public class FlowRunner {
             llmWindow = number.intValue();
         }
         AskRequest forLlm = llmWindow >= 0 ? trimHistory(withQuery, llmWindow) : withQuery;
+        // 正式问数与预览共用：永不在此抢发最终 answer，一律交给回答节点
         if (skillSet.contains(AskSkillIds.SQL) || insightAlias) {
             ensureInsightContext(forLlm, listener, state);
             return askService.runInsight(
@@ -490,9 +450,9 @@ public class FlowRunner {
                     state,
                     insightAlias && skillSet.isEmpty() ? AskSkillIds.DEFAULT_INSIGHT : skillSet,
                     system,
-                    emitFinalAnswer);
+                    false);
         }
-        return askService.runLlmChat(forLlm, listener, system, skillSet, knowledgeTools, emitFinalAnswer);
+        return askService.runLlmChat(forLlm, listener, system, skillSet, knowledgeTools, false);
     }
 
     /** 缺本体/元数据且上游未跑过对应节点时补跑，使单独的「大模型+SQL」也能执行。 */

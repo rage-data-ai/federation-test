@@ -15,7 +15,7 @@ import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowNode;
 class FlowGraphMigrationsTest {
 
     @Test
-    void stripsEndWhenReplyNodeExists() {
+    void convertsEndToAnswerWhenGraphHasLlmButNoAnswer() {
         FlowGraph raw = new FlowGraph(
                 "start",
                 List.of(
@@ -27,8 +27,12 @@ class FlowGraphMigrationsTest {
                         new FlowEdge("chat", "end", "default")));
         FlowGraph migrated = FlowGraphMigrations.normalize(raw);
         assertFalse(migrated.nodes().stream().anyMatch(n -> "end".equals(n.type())));
-        assertEquals(2, migrated.nodes().size());
-        assertTrue(migrated.edges().stream().noneMatch(e -> "end".equals(e.to())));
+        assertEquals(1, migrated.nodes().stream().filter(n -> "answer".equals(n.type())).count());
+        assertEquals("answer", migrated.node("end").type());
+        assertTrue(migrated.edges().stream().anyMatch(e -> "chat".equals(e.from()) && "end".equals(e.to())));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> inputs = (Map<String, Object>) migrated.node("end").config().get("inputs");
+        assertEquals("{{#对话.answer#}}", inputs.get("text"));
         migrated.validate();
     }
 

@@ -70,11 +70,11 @@ POST   /api/v1/ask                   { question, history, conversationId?, appId
 ## 默认图
 
 ```text
-智能问数 (rev≥21，模板名 builtin_ask，已无黑盒节点):
+智能问数 (rev≥22，模板名 builtin_ask，已无黑盒节点):
   start → knowledge → llm_kb → if_kb ─true→ answer_kb
                                    └false→ ontology → metadata ─error→（叶子）
                                                         └default→ llm_chat(+sql) → answer_sql
-  （ChatFlow 无 end；上游只写变量池，回答节点统一对外拼接；本体澄清仍 emit）
+  （正式问数 = 与编排预览同一套 DAG；上游只写池；最终输出必须经回答节点）
 
 简单对话:  start ──default──► llm_chat ──default──► answer
 ```

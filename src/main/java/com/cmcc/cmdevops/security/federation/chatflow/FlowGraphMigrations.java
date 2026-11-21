@@ -13,18 +13,15 @@ import com.cmcc.cmdevops.security.federation.chatflow.FlowGraph.FlowNode;
 /**
  * ChatFlow 图迁移：对齐 Dify Chatflow（以 Answer 收束，无 End/Output）。
  *
- * <p>旧图若仍含 {@code end}：删除结束节点及其相关边；上游叶子自然终止（知识短路 / LLM 已
- * {@code emit answer} 的路径不再二次回答）。若删除后图中完全没有可产生用户可见回复的节点，
- * 则把原唯一出口 {@code end} 转成 {@code answer}（模板默认 {@code {{#sys.query#}}}）。
+ * <p>旧图若仍含 {@code end}：删除结束节点；若图中尚无 {@code answer}，把原出口 end 转成
+ * answer（最终用户可见回复必须经回答节点）。
  */
 public final class FlowGraphMigrations {
-
-    private static final Set<String> REPLY_TYPES = Set.of("answer", "llm_chat", "insight", "knowledge");
 
     private FlowGraphMigrations() {
     }
 
-    /** 规范化：去掉 end，并尽量保留可对话出口。 */
+    /** 规范化：去掉 end，并确保可落到回答节点。 */
     public static FlowGraph normalize(FlowGraph graph) {
         if (graph == null) {
             return null;
@@ -39,8 +36,8 @@ public final class FlowGraphMigrations {
         }
 
         Set<String> endIds = ends.stream().map(FlowNode::id).collect(Collectors.toSet());
-        boolean hasReply = graph.nodes().stream()
-                .anyMatch(node -> !"end".equals(node.type()) && REPLY_TYPES.contains(node.type()));
+        boolean hasAnswer = graph.nodes().stream()
+                .anyMatch(node -> !"end".equals(node.type()) && "answer".equals(node.type()));
 
         List<FlowNode> keptNodes = new ArrayList<>();
         for (FlowNode node : graph.nodes()) {
@@ -54,20 +51,35 @@ public final class FlowGraphMigrations {
                 .filter(edge -> !endIds.contains(edge.from()) && !endIds.contains(edge.to()))
                 .toList();
 
-        if (!hasReply) {
-            // 旧「仅 llm/start → end」或空壳：把第一个 end 转成 answer，挂到原入边来源上。
+        // 无回答节点时：把第一个 end 转成 answer，并接回原入边（llm→end 变为 llm→answer）
+        if (!hasAnswer) {
             FlowNode firstEnd = ends.get(0);
             String answerId = firstEnd.id();
             String answerTitle = "结束".equals(firstEnd.title()) || "end".equalsIgnoreCase(firstEnd.title())
                     ? "回答"
                     : firstEnd.title();
             Map<String, Object> config = new LinkedHashMap<>(firstEnd.config());
-            config.put("text", "{{#sys.query#}}");
+            Object upstreamHint = null;
+            for (FlowEdge edge : graph.edges()) {
+                if (endIds.contains(edge.to()) && !endIds.contains(edge.from())) {
+                    try {
+                        FlowNode from = graph.node(edge.from());
+                        if ("llm_chat".equals(from.type()) || "insight".equals(from.type())) {
+                            upstreamHint = "{{#" + from.title() + ".answer#}}";
+                            break;
+                        }
+                    } catch (RuntimeException ignored) {
+                        // ignore
+                    }
+                }
+            }
+            String text = upstreamHint != null ? String.valueOf(upstreamHint) : "{{#sys.query#}}";
+            config.put("text", text);
             @SuppressWarnings("unchecked")
             Map<String, Object> inputs = config.get("inputs") instanceof Map<?, ?> map
                     ? new LinkedHashMap<>((Map<String, Object>) map)
                     : new LinkedHashMap<>();
-            inputs.putIfAbsent("text", "{{#sys.query#}}");
+            inputs.putIfAbsent("text", text);
             config.put("inputs", inputs);
             keptNodes.add(new FlowNode(answerId, "answer", answerTitle, config));
 

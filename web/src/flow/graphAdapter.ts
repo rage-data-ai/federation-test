@@ -165,33 +165,42 @@ export function assertUniqueTitles(graph: FlowGraph) {
   }
 }
 
-/** ChatFlow：去掉遗留 end（对齐 Dify，无结束节点）。 */
+/** ChatFlow：去掉遗留 end；若尚无回答节点则把 end 转为 answer（最终输出必须经回答节点）。 */
 export function stripEndNodes(graph: FlowGraph): FlowGraph {
   const ends = (graph.nodes || []).filter((node) => node.type === 'end')
   if (!ends.length) {
-    return graph
+    return {
+      ...graph,
+      nodes: (graph.nodes || []).map((node) => normalizeAnswerNode(node))
+    }
   }
   const endIds = new Set(ends.map((node) => node.id))
-  const hasReply = (graph.nodes || []).some(
-    (node) =>
-      node.type !== 'end' &&
-      (node.type === 'answer' ||
-        node.type === 'llm_chat' ||
-        node.type === 'insight' ||
-        node.type === 'knowledge')
-  )
+  const hasAnswer = (graph.nodes || []).some((node) => node.type !== 'end' && node.type === 'answer')
   let nodes = (graph.nodes || [])
     .filter((node) => node.type !== 'end')
     .map((node) => normalizeAnswerNode(node))
   let edges = (graph.edges || []).filter((edge) => !endIds.has(edge.from) && !endIds.has(edge.to))
-  if (!hasReply && ends[0]) {
+  if (!hasAnswer && ends[0]) {
     const first = ends[0]
     const title =
       first.title === '结束' || first.title === 'end' || !first.title ? '回答' : first.title
-    const text =
+    const inbound = (graph.edges || []).filter(
+      (edge) => endIds.has(edge.to) && !endIds.has(edge.from)
+    )
+    let text =
       (first.config?.inputs as Record<string, unknown> | undefined)?.text ??
       first.config?.text ??
       '{{#sys.query#}}'
+    const fromId = inbound[0]?.from
+    const fromNode = (graph.nodes || []).find((node) => node.id === fromId)
+    if (
+      fromNode &&
+      (fromNode.type === 'llm_chat' || fromNode.type === 'insight') &&
+      typeof fromNode.title === 'string' &&
+      fromNode.title.trim()
+    ) {
+      text = `{{#${fromNode.title.trim()}.answer#}}`
+    }
     nodes = [
       ...nodes,
       {
@@ -207,9 +216,7 @@ export function stripEndNodes(graph: FlowGraph): FlowGraph {
     ]
     edges = [
       ...edges,
-      ...(graph.edges || [])
-        .filter((edge) => endIds.has(edge.to) && !endIds.has(edge.from))
-        .map((edge) => ({ ...edge, to: first.id }))
+      ...inbound.map((edge) => ({ ...edge, to: first.id }))
     ]
   }
   let startNodeId = graph.startNodeId
@@ -239,17 +246,11 @@ function normalizeAnswerNode(node: FlowGraph['nodes'][number]): FlowGraph['nodes
   return { ...node, config }
 }
 
-/** 须有回答 / 大模型 / 知识库等可产生用户可见回复的出口。 */
+/** 最终用户可见回复必须经回答节点（与后端 FlowGraph.validate 一致）。 */
 export function assertHasChatExit(graph: FlowGraph) {
-  const ok = (graph.nodes || []).some(
-    (node) =>
-      node.type === 'answer' ||
-      node.type === 'llm_chat' ||
-      node.type === 'insight' ||
-      node.type === 'knowledge'
-  )
+  const ok = (graph.nodes || []).some((node) => node.type === 'answer')
   if (!ok) {
-    throw new Error('流程需要至少一个回答 / 大模型 / 知识库节点作为对话出口')
+    throw new Error('流程需要至少一个回答节点作为对话出口')
   }
 }
 

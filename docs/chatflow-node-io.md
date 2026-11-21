@@ -13,7 +13,7 @@ start → 知识库 → 知识判定(llm_chat) → 能否用知识作答(canAnsw
                                                       └─默认→ 大模型(sql) → 回答(answer)
 ```
 
-ChatFlow **无结束节点**（对齐 Dify）：上游 `llm_chat`/insight **只写变量池**；有下游时不抢发最终 `answer`，由**回答节点**统一拼接输出（可并入上游 sql/rows）。旧图含 `end` 时加载/发布会自动去掉。`continue` 等同 `default`；本体澄清仍 `emit clarify`。
+ChatFlow **无结束节点**（对齐 Dify）：校验要求至少有一个**回答节点**；`llm_chat`/insight **只写变量池**，最终 `answer` SSE **仅由回答节点**发出（可并入上游 sql/rows）。正式问数与编排预览共用同一套 `FlowRunner` DAG。旧图含 `end` 且无回答节点时，会把 end 转为 answer。
 
 1. **知识库**：只检索，写出唯一出参 `result`（`Array[Object]`）
 2. **知识判定**：普通 `llm_chat`；提示词插入 `{{#知识库.result#}}`，并约定模型输出含 `canAnswer` 的 JSON

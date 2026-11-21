@@ -42,7 +42,7 @@ describe('graphAdapter', () => {
     expect(back.edges.map((edge) => edge.when)).toEqual(['default', 'answered'])
   })
 
-  it('strips legacy end nodes on load and save', () => {
+  it('converts legacy end to answer when no answer node', () => {
     const withEnd: FlowGraph = {
       startNodeId: 'start',
       nodes: [
@@ -57,7 +57,10 @@ describe('graphAdapter', () => {
     }
     const stripped = stripEndNodes(withEnd)
     expect(stripped.nodes.some((n) => n.type === 'end')).toBe(false)
-    expect(stripped.nodes).toHaveLength(2)
+    expect(stripped.nodes.some((n) => n.type === 'answer')).toBe(true)
+    expect(stripped.nodes).toHaveLength(3)
+    const ans = stripped.nodes.find((n) => n.type === 'answer')
+    expect((ans?.config?.inputs as { text?: string } | undefined)?.text).toBe('{{#对话.answer#}}')
     const { nodes } = graphToVueFlow(withEnd)
     expect(nodes.some((n) => n.data.flowType === 'end')).toBe(false)
     assertHasChatExit(stripped)

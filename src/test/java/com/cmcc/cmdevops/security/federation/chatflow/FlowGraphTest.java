@@ -59,8 +59,11 @@ class FlowGraphTest {
                 "a",
                 List.of(
                         new FlowNode("a", "start", "a", Map.of()),
-                        new FlowNode("b", "llm_chat", "b", Map.of())),
-                List.of(new FlowEdge("a", "b", "continue")));
+                        new FlowNode("b", "llm_chat", "b", Map.of()),
+                        new FlowNode("c", "answer", "c", Map.of("inputs", Map.of("text", "x")))),
+                List.of(
+                        new FlowEdge("a", "b", "continue"),
+                        new FlowEdge("b", "c", "default")));
         assertEquals("b", graph.next("a", "default"));
         assertEquals("b", graph.next("a", "continue"));
     }
@@ -74,7 +77,7 @@ class FlowGraphTest {
     }
 
     @Test
-    void ofStripsLegacyEndNodes() {
+    void ofConvertsLegacyEndToAnswer() {
         FlowGraph graph = FlowGraph.of(
                 "start",
                 List.of(
@@ -85,5 +88,19 @@ class FlowGraphTest {
                         new FlowEdge("start", "chat", "default"),
                         new FlowEdge("chat", "end", "default")));
         assertEquals(0, graph.nodes().stream().filter(n -> "end".equals(n.type())).count());
+        assertEquals(1, graph.nodes().stream().filter(n -> "answer".equals(n.type())).count());
+    }
+
+    @Test
+    void validateRequiresAnswerNode() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new FlowGraph(
+                                "start",
+                                List.of(
+                                        new FlowNode("start", "start", "开始", Map.of()),
+                                        new FlowNode("chat", "llm_chat", "对话", Map.of())),
+                                List.of(new FlowEdge("start", "chat", "default")))
+                        .validate());
     }
 }

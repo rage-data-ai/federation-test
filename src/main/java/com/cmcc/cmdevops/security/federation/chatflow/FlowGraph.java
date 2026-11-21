@@ -88,14 +88,10 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
                 throw new IllegalArgumentException("边引用了不存在的节点：" + edge.from() + " → " + edge.to());
             }
         }
-        // ChatFlow 对齐 Dify：不要求 end；须有可产生用户可见回复的节点。
-        boolean hasReply = nodes.stream()
-                .anyMatch(node -> "answer".equals(node.type())
-                        || "llm_chat".equals(node.type())
-                        || "insight".equals(node.type())
-                        || "knowledge".equals(node.type()));
-        if (!hasReply) {
-            throw new IllegalArgumentException("流程需要至少一个回答 / 大模型 / 知识库节点作为对话出口");
+        // ChatFlow 对齐 Dify：不要求 end；最终用户可见回复必须经回答节点。
+        boolean hasAnswer = nodes.stream().anyMatch(node -> "answer".equals(node.type()));
+        if (!hasAnswer) {
+            throw new IllegalArgumentException("流程需要至少一个回答节点作为对话出口");
         }
         java.util.HashSet<String> titles = new java.util.HashSet<>();
         for (FlowNode node : nodes) {
