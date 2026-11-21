@@ -240,6 +240,31 @@ function startNewConversation() {
               <p v-if="item.message" class="line warn">{{ item.message }}</p>
             </section>
 
+            <section v-if="turn.nodeRuns?.length" class="step">
+              <h4><span class="tag">DAG</span>节点运行详情</h4>
+              <div
+                v-for="(run, nidx) in turn.nodeRuns"
+                :key="`${run.nodeId}-${nidx}`"
+                class="line node-run"
+                :class="run.status"
+              >
+                <strong>{{ run.title || run.nodeId }}</strong>
+                <em>{{ run.type }}</em>
+                <em>{{ run.status }}</em>
+                <em v-if="run.outcome">→ {{ run.outcome }}</em>
+                <em v-if="run.durationMs != null">{{ run.durationMs }}ms</em>
+                <p v-if="run.error" class="warn">{{ run.error }}</p>
+                <details v-if="Object.keys(run.inputs || {}).length">
+                  <summary>入参</summary>
+                  <pre class="sql">{{ JSON.stringify(run.inputs, null, 2) }}</pre>
+                </details>
+                <details v-if="Object.keys(run.outputs || {}).length">
+                  <summary>出参</summary>
+                  <pre class="sql">{{ JSON.stringify(run.outputs, null, 2) }}</pre>
+                </details>
+              </div>
+            </section>
+
             <section v-if="turn.vars?.length" class="step">
               <h4><span class="tag">变量</span>节点出参（ChatFlow）</h4>
               <div v-for="(snap, vidx) in turn.vars" :key="`${snap.nodeId}-${vidx}`" class="line">
@@ -508,6 +533,32 @@ function startNewConversation() {
 
 .warn {
   color: var(--warn);
+}
+
+.node-run {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.node-run em {
+  margin-left: 6px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.node-run.error strong {
+  color: var(--err);
+}
+
+.node-run details {
+  margin-top: 4px;
+}
+
+.node-run summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .sql {

@@ -25,8 +25,23 @@ public class FlowService {
     }
 
     public FlowDraft get(String id) {
-        return store.findFlow(id)
+        FlowDraft flow = store.findFlow(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "流程不存在：" + id));
+        FlowGraph normalized = FlowGraphMigrations.normalize(flow.graph());
+        if (normalized.equals(flow.graph())) {
+            return flow;
+        }
+        // 读时去掉遗留 end，写回草稿以免编排页再出现结束节点
+        FlowDraft healed = new FlowDraft(
+                flow.id(),
+                flow.name(),
+                flow.owner(),
+                normalized,
+                flow.status(),
+                flow.createdAt(),
+                System.currentTimeMillis());
+        store.saveFlow(healed);
+        return healed;
     }
 
     public FlowDraft create(String name, String template) {
@@ -47,14 +62,16 @@ public class FlowService {
 
     public FlowDraft update(String id, String name, FlowGraph graph) {
         FlowDraft existing = get(id);
+        FlowGraph nextGraph = existing.graph();
         if (graph != null) {
-            graph.validate();
+            nextGraph = FlowGraphMigrations.normalize(graph);
+            nextGraph.validate();
         }
         FlowDraft updated = new FlowDraft(
                 existing.id(),
                 name == null || name.isBlank() ? existing.name() : name.strip(),
                 existing.owner(),
-                graph == null ? existing.graph() : graph,
+                nextGraph,
                 existing.status(),
                 existing.createdAt(),
                 System.currentTimeMillis());
@@ -64,13 +81,14 @@ public class FlowService {
 
     public FlowVersion publish(String id) {
         FlowDraft flow = get(id);
-        flow.graph().validate();
+        FlowGraph graph = FlowGraphMigrations.normalize(flow.graph());
+        graph.validate();
         int next = store.latestFlowVersion(id).map(version -> version.version() + 1).orElse(1);
         FlowVersion version = new FlowVersion(
                 "fv-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16),
                 flow.id(),
                 next,
-                flow.graph(),
+                graph,
                 GatewayUser.current().name(),
                 System.currentTimeMillis());
         return store.saveFlowVersion(version);

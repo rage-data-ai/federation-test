@@ -330,7 +330,7 @@ export function askStream(body: unknown, onEvent: SseHandler, signal?: AbortSign
   return postEvents('/api/v1/ask', body, onEvent, signal)
 }
 
-/** 编排预览：可读草稿/脏图；SSE 含 node_start/node_finish。 */
+/** 编排预览：可读草稿/脏图；SSE 含 node_start(inputs)/node_finish(durationMs,outputs)。 */
 export function askPreviewStream(body: unknown, onEvent: SseHandler, signal?: AbortSignal) {
   return postEvents('/api/v1/ask/preview', body, onEvent, signal)
 }

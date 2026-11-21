@@ -25,11 +25,12 @@ import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 
 /**
- * 按发布图执行节点（Dify 式白盒 + 变量入参/出参）：
+ * 按发布图自由组装执行（Dify 式白盒 DAG）：
  * <ul>
- *   <li>运行前灌入 {@code sys.*}；每节点解析 {@code config.inputs}，写出 {@code nodeId.*}</li>
- *   <li>阶段节点真实拆跑并按 outcome 选边</li>
- *   <li>{@code llm_chat} 支持提示词变量插值与工具技能</li>
+ *   <li>正式问数与编排预览共用同一 walker（仅图来源 / 是否落库不同）</li>
+ *   <li>任意合法边连接的节点序列均可跑；阶段节点按 outcome 选边</li>
+ *   <li>每节点 SSE：{@code node_start}（含解析后入参）、{@code vars}、{@code node_finish}（含耗时与出参）</li>
+ *   <li>最终用户可见回答只由 {@code answer} 节点发出</li>
  * </ul>
  */
 @Component
@@ -52,128 +53,30 @@ public class FlowRunner {
         run(app, request, listener, false);
     }
 
-    /** 编排预览：同一套白盒执行，发 node_start/finish，不落正式 run。 */
+    /** 编排预览：同一套 DAG 执行，发 node_start/finish，不落正式 run。 */
     public void runPreview(PublishedApp app, AskRequest request, AskListener listener) {
         run(app, request, listener, true);
     }
 
     private void run(PublishedApp app, AskRequest request, AskListener listener, boolean preview) {
-        FlowGraph graph = app.graph();
+        FlowGraph graph = FlowGraphMigrations.normalize(app.graph());
         graph.validate();
         assertCompatibleAskNodes(graph);
         AskRequest scoped = withHistoryWindow(graph, withAppMeta(request, app));
         FlowVariablePool pool = FlowVariablePool.fromRequest(scoped, GatewayUser.current().name());
-
-        boolean stageGraph = graph.nodes().stream().anyMatch(node -> DefaultFlows.isAskStageType(node.type()));
-        if (stageGraph) {
-            runWhiteBox(graph, scoped, listener, pool, preview);
-            return;
-        }
-
-        runSimple(graph, scoped, listener, pool, preview, app.appId());
+        runDag(graph, scoped, listener, pool, preview, app.appId());
     }
 
-    private void runSimple(
+    /**
+     * 统一 DAG walker：自由组装的任意合法图走同一路径（单次 beginRun，逐节点详情）。
+     */
+    private void runDag(
             FlowGraph graph,
             AskRequest scoped,
             AskListener listener,
             FlowVariablePool pool,
             boolean preview,
             String appId) {
-        String nodeId = graph.startNodeId();
-        String lastOutcome = "default";
-        for (int hop = 0; hop < MAX_HOPS && nodeId != null; hop++) {
-            FlowNode node = graph.node(nodeId);
-            Map<String, Object> inputs = resolveNodeInputs(node, pool);
-            emitNodeStart(listener, node);
-            try {
-                switch (node.type()) {
-                    case "start" -> {
-                        lastOutcome = "default";
-                        Map<String, Object> outs = Map.of(
-                                "query", pool.sys().get("query"),
-                                "history", pool.sys().get("history"),
-                                "conversation_id", pool.sys().get("conversation_id"));
-                        pool.putNode(node, outs);
-                        emitVars(listener, node.id(), outs, pool);
-                    }
-                    case "end" -> {
-                        emitNodeFinish(listener, node, "default", null);
-                        return;
-                    }
-                    case "builtin_ask" -> throw new IllegalArgumentException(
-                            "builtin_ask 已移除，请发布白盒问数图（knowledge/ontology/metadata/llm_chat）");
-                    case "if_else" -> {
-                        AskStageResult result = evaluateIfElse(inputs);
-                        lastOutcome = result.outcome();
-                        pool.putNode(node, result.outputs());
-                        emitVars(listener, node.id(), result.outputs(), pool);
-                    }
-                    case "llm_chat", "insight" -> {
-                        AskRunRecorder recorder = askService.beginRun(scoped, listener, preview);
-                        try {
-                            AskStageResult result =
-                                    runResolvedLlm(node, scoped, recorder, inputs, pool, new AskFlowState());
-                            lastOutcome = result.outcome();
-                            pool.putNode(node, result.outputs());
-                            emitVars(listener, node.id(), result.outputs(), pool);
-                        } catch (RuntimeException e) {
-                            emitNodeFinish(listener, node, "error", e.getMessage());
-                            if (preview) {
-                                askService.failAndDiscard(recorder, e);
-                            } else {
-                                askService.failAndFinish(recorder, e);
-                            }
-                            throw e;
-                        }
-                        if (preview) {
-                            askService.discardRun(recorder);
-                        } else {
-                            askService.finishRun(recorder);
-                        }
-                    }
-                    case "answer" -> {
-                        AskRunRecorder recorder = askService.beginRun(scoped, listener, preview);
-                        try {
-                            AskStageResult result = runAnswerNode(inputs, pool, recorder);
-                            lastOutcome = result.outcome();
-                            pool.putNode(node, result.outputs());
-                            emitVars(listener, node.id(), result.outputs(), pool);
-                        } catch (RuntimeException e) {
-                            emitNodeFinish(listener, node, "error", e.getMessage());
-                            if (preview) {
-                                askService.failAndDiscard(recorder, e);
-                            } else {
-                                askService.failAndFinish(recorder, e);
-                            }
-                            throw e;
-                        }
-                        if (preview) {
-                            askService.discardRun(recorder);
-                        } else {
-                            askService.finishRun(recorder);
-                        }
-                    }
-                    default -> throw new IllegalArgumentException("暂不支持的节点类型：" + node.type());
-                }
-                emitNodeFinish(listener, node, lastOutcome, null);
-            } catch (RuntimeException e) {
-                if (!"end".equals(node.type())) {
-                    // node_finish already emitted for llm/answer errors
-                }
-                throw e;
-            }
-            String next = graph.next(nodeId, lastOutcome);
-            if (next == null) {
-                return;
-            }
-            nodeId = next;
-        }
-        log.warn("流程跳转超过 {} 次，已停止 appId={}", MAX_HOPS, appId);
-    }
-
-    private void runWhiteBox(
-            FlowGraph graph, AskRequest scoped, AskListener listener, FlowVariablePool pool, boolean preview) {
         AskRunRecorder recorder = askService.beginRun(scoped, listener, preview);
         AskFlowState state = new AskFlowState();
         String nodeId = graph.startNodeId();
@@ -183,74 +86,38 @@ public class FlowRunner {
                 FlowNode node = graph.node(nodeId);
                 Map<String, Object> inputs = resolveNodeInputs(node, pool);
                 AskRequest nodeRequest = requestWithQuery(scoped, inputs);
-                emitNodeStart(listener, node);
+                long startedAt = System.nanoTime();
+                emitNodeStart(listener, node, inputs);
                 AskStageResult result;
                 try {
-                    switch (node.type()) {
-                        case "start" -> {
-                            lastOutcome = "default";
-                            Map<String, Object> outs = Map.of(
-                                    "query", pool.sys().get("query"),
-                                    "history", pool.sys().get("history"),
-                                    "conversation_id", pool.sys().get("conversation_id"));
-                            pool.putNode(node, outs);
-                            emitVars(listener, node.id(), outs, pool);
-                            result = AskStageResult.of("default", outs);
-                        }
-                        case "end" -> {
-                            emitNodeFinish(listener, node, "default", null);
-                            return;
-                        }
-                        case "knowledge" -> {
-                            int topK = FlowVarRefs.asInt(inputs, "topK", AskKnowledgeService.DEFAULT_TOP_K);
-                            result = askService.runKnowledge(nodeRequest, recorder, state, topK);
-                        }
-                        case "if_else" -> result = runIfElse(node, inputs, pool, recorder);
-                        case "ontology" -> {
-                            result = askService.runOntology(
-                                    nodeRequest, recorder, state, AskSkillIds.DEFAULT_ONTOLOGY);
-                            state.markOntologyPrepared();
-                        }
-                        case "metadata" -> {
-                            result = askService.runMetadata(
-                                    nodeRequest, recorder, state, FlowVarRefs.asBool(inputs, "recover", true));
-                            state.markMetadataPrepared();
-                        }
-                        case "insight", "llm_chat" ->
-                                result = runResolvedLlm(node, nodeRequest, recorder, inputs, pool, state);
-                        case "answer" -> result = runAnswerNode(inputs, pool, recorder);
-                        case "builtin_ask" -> throw new IllegalArgumentException(
-                                "builtin_ask 已移除，请使用 knowledge/ontology/metadata/llm_chat 白盒图");
-                        default -> throw new IllegalArgumentException("暂不支持的节点类型：" + node.type());
-                    }
+                    result = executeNode(node, nodeRequest, recorder, inputs, pool, state);
                 } catch (RuntimeException e) {
-                    emitNodeFinish(listener, node, "error", e.getMessage());
+                    emitNodeFinish(listener, node, "error", e.getMessage(), elapsedMs(startedAt), Map.of());
                     throw e;
                 }
-                if (result != null) {
-                    lastOutcome = result.outcome();
-                    pool.putNode(node, result.outputs());
-                    emitVars(listener, node.id(), result.outputs(), pool);
-                    emitNodeFinish(listener, node, lastOutcome, null);
+                if ("end".equals(node.type())) {
+                    emitNodeFinish(listener, node, "default", null, elapsedMs(startedAt), Map.of());
+                    return;
                 }
+                lastOutcome = result.outcome();
+                Map<String, Object> outputs = result.outputs() == null ? Map.of() : result.outputs();
+                pool.putNode(node, outputs);
+                emitVars(listener, node.id(), outputs, pool);
+                emitNodeFinish(listener, node, lastOutcome, null, elapsedMs(startedAt), outputs);
                 String next = graph.next(nodeId, lastOutcome);
                 if (next == null) {
-                    if (!"answered".equals(lastOutcome)
-                            && !"clarify".equals(lastOutcome)
-                            && !"error".equals(lastOutcome)
-                            && !"default".equals(lastOutcome)
-                            && !"true".equals(lastOutcome)
-                            && !"false".equals(lastOutcome)
-                            && !"continue".equals(lastOutcome)) {
+                    if (!isTerminalOutcome(lastOutcome)) {
                         listener.emit(
                                 "error",
-                                Map.of("message", "流程在节点 " + nodeId + " 后没有出口（outcome=" + lastOutcome + ")"));
+                                Map.of(
+                                        "message",
+                                        "流程在节点 " + nodeId + " 后没有出口（outcome=" + lastOutcome + ")"));
                     }
                     return;
                 }
                 nodeId = next;
             }
-            log.warn("流程跳转超过 {} 次，已停止", MAX_HOPS);
+            log.warn("流程跳转超过 {} 次，已停止 appId={}", MAX_HOPS, appId);
         } catch (RuntimeException e) {
             if (preview) {
                 askService.failAndDiscard(recorder, e);
@@ -267,28 +134,96 @@ public class FlowRunner {
         }
     }
 
-    private static void emitNodeStart(AskListener listener, FlowNode node) {
+    private AskStageResult executeNode(
+            FlowNode node,
+            AskRequest nodeRequest,
+            AskListener recorder,
+            Map<String, Object> inputs,
+            FlowVariablePool pool,
+            AskFlowState state) {
+        return switch (node.type()) {
+            case "start" -> {
+                Map<String, Object> outs = new LinkedHashMap<>();
+                outs.put("query", pool.sys().get("query"));
+                outs.put("history", pool.sys().get("history"));
+                outs.put("conversation_id", pool.sys().get("conversation_id"));
+                yield AskStageResult.of("default", outs);
+            }
+            case "end" -> {
+                // 旧图兼容：归一化后极少出现；当作叶子出口
+                yield AskStageResult.of("default", Map.of());
+            }
+            case "knowledge" -> {
+                int topK = FlowVarRefs.asInt(inputs, "topK", AskKnowledgeService.DEFAULT_TOP_K);
+                yield askService.runKnowledge(nodeRequest, recorder, state, topK);
+            }
+            case "if_else" -> runIfElse(node, inputs, recorder);
+            case "ontology" -> {
+                AskStageResult result =
+                        askService.runOntology(nodeRequest, recorder, state, AskSkillIds.DEFAULT_ONTOLOGY);
+                state.markOntologyPrepared();
+                yield result;
+            }
+            case "metadata" -> {
+                AskStageResult result = askService.runMetadata(
+                        nodeRequest, recorder, state, FlowVarRefs.asBool(inputs, "recover", true));
+                state.markMetadataPrepared();
+                yield result;
+            }
+            case "insight", "llm_chat" ->
+                    // 上游只写池；最终 answer 必须由回答节点发出
+                    runResolvedLlm(node, nodeRequest, recorder, inputs, pool, state);
+            case "answer" -> runAnswerNode(node, inputs, pool, recorder);
+            case "builtin_ask" -> throw new IllegalArgumentException(
+                    "builtin_ask 已移除，请使用 knowledge/ontology/metadata/llm_chat 白盒图");
+            default -> throw new IllegalArgumentException("暂不支持的节点类型：" + node.type());
+        };
+    }
+
+    private static boolean isTerminalOutcome(String outcome) {
+        return "answered".equals(outcome)
+                || "clarify".equals(outcome)
+                || "error".equals(outcome)
+                || "default".equals(outcome)
+                || "true".equals(outcome)
+                || "false".equals(outcome)
+                || "continue".equals(outcome);
+    }
+
+    private static long elapsedMs(long startedAtNanos) {
+        return Math.max(0L, (System.nanoTime() - startedAtNanos) / 1_000_000L);
+    }
+
+    private static void emitNodeStart(AskListener listener, FlowNode node, Map<String, Object> inputs) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("nodeId", node.id());
         payload.put("title", node.title());
         payload.put("type", node.type());
+        payload.put("inputs", inputs == null ? Map.of() : inputs);
         listener.emit("node_start", payload);
     }
 
-    private static void emitNodeFinish(AskListener listener, FlowNode node, String outcome, String error) {
+    private static void emitNodeFinish(
+            AskListener listener,
+            FlowNode node,
+            String outcome,
+            String error,
+            long durationMs,
+            Map<String, Object> outputs) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("nodeId", node.id());
         payload.put("title", node.title());
         payload.put("type", node.type());
         payload.put("outcome", outcome == null ? "default" : outcome);
+        payload.put("durationMs", durationMs);
+        payload.put("outputs", outputs == null ? Map.of() : outputs);
         if (error != null && !error.isBlank()) {
             payload.put("error", error);
         }
         listener.emit("node_finish", payload);
     }
 
-    private AskStageResult runIfElse(
-            FlowNode node, Map<String, Object> inputs, FlowVariablePool pool, AskListener listener) {
+    private AskStageResult runIfElse(FlowNode node, Map<String, Object> inputs, AskListener listener) {
         AskStageResult result = evaluateIfElse(inputs);
         listener.emit(
                 "stage",
@@ -319,18 +254,95 @@ public class FlowRunner {
         return AskStageResult.of(ok ? "true" : "false", outputs);
     }
 
-    private static AskStageResult runAnswerNode(
-            Map<String, Object> inputs, FlowVariablePool pool, AskListener listener) {
-        String template = FlowVarRefs.asString(inputs, "text", "{{#sys.query#}}");
+    /**
+     * 回答节点：固定文案 + 上游变量拼接（DAG 对话出口）。缺失 / null 变量按空串拼入，不抛错、不中断。
+     * 文案取自 {@code config.inputs.text} 或顶层 {@code config.text}（二者等价）。
+     * 若模板引用的上游节点出参含 sql/rows/caliber 等，一并并入最终 answer 事件。
+     */
+    static AskStageResult runAnswerNode(
+            FlowNode node, Map<String, Object> inputs, FlowVariablePool pool, AskListener listener) {
+        String template = answerTextTemplate(node, inputs);
         String text = FlowVarRefs.interpolate(template, pool);
+        if (text == null) {
+            text = "";
+        }
         listener.emit("stage", Map.of("name", "answer", "message", "直接输出回答"));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("answer", text);
-        payload.put("sql", null);
-        payload.put("caliber", List.of());
-        payload.put("steps", List.of(Map.of("agent", "answer")));
+        enrichAnswerFromUpstream(payload, template, pool);
+        payload.putIfAbsent("sql", null);
+        payload.putIfAbsent("caliber", List.of());
+        payload.putIfAbsent("steps", List.of(Map.of("agent", "answer")));
         listener.emit("answer", payload);
-        return AskStageResult.of("default", Map.of("answer", text));
+        Map<String, Object> outputs = new LinkedHashMap<>();
+        outputs.put("answer", text);
+        copyIfPresent(outputs, payload, "sql");
+        copyIfPresent(outputs, payload, "rows");
+        copyIfPresent(outputs, payload, "columns");
+        copyIfPresent(outputs, payload, "rowCount");
+        copyIfPresent(outputs, payload, "caliber");
+        return AskStageResult.of("default", outputs);
+    }
+
+    /** 从模板里出现的 {@code {{#节点名.字段#}}} 合并上游富字段（sql/rows 等）。 */
+    static void enrichAnswerFromUpstream(Map<String, Object> payload, String template, FlowVariablePool pool) {
+        if (payload == null || pool == null || template == null || template.isEmpty()) {
+            return;
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\{\\{#([^.}]+)(\\.[^#]+)?#\\}\\}")
+                .matcher(template);
+        java.util.LinkedHashSet<String> titles = new java.util.LinkedHashSet<>();
+        while (matcher.find()) {
+            String title = matcher.group(1);
+            if (title != null && !title.isBlank() && !"sys".equals(title)) {
+                titles.add(title.strip());
+            }
+        }
+        for (String title : titles) {
+            Map<String, Object> ups = pool.node(title);
+            if (ups == null || ups.isEmpty()) {
+                continue;
+            }
+            copyIfAbsent(payload, ups, "sql");
+            copyIfAbsent(payload, ups, "rows");
+            copyIfAbsent(payload, ups, "columns");
+            copyIfAbsent(payload, ups, "rowCount");
+            copyIfAbsent(payload, ups, "caliber");
+            copyIfAbsent(payload, ups, "steps");
+            copyIfAbsent(payload, ups, "knowledgeId");
+            copyIfAbsent(payload, ups, "canAnswer");
+        }
+    }
+
+    private static void copyIfPresent(Map<String, Object> target, Map<String, Object> source, String key) {
+        if (source != null && source.get(key) != null) {
+            target.put(key, source.get(key));
+        }
+    }
+
+    /**
+     * 读取用户配置的回答模板。优先未解析的原始模板，避免纯 {@code {{#missing#}}} 被
+     * resolveInputs 收成 null 后误回退到 sys.query。
+     */
+    @SuppressWarnings("unchecked")
+    static String answerTextTemplate(FlowNode node, Map<String, Object> inputs) {
+        Object raw = null;
+        if (node != null && node.config() != null) {
+            Object nested = node.config().get("inputs");
+            if (nested instanceof Map<?, ?> map && map.get("text") != null) {
+                raw = map.get("text");
+            }
+            if (raw == null) {
+                raw = node.config().get("text");
+            }
+        }
+        if (raw == null && inputs != null && inputs.get("text") != null) {
+            raw = inputs.get("text");
+        }
+        if (raw == null) {
+            return "{{#sys.query#}}";
+        }
+        return String.valueOf(raw);
     }
 
     /**
@@ -361,6 +373,7 @@ public class FlowRunner {
             llmWindow = number.intValue();
         }
         AskRequest forLlm = llmWindow >= 0 ? trimHistory(withQuery, llmWindow) : withQuery;
+        // 正式问数与预览共用：永不在此抢发最终 answer，一律交给回答节点
         if (skillSet.contains(AskSkillIds.SQL) || insightAlias) {
             ensureInsightContext(forLlm, listener, state);
             return askService.runInsight(
@@ -368,9 +381,10 @@ public class FlowRunner {
                     listener,
                     state,
                     insightAlias && skillSet.isEmpty() ? AskSkillIds.DEFAULT_INSIGHT : skillSet,
-                    system);
+                    system,
+                    false);
         }
-        return askService.runLlmChat(forLlm, listener, system, skillSet, knowledgeTools);
+        return askService.runLlmChat(forLlm, listener, system, skillSet, knowledgeTools, false);
     }
 
     /** 缺本体/元数据且上游未跑过对应节点时补跑，使单独的「大模型+SQL」也能执行。 */
@@ -418,11 +432,16 @@ public class FlowRunner {
         copyIfAbsent(configured, node.config(), "left");
         copyIfAbsent(configured, node.config(), "op");
         copyIfAbsent(configured, node.config(), "right");
+        // answer 模板：顶层 config.text 与 inputs.text 等价（调色板新建曾只写顶层）
+        copyIfAbsent(configured, node.config(), "text");
         return FlowVarRefs.resolveInputs(spec.defaultInputs(), configured, pool);
     }
 
     private static void copyIfAbsent(Map<String, Object> target, Map<String, Object> source, String key) {
-        if (!target.containsKey(key) && source.containsKey(key)) {
+        if (target == null || source == null || key == null || target.containsKey(key)) {
+            return;
+        }
+        if (source.containsKey(key) && source.get(key) != null) {
             target.put(key, source.get(key));
         }
     }

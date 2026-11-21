@@ -36,6 +36,22 @@ class FlowVarRefsTest {
     }
 
     @Test
+    void interpolateTreatsNullAndMissingAsEmpty() {
+        FlowVariablePool pool = FlowVariablePool.fromRequest(new AskRequest("q", List.of()), "alice");
+        pool.putNode("n", new java.util.HashMap<>() {
+            {
+                put("ok", "X");
+                put("nil", null);
+            }
+        });
+        assertEquals(
+                "X||",
+                FlowVarRefs.interpolate("{{#n.ok#}}|{{#n.nil#}}|{{#n.missing#}}", pool));
+        assertEquals("", FlowVarRefs.interpolate("{{#gone.field#}}", pool));
+        assertEquals("", FlowVarRefs.stringify(null));
+    }
+
+    @Test
     void interpolatesKnowledgeResultArrayAsJson() {
         FlowVariablePool pool = FlowVariablePool.fromRequest(new AskRequest("高危告警多少", List.of()), "alice");
         pool.putNode(

@@ -17,12 +17,13 @@
 ## P0/P1 行为
 
 1. 请求体可带 `graph`（当前画布）；缺省读应用绑定流程的草稿图。
-2. SSE 对齐 `/ask`，额外：
+2. SSE 对齐 `/ask`（正式问数同源 walker），额外：
    - `run.preview=true`
-   - `node_start` / `node_finish`（含 `nodeId`/`title`/`type`/`outcome`）
-   - `start` 也发 `vars`
+   - `node_start`：`nodeId` / `title` / `type` / **`inputs`（解析后入参）**
+   - `node_finish`：`outcome` / **`durationMs`** / **`outputs`** / 可选 `error`
+   - 每节点 `vars`（变量池路径）
 3. 预览 **不写入** `fed_ask_run`（避免污染广场/历史）。
-4. UI：画布旁预览对话；节点 `running/ok/error`；选中节点展示最近 outputs。
+4. UI：画布旁预览对话；节点 `running/ok/error`；节点运行列表；选中节点展示入参/出参/耗时。
 
 ## API
 

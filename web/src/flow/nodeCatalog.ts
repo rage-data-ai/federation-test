@@ -54,16 +54,22 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
   },
   {
     type: 'answer',
-    title: '直接回答',
-    description: '模板输出最终回答（支持变量插值）',
+    title: '回答',
+    description: '固定文案 + 上游变量拼接；可添加多个（对齐 Dify Answer）',
     addable: true,
     color: '#9ec5fe'
-  },
-  { type: 'end', title: '结束', description: '流程出口', addable: true, color: '#adb5bd' }
+  }
 ]
 
 /** 旧图仍可能出现；仅用于标题/颜色回显，不进调色板。 */
 const LEGACY_NODES: Record<string, NodeCatalogItem> = {
+  end: {
+    type: 'end',
+    title: '结束（已移除）',
+    description: 'ChatFlow 无结束节点；加载时会自动去掉',
+    addable: false,
+    color: '#adb5bd'
+  },
   insight: {
     type: 'insight',
     title: 'SQL 洞察',
@@ -106,8 +112,7 @@ const EDGE_WHEN_BY_SOURCE: Record<string, EdgeWhenValue[]> = {
   answer: ['default'],
   knowledge: ['default'],
   start: ['default'],
-  builtin_ask: ['default'],
-  end: ['default']
+  builtin_ask: ['default']
 }
 
 export function edgeWhenMeta(when: string): (typeof EDGE_WHEN_OPTIONS)[number] {

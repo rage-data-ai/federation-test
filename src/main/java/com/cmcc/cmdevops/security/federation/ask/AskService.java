@@ -489,6 +489,19 @@ public class AskService {
             AskFlowState state,
             Iterable<String> skills,
             String systemPromptText) {
+        return runInsight(request, listener, state, skills, systemPromptText, true);
+    }
+
+    /**
+     * @param emitFinalAnswer false 时只写节点出参（供 DAG 下游回答节点拼接），由编排决定是否发最终 answer
+     */
+    public AskStageResult runInsight(
+            AskRequest request,
+            AskListener listener,
+            AskFlowState state,
+            Iterable<String> skills,
+            String systemPromptText,
+            boolean emitFinalAnswer) {
         Set<String> skillSet = AskSkillIds.normalize(skills, AskSkillIds.DEFAULT_INSIGHT);
         BusinessContext context = state.context();
         MetadataReport report = state.report();
@@ -544,11 +557,14 @@ public class AskService {
             answer.put("rowCount", result.rowCount());
             rowCount = result.rowCount();
         }
-        listener.emit("answer", answer);
-        Map<String, Object> outputs = new LinkedHashMap<>();
+        // 出参完整写入变量池，供下游回答节点自由拼接；是否对外 emit 由 DAG 决定
+        Map<String, Object> outputs = new LinkedHashMap<>(answer);
         outputs.put("answer", reply.answer() == null ? "" : reply.answer());
         outputs.put("sql", reply.sql() == null ? "" : reply.sql());
         outputs.put("rowCount", rowCount);
+        if (emitFinalAnswer) {
+            listener.emit("answer", answer);
+        }
         return AskStageResult.of("answered", outputs);
     }
 
@@ -562,6 +578,19 @@ public class AskService {
             String systemPromptText,
             Iterable<String> skills,
             KnowledgeTools knowledgeTools) {
+        return runLlmChat(request, listener, systemPromptText, skills, knowledgeTools, true);
+    }
+
+    /**
+     * @param emitFinalAnswer false 时只写节点出参；由编排在叶子或回答节点再发最终 answer
+     */
+    public AskStageResult runLlmChat(
+            AskRequest request,
+            AskListener listener,
+            String systemPromptText,
+            Iterable<String> skills,
+            KnowledgeTools knowledgeTools,
+            boolean emitFinalAnswer) {
         Set<String> skillSet = AskSkillIds.normalize(skills, AskSkillIds.DEFAULT_LLM_CHAT);
         Map<String, Object> llmStage = new LinkedHashMap<>();
         llmStage.put("name", "llm");
@@ -613,13 +642,13 @@ public class AskService {
             listener.emit("clarify", clarified);
             payload.put("clarify", clarifyPayload(clarified));
             payload.put("answer", outputs.get("answer"));
-        } else if (!Boolean.FALSE.equals(outputs.get("canAnswer"))) {
-            // canAnswer=false：仅写出变量供 if_else，不发最终 answer（避免抢答后续本体/SQL）
-            listener.emit("answer", payload);
-        } else {
+        } else if (Boolean.FALSE.equals(outputs.get("canAnswer"))) {
+            // canAnswer=false：仅写出变量供 if_else，不发最终 answer
             listener.emit(
                     "stage",
                     Map.of("name", "llm", "message", "判定不能直接作答", "canAnswer", false));
+        } else if (emitFinalAnswer) {
+            listener.emit("answer", payload);
         }
         return AskStageResult.of(clarified != null ? "clarify" : "default", outputs);
     }

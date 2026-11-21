@@ -30,6 +30,19 @@ export type AskStage = {
   [key: string]: unknown
 }
 
+/** 单节点一次运行的详情（node_start / node_finish SSE）。 */
+export type AskNodeRun = {
+  nodeId: string
+  title: string
+  type: string
+  status: 'running' | 'ok' | 'error'
+  outcome?: string
+  durationMs?: number
+  error?: string
+  inputs: Record<string, unknown>
+  outputs: Record<string, unknown>
+}
+
 export type AskTurn = {
   question: string
   /** 网关给这次问数的记录号；流一开始就下发，评价和建议靠它指回这次问数。 */
@@ -48,6 +61,8 @@ export type AskTurn = {
   clarify: Record<string, unknown> | null
   /** ChatFlow 变量池快照（vars SSE）。 */
   vars: Array<{ nodeId: string; outputs: Record<string, unknown>; paths: string[] }>
+  /** DAG 节点运行详情（预览与正式问数同源）。 */
+  nodeRuns: AskNodeRun[]
   error: string
   done: boolean
   showTrace: boolean
@@ -84,6 +99,7 @@ export function emptyTurn(question: string): AskTurn {
     answer: null,
     clarify: null,
     vars: [],
+    nodeRuns: [],
     error: '',
     done: false,
     showTrace: true
@@ -214,6 +230,77 @@ export function applyEvent(turn: AskTurn, name: string, data: unknown): void {
         ? payload.paths.filter((item): item is string => typeof item === 'string')
         : []
       turn.vars = [...(turn.vars || []), { nodeId, outputs, paths }]
+      if (nodeId) {
+        const runs = [...(turn.nodeRuns || [])]
+        const idx = runs.findIndex((run) => run.nodeId === nodeId && run.status === 'running')
+        if (idx >= 0) {
+          runs[idx] = { ...runs[idx], outputs }
+          turn.nodeRuns = runs
+        }
+      }
+      break
+    }
+    case 'node_start': {
+      const nodeId = typeof payload.nodeId === 'string' ? payload.nodeId : ''
+      if (!nodeId) {
+        break
+      }
+      const run: AskNodeRun = {
+        nodeId,
+        title: typeof payload.title === 'string' ? payload.title : nodeId,
+        type: typeof payload.type === 'string' ? payload.type : '',
+        status: 'running',
+        inputs: asRecord(payload.inputs),
+        outputs: {}
+      }
+      turn.nodeRuns = [...(turn.nodeRuns || []), run]
+      break
+    }
+    case 'node_finish': {
+      const nodeId = typeof payload.nodeId === 'string' ? payload.nodeId : ''
+      if (!nodeId) {
+        break
+      }
+      const outcome = typeof payload.outcome === 'string' ? payload.outcome : 'default'
+      const error = typeof payload.error === 'string' ? payload.error : undefined
+      const durationMs =
+        typeof payload.durationMs === 'number'
+          ? payload.durationMs
+          : typeof payload.durationMs === 'string'
+            ? Number(payload.durationMs)
+            : undefined
+      const outputs = asRecord(payload.outputs)
+      const runs = [...(turn.nodeRuns || [])]
+      const idx = [...runs]
+        .map((run, i) => ({ run, i }))
+        .reverse()
+        .find(({ run }) => run.nodeId === nodeId)?.i
+      if (idx != null && idx >= 0) {
+        runs[idx] = {
+          ...runs[idx],
+          status: error || outcome === 'error' ? 'error' : 'ok',
+          outcome,
+          error,
+          durationMs: Number.isFinite(durationMs) ? durationMs : runs[idx].durationMs,
+          outputs: Object.keys(outputs).length ? outputs : runs[idx].outputs
+        }
+        turn.nodeRuns = runs
+      } else {
+        turn.nodeRuns = [
+          ...(turn.nodeRuns || []),
+          {
+            nodeId,
+            title: typeof payload.title === 'string' ? payload.title : nodeId,
+            type: typeof payload.type === 'string' ? payload.type : '',
+            status: error || outcome === 'error' ? 'error' : 'ok',
+            outcome,
+            error,
+            durationMs: Number.isFinite(durationMs) ? durationMs : undefined,
+            inputs: {},
+            outputs
+          }
+        ]
+      }
       break
     }
     case 'error':

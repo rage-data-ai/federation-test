@@ -322,7 +322,14 @@ function defaultConfig(type: string): Record<string, unknown> {
     }
   }
   if (type === 'answer') {
-    return { ...base, text: '{{#sys.query#}}' }
+    // 只写 inputs.text（与后端 resolveNodeInputs / answerTextTemplate 一致）
+    return {
+      inputs: {
+        ...ports.defaultInputs,
+        text: String(ports.defaultInputs.text || '{{#sys.query#}}')
+      },
+      text: String(ports.defaultInputs.text || '{{#sys.query#}}')
+    }
   }
   if (type === 'start') {
     return { memoryWindowTurns: 12 }

@@ -152,13 +152,14 @@ public class AppService {
         if (flowVersionId == null || flowVersionId.isBlank()) {
             FlowDraft flow = store.findFlow(app.flowId())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "流程不存在：" + app.flowId()));
-            flow.graph().validate();
+            FlowGraph graph = FlowGraphMigrations.normalize(flow.graph());
+            graph.validate();
             int next = store.latestFlowVersion(flow.id()).map(v -> v.version() + 1).orElse(1);
             version = new FlowVersion(
                     "fv-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16),
                     flow.id(),
                     next,
-                    flow.graph(),
+                    graph,
                     GatewayUser.current().name(),
                     System.currentTimeMillis());
             store.saveFlowVersion(version);
@@ -198,7 +199,8 @@ public class AppService {
         }
         AppRelease release = store.findAppRelease(app.currentReleaseId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "应用发布记录缺失：" + id));
-        return new PublishedApp(app.id(), app.name(), release.id(), release.flowVersionId(), release.graph());
+        FlowGraph graph = FlowGraphMigrations.normalize(release.graph());
+        return new PublishedApp(app.id(), app.name(), release.id(), release.flowVersionId(), graph);
     }
 
     /**
@@ -224,6 +226,7 @@ public class AppService {
         if (graph == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "预览图为空");
         }
+        graph = FlowGraphMigrations.normalize(graph);
         graph.validate();
         FlowRunner.assertCompatibleAskNodes(graph);
         return new PublishedApp(app.id(), app.name(), 0L, "preview", graph);

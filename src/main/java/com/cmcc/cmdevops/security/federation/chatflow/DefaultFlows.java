@@ -17,7 +17,7 @@ public final class DefaultFlows {
     public static final String DEFAULT_FLOW_ID = "flow-builtin-ask";
 
     /** 内置问数图修订号；迁移器据此强制升级。 */
-    public static final int BUILTIN_ASK_REVISION = 18;
+    public static final int BUILTIN_ASK_REVISION = 22;
 
     /** 大模型+SQL：只引用上游本体 / 元数据出参（运行时再叠内置 SQL 规则）。 */
     public static final String SQL_LLM_PROMPT = """
@@ -54,14 +54,15 @@ public final class DefaultFlows {
     }
 
     /**
-     * 智能问数：检索 → llm_chat（提示词约定 JSON/canAnswer）→ if_else 分流 → 本体/元数据/SQL 或结束。
-     * 知识可答即停；本体澄清仍走元数据（仍 emit clarify）；元数据出错即停。
+     * 智能问数默认 DAG（模板名仍叫 builtin_ask，已无黑盒 builtin_ask 节点）：
+     * 上游只写变量池；对话出口用回答节点自由拼接（对齐 Dify Answer）。
+     * ChatFlow 无结束节点。
      *
      * <pre>
      * start → knowledge → llm_kb → if_kb
-     *                                  ├─true  → end（判定节点已发 answer）
-     *                                  └─false → ontology → metadata ─error→ end
-     *                                                          └─default→ llm(sql) → end
+     *                                  ├─true  → answer_kb
+     *                                  └─false → ontology → metadata ─error→（叶子）
+     *                                                          └─default→ llm(sql) → answer_sql
      * </pre>
      */
     public static FlowGraph builtinAsk() {
@@ -181,19 +182,44 @@ public final class DefaultFlows {
                                                 SQL_LLM_PROMPT,
                                                 "skills",
                                                 List.of("sql", "preference")))),
-                        new FlowNode("end", "end", "结束", Map.of("x", 900, "y", 60))),
+                        new FlowNode(
+                                "answer_kb",
+                                "answer",
+                                "知识回答",
+                                Map.of(
+                                        "x",
+                                        880,
+                                        "y",
+                                        40,
+                                        "text",
+                                        "{{#知识判定.answer#}}",
+                                        "inputs",
+                                        Map.of("text", "{{#知识判定.answer#}}"))),
+                        new FlowNode(
+                                "answer_sql",
+                                "answer",
+                                "回答",
+                                Map.of(
+                                        "x",
+                                        1560,
+                                        "y",
+                                        260,
+                                        "text",
+                                        "{{#大模型对话.answer#}}",
+                                        "inputs",
+                                        Map.of("text", "{{#大模型对话.answer#}}")))),
                 List.of(
                         new FlowEdge("start", "knowledge", "default"),
                         new FlowEdge("knowledge", "llm_kb", "default"),
                         new FlowEdge("llm_kb", "if_kb", "default"),
-                        new FlowEdge("if_kb", "end", "true"),
+                        new FlowEdge("if_kb", "answer_kb", "true"),
                         new FlowEdge("if_kb", "ontology", "false"),
                         new FlowEdge("if_kb", "ontology", "default"),
-                        // 本体澄清≡默认：仍 emit clarify，继续元数据；元数据出错再停
+                        // 本体澄清≡默认：仍 emit clarify，继续元数据；元数据出错再停（叶子）
                         new FlowEdge("ontology", "metadata", "default"),
-                        new FlowEdge("metadata", "end", "error"),
                         new FlowEdge("metadata", "llm", "default"),
-                        new FlowEdge("llm", "end", "default")));
+                        new FlowEdge("llm", "answer_sql", "default"),
+                        new FlowEdge("llm", "answer_sql", "answered")));
     }
 
     public static FlowGraph llmChat() {
@@ -224,10 +250,22 @@ public final class DefaultFlows {
                                                 "你是跨源联邦查询控制台里的对话助手。用简洁中文回答；不确定时说明假设。",
                                                 "skills",
                                                 List.of()))),
-                        new FlowNode("end", "end", "结束", Map.of("x", 500, "y", 120))),
+                        new FlowNode(
+                                "answer",
+                                "answer",
+                                "回答",
+                                Map.of(
+                                        "x",
+                                        500,
+                                        "y",
+                                        120,
+                                        "text",
+                                        "{{#大模型对话.answer#}}",
+                                        "inputs",
+                                        Map.of("text", "{{#大模型对话.answer#}}")))),
                 List.of(
                         new FlowEdge("start", "chat", "default"),
-                        new FlowEdge("chat", "end", "default")));
+                        new FlowEdge("chat", "answer", "default")));
     }
 
     public static FlowGraph template(String name) {
@@ -272,6 +310,15 @@ public final class DefaultFlows {
         Object rev = graph.node(graph.startNodeId()).config().get("builtinAskRevision");
         int current = rev instanceof Number number ? number.intValue() : 0;
         if (current < BUILTIN_ASK_REVISION) {
+            return true;
+        }
+        if (graph.nodes().stream().anyMatch(node -> "end".equals(node.type()))) {
+            return true;
+        }
+        // rev21：对话出口用回答节点；缺 answer_kb / answer_sql 则升级
+        boolean hasAnswerKb = graph.nodes().stream().anyMatch(node -> "answer_kb".equals(node.id()));
+        boolean hasAnswerSql = graph.nodes().stream().anyMatch(node -> "answer_sql".equals(node.id()));
+        if (!hasAnswerKb || !hasAnswerSql) {
             return true;
         }
         boolean hasLlmChat = graph.nodes().stream().anyMatch(node -> "llm_chat".equals(node.type()));

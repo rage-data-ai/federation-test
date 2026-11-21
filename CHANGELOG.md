@@ -19,6 +19,10 @@
 
 ### Changed
 
+- ChatFlow 自由组装 DAG：`FlowRunner` 合并为单一 walker（取消 simple/whitebox 分叉）；任意合法边连接的节点图共用一次 beginRun；`node_start` 带解析入参、`node_finish` 带耗时与出参；预览抽屉与正式问数过程均展示节点运行详情
+- ChatFlow 对齐 Dify：去掉可添加的「结束」节点；旧图 `end` 加载/发布时自动剥离（无回复出口时转为 `answer`）
+- DAG 编排：正式问数与预览共用 `FlowRunner`；`llm_chat`/insight 只写变量池；最终 `answer` 必须经回答节点；图校验要求至少一个 answer；默认智能问数 rev 22 为 `answer_kb` / `answer_sql`
+- 回答节点：`config.text` 与 `config.inputs.text` 互通；模板里 `null`/缺失变量按空串拼接，不抛错（预览与正式问答一致）
 - 默认智能问数 DAG（rev 18）：本体澄清继续元数据，元数据出错再停；删除黑盒 `AskService.ask` / `builtin_ask` 节点（仅保留 migrator 升级旧图）
 - 知识库 Milvus 字段扩展为 `dense_vector`（←question）/`sparse_vector`/`answer`（问答对）/`year`/`version`；MySQL `answer` 与之同构；智能问数与召回测试优先用这些字段
 - Compose 拆成两套：`docker-compose.yml` 全家桶（含 Milvus + 网关/控制台），`docker-compose.deps.yml` 仅依赖供本机跑后端/前端

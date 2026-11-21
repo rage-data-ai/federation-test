@@ -8,12 +8,12 @@
 
 ```text
 start → 知识库 → 知识判定(llm_chat) → 能否用知识作答(canAnswer==true)
-                                         ├─是 → end（判定节点已发 answer）
-                                         └─否 → 本体 → 元数据 ─出错→ end
-                                                      └─默认→ 大模型(sql) → end
+                                         ├─是 → 知识回答(answer)
+                                         └─否 → 本体 → 元数据 ─出错→（叶子）
+                                                      └─默认→ 大模型(sql) → 回答(answer)
 ```
 
-`continue` 等同 `default`；本体澄清仍 `emit clarify`，默认图沿默认边继续元数据（可自定义 clarify 边）。元数据出错即停；大模型澄清且无 clarify 边时回落默认边到结束。
+ChatFlow **无结束节点**（对齐 Dify）：校验要求至少有一个**回答节点**；`llm_chat`/insight **只写变量池**，最终 `answer` SSE **仅由回答节点**发出（可并入上游 sql/rows）。正式问数与编排预览共用同一套 `FlowRunner` DAG。旧图含 `end` 且无回答节点时，会把 end 转为 answer。
 
 1. **知识库**：只检索，写出唯一出参 `result`（`Array[Object]`）
 2. **知识判定**：普通 `llm_chat`；提示词插入 `{{#知识库.result#}}`，并约定模型输出含 `canAnswer` 的 JSON
@@ -55,10 +55,17 @@ start → 知识库 → 知识判定(llm_chat) → 能否用知识作答(canAnsw
 | `version` | String | 知识版本 |
 | `sourceRunId` | String | 来源问数 run |
 
+## 回答节点（`answer`）
+
+- 模板取自 `config.inputs.text` 或顶层 `config.text`（二者等价，读写时会互相同步）。
+- 支持固定文案 + `{{#上游.字段#}}` 自由拼接；可添加多个回答节点。
+- **空值安全**：引用的上游变量为 `null`、缺失或 `undefined` 时按**空字符串**拼入，不抛错、不中断、不显示错误（预览与正式问答相同）。
+
 ## 节点端口（摘要）
 
 | type | 关键 outputs |
 |---|---|
 | `knowledge` | `result` Array[Object] |
 | `llm_chat` | `answer`（JSON 其它字段运行时动态写入） |
+| `answer` | `answer`（模板插值后的最终回复） |
 | `if_else` | `outcome`=`true`/`false`, `result` |

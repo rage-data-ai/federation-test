@@ -24,12 +24,24 @@ type PreviewLine =
   | { kind: 'system'; text: string }
   | { kind: 'error'; text: string }
 
+type NodeDetail = {
+  nodeId: string
+  title: string
+  type: string
+  status: NodeRunStatus
+  outcome?: string
+  durationMs?: number
+  error?: string
+  inputs: Record<string, unknown>
+  outputs: Record<string, unknown>
+}
+
 const question = ref('')
 const busy = ref(false)
 const lines = ref<PreviewLine[]>([])
 const nodeStatuses = ref<Record<string, NodeRunStatus>>({})
 const activeEdges = ref<string[]>([])
-const selectedOutputs = ref<Record<string, Record<string, unknown>>>({})
+const nodeDetails = ref<Record<string, NodeDetail>>({})
 const inspectNodeId = ref('')
 const abort = ref<AbortController | null>(null)
 /** 上一完成节点，用于边高亮：finish → 下一 start */
@@ -49,9 +61,34 @@ const inspectJson = computed(() => {
   if (!id) {
     return ''
   }
-  const outs = selectedOutputs.value[id]
-  return outs ? JSON.stringify(outs, null, 2) : '（该节点尚无出参）'
+  const detail = nodeDetails.value[id]
+  if (!detail) {
+    return '（该节点尚无运行详情）'
+  }
+  return JSON.stringify(
+    {
+      nodeId: detail.nodeId,
+      title: detail.title,
+      type: detail.type,
+      status: detail.status,
+      outcome: detail.outcome,
+      durationMs: detail.durationMs,
+      error: detail.error,
+      inputs: detail.inputs,
+      outputs: detail.outputs
+    },
+    null,
+    2
+  )
 })
+
+const runOrder = computed(() =>
+  Object.values(nodeDetails.value).sort((a, b) => {
+    const ai = (props.graph.nodes || []).findIndex((n) => n.id === a.nodeId)
+    const bi = (props.graph.nodes || []).findIndex((n) => n.id === b.nodeId)
+    return ai - bi
+  })
+)
 
 function setStatuses(next: Record<string, NodeRunStatus>) {
   nodeStatuses.value = next
@@ -66,6 +103,7 @@ function resetStatuses() {
   setStatuses(blank)
   lastFinish = null
   setActiveEdges([])
+  nodeDetails.value = {}
 }
 
 function stop() {
@@ -81,7 +119,6 @@ async function send() {
   }
   stop()
   resetStatuses()
-  selectedOutputs.value = {}
   lines.value = [...lines.value, { kind: 'user', text: q }]
   question.value = ''
   busy.value = true
@@ -105,6 +142,23 @@ async function send() {
           if (id) {
             statuses[id] = 'running'
             setStatuses({ ...statuses })
+            nodeDetails.value = {
+              ...nodeDetails.value,
+              [id]: {
+                nodeId: id,
+                title: String(payload.title || id),
+                type: String(payload.type || ''),
+                status: 'running',
+                inputs:
+                  payload.inputs && typeof payload.inputs === 'object'
+                    ? (payload.inputs as Record<string, unknown>)
+                    : {},
+                outputs: {}
+              }
+            }
+            if (!inspectNodeId.value) {
+              inspectNodeId.value = id
+            }
             if (lastFinish) {
               const when = lastFinish.outcome || 'default'
               const match = (props.graph.edges || []).find(
@@ -129,9 +183,35 @@ async function send() {
           const id = String(payload.nodeId || '')
           if (id) {
             const outcome = String(payload.outcome || 'default')
-            statuses[id] = payload.error || outcome === 'error' ? 'error' : 'ok'
+            const status: NodeRunStatus =
+              payload.error || outcome === 'error' ? 'error' : 'ok'
+            statuses[id] = status
             setStatuses({ ...statuses })
             lastFinish = { nodeId: id, outcome }
+            const prev = nodeDetails.value[id]
+            const outputs =
+              payload.outputs && typeof payload.outputs === 'object'
+                ? (payload.outputs as Record<string, unknown>)
+                : prev?.outputs || {}
+            nodeDetails.value = {
+              ...nodeDetails.value,
+              [id]: {
+                nodeId: id,
+                title: String(payload.title || prev?.title || id),
+                type: String(payload.type || prev?.type || ''),
+                status,
+                outcome,
+                durationMs:
+                  typeof payload.durationMs === 'number'
+                    ? payload.durationMs
+                    : Number(payload.durationMs) || undefined,
+                error: payload.error ? String(payload.error) : undefined,
+                inputs: prev?.inputs || {},
+                outputs
+              }
+            }
+            emit('node-outputs', { nodeId: id, outputs })
+            inspectNodeId.value = id
           }
         } else if (event === 'vars') {
           const id = String(payload.nodeId || '')
@@ -140,7 +220,13 @@ async function send() {
               ? (payload.outputs as Record<string, unknown>)
               : {}
           if (id) {
-            selectedOutputs.value = { ...selectedOutputs.value, [id]: outputs }
+            const prev = nodeDetails.value[id]
+            if (prev) {
+              nodeDetails.value = {
+                ...nodeDetails.value,
+                [id]: { ...prev, outputs }
+              }
+            }
             emit('node-outputs', { nodeId: id, outputs })
             if (!inspectNodeId.value) {
               inspectNodeId.value = id
@@ -203,10 +289,29 @@ defineExpose({ inspect, resetStatuses, stop })
       <p v-if="busy" class="hint">运行中…</p>
     </div>
 
+    <div v-if="runOrder.length" class="runs" aria-label="节点运行列表">
+      <p class="runs-label">节点运行</p>
+      <button
+        v-for="run in runOrder"
+        :key="run.nodeId"
+        type="button"
+        class="run-chip"
+        :class="[run.status, { active: inspectNodeId === run.nodeId }]"
+        @click="inspect(run.nodeId)"
+      >
+        <span class="run-title">{{ run.title || run.nodeId }}</span>
+        <span class="run-meta">
+          {{ run.status }}
+          <template v-if="run.outcome"> · {{ run.outcome }}</template>
+          <template v-if="run.durationMs != null"> · {{ run.durationMs }}ms</template>
+        </span>
+      </button>
+    </div>
+
     <div class="inspect">
       <label>
-        节点出参
-        <select v-model="inspectNodeId" aria-label="选择节点查出参">
+        节点详情（入参 / 出参 / 耗时）
+        <select v-model="inspectNodeId" aria-label="选择节点查详情">
           <option value="">选择节点</option>
           <option v-for="node in graph.nodes" :key="node.id" :value="node.id">
             {{ node.title || node.id }}
@@ -304,6 +409,57 @@ defineExpose({ inspect, resetStatuses, stop })
   text-align: center;
 }
 
+.runs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.runs-label {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.run-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2, var(--bg));
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.run-chip.active {
+  border-color: var(--accent);
+}
+
+.run-chip.running {
+  border-color: var(--accent);
+}
+
+.run-chip.error {
+  border-color: var(--err, #c44);
+}
+
+.run-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.run-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .inspect {
   display: flex;
   flex-direction: column;
@@ -328,7 +484,7 @@ defineExpose({ inspect, resetStatuses, stop })
 
 .outs {
   margin: 0;
-  max-height: 140px;
+  max-height: 160px;
   overflow: auto;
   padding: 8px;
   border-radius: 6px;
