@@ -81,6 +81,7 @@ public class FlowRunner {
         AskFlowState state = new AskFlowState();
         String nodeId = graph.startNodeId();
         String lastOutcome = "default";
+        boolean emittedUserExit = false;
         try {
             for (int hop = 0; hop < MAX_HOPS && nodeId != null; hop++) {
                 FlowNode node = graph.node(nodeId);
@@ -97,16 +98,38 @@ public class FlowRunner {
                 }
                 if ("end".equals(node.type())) {
                     emitNodeFinish(listener, node, "default", null, elapsedMs(startedAt), Map.of());
+                    if (!emittedUserExit) {
+                        listener.emit("error", Map.of("message", "流程结束但未发出回答（缺少回答节点出口）"));
+                    }
                     return;
                 }
+                if ("answer".equals(node.type())) {
+                    emittedUserExit = true;
+                }
                 lastOutcome = result.outcome();
+                if ("clarify".equals(lastOutcome) || "answered".equals(lastOutcome)) {
+                    // clarify/answered 可能由 llm 直接发出；仍要求最终经 answer，但至少不算静默
+                    if ("clarify".equals(lastOutcome)) {
+                        emittedUserExit = true;
+                    }
+                }
                 Map<String, Object> outputs = result.outputs() == null ? Map.of() : result.outputs();
                 pool.putNode(node, outputs);
                 emitVars(listener, node.id(), outputs, pool);
                 emitNodeFinish(listener, node, lastOutcome, null, elapsedMs(startedAt), outputs);
                 String next = graph.next(nodeId, lastOutcome);
                 if (next == null) {
-                    if (!isTerminalOutcome(lastOutcome)) {
+                    if (!emittedUserExit) {
+                        listener.emit(
+                                "error",
+                                Map.of(
+                                        "message",
+                                        "流程在节点 "
+                                                + nodeId
+                                                + " 结束后未发出回答（outcome="
+                                                + lastOutcome
+                                                + "），请将边接到回答节点"));
+                    } else if (!isTerminalOutcome(lastOutcome)) {
                         listener.emit(
                                 "error",
                                 Map.of(
@@ -118,6 +141,7 @@ public class FlowRunner {
                 nodeId = next;
             }
             log.warn("流程跳转超过 {} 次，已停止 appId={}", MAX_HOPS, appId);
+            listener.emit("error", Map.of("message", "流程跳转超过上限，已停止"));
         } catch (RuntimeException e) {
             if (preview) {
                 askService.failAndDiscard(recorder, e);

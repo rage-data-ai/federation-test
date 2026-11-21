@@ -2,6 +2,7 @@ package com.cmcc.cmdevops.security.federation.api;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +23,7 @@ import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient.Settings;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
+import com.cmcc.cmdevops.security.federation.security.QuotaService;
 import com.cmcc.cmdevops.security.federation.security.RequireRole;
 
 @RestController
@@ -35,16 +37,19 @@ public class AskController {
     private final ChatflowRuntime chatflowRuntime;
     private final LlmClient llmClient;
     private final AskEmbedSettings embedSettings;
+    private final QuotaService quotaService;
 
     public AskController(
             AskService askService,
             ChatflowRuntime chatflowRuntime,
             LlmClient llmClient,
-            AskEmbedSettings embedSettings) {
+            AskEmbedSettings embedSettings,
+            QuotaService quotaService) {
         this.askService = askService;
         this.chatflowRuntime = chatflowRuntime;
         this.llmClient = llmClient;
         this.embedSettings = embedSettings;
+        this.quotaService = quotaService;
     }
 
     @GetMapping("/llm/status")
@@ -69,7 +74,7 @@ public class AskController {
         try {
             return Map.of("success", true, "message", llmClient.test(settings));
         } catch (RuntimeException e) {
-            return Map.of("success", false, "message", e.getMessage() == null ? e.toString() : e.getMessage());
+            return Map.of("success", false, "message", safeClientMessage(e));
         }
     }
 
@@ -90,7 +95,7 @@ public class AskController {
         try {
             return embedSettings.test(settings);
         } catch (RuntimeException e) {
-            return Map.of("success", false, "message", e.getMessage() == null ? e.toString() : e.getMessage());
+            return Map.of("success", false, "message", safeClientMessage(e));
         }
     }
 
@@ -110,22 +115,9 @@ public class AskController {
     @RequireRole(GatewayRole.QUERY)
     @PostMapping(value = "/ask", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter ask(@RequestBody AskRequest request) {
-        SseEmitter emitter = new SseEmitter(TIMEOUT_MS);
-        GatewayUser user = GatewayUser.current();
-        Thread.ofVirtual().name("ask-", 0).start(() -> {
-            GatewayUser.set(user);
-            try {
-                chatflowRuntime.ask(request, (event, data) -> send(emitter, event, data));
-            } catch (RuntimeException e) {
-                log.warn("问数失败: {}", e.getMessage(), e);
-                send(emitter, "error", Map.of("message", e.getMessage() == null ? e.toString() : e.getMessage()));
-            } finally {
-                send(emitter, "done", Map.of());
-                emitter.complete();
-                GatewayUser.clear();
-            }
-        });
-        return emitter;
+        quotaService.check(GatewayUser.current().name());
+        return stream("ask-", (emitter, cancelled) -> chatflowRuntime.ask(
+                request, (event, data) -> send(emitter, event, data, cancelled)));
     }
 
     /**
@@ -134,29 +126,92 @@ public class AskController {
     @RequireRole(GatewayRole.QUERY)
     @PostMapping(value = "/ask/preview", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter preview(@RequestBody ChatflowRuntime.PreviewAskRequest request) {
+        quotaService.check(GatewayUser.current().name());
+        return stream("ask-preview-", (emitter, cancelled) -> chatflowRuntime.preview(
+                request, (event, data) -> send(emitter, event, data, cancelled)));
+    }
+
+    @FunctionalInterface
+    private interface StreamBody {
+        void run(SseEmitter emitter, AtomicBoolean cancelled);
+    }
+
+    private SseEmitter stream(String threadPrefix, StreamBody body) {
         SseEmitter emitter = new SseEmitter(TIMEOUT_MS);
         GatewayUser user = GatewayUser.current();
-        Thread.ofVirtual().name("ask-preview-", 0).start(() -> {
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        Thread worker = Thread.ofVirtual().name(threadPrefix, 0).unstarted(() -> {
             GatewayUser.set(user);
             try {
-                chatflowRuntime.preview(request, (event, data) -> send(emitter, event, data));
+                if (cancelled.get() || Thread.currentThread().isInterrupted()) {
+                    return;
+                }
+                body.run(emitter, cancelled);
             } catch (RuntimeException e) {
-                log.warn("问数预览失败: {}", e.getMessage(), e);
-                send(emitter, "error", Map.of("message", e.getMessage() == null ? e.toString() : e.getMessage()));
+                if (!cancelled.get()) {
+                    log.warn("问数流失败: {}", e.getMessage(), e);
+                    send(emitter, "error", Map.of("message", safeClientMessage(e)), cancelled);
+                }
             } finally {
-                send(emitter, "done", Map.of());
-                emitter.complete();
+                if (!cancelled.get()) {
+                    send(emitter, "done", Map.of(), cancelled);
+                    try {
+                        emitter.complete();
+                    } catch (IllegalStateException ignored) {
+                        // already completed by timeout/client
+                    }
+                }
                 GatewayUser.clear();
             }
         });
+        Runnable cancel = () -> {
+            cancelled.set(true);
+            worker.interrupt();
+        };
+        emitter.onCompletion(cancel);
+        emitter.onTimeout(() -> {
+            cancel.run();
+            try {
+                emitter.complete();
+            } catch (IllegalStateException ignored) {
+                // already completed
+            }
+        });
+        emitter.onError(error -> cancel.run());
+        worker.start();
         return emitter;
     }
 
-    private static void send(SseEmitter emitter, String event, Object data) {
+    private static void send(SseEmitter emitter, String event, Object data, AtomicBoolean cancelled) {
+        if (cancelled.get() || Thread.currentThread().isInterrupted()) {
+            return;
+        }
         try {
             emitter.send(SseEmitter.event().name(event).data(data, MediaType.APPLICATION_JSON));
         } catch (IOException | IllegalStateException e) {
+            cancelled.set(true);
             log.debug("SSE 客户端已断开: {}", e.getMessage());
         }
+    }
+
+    /** 对客户端可见消息脱敏：业务 IllegalArgument 原样；其它截断并避免堆栈。 */
+    static String safeClientMessage(Throwable e) {
+        if (e == null) {
+            return "内部错误，请查看服务日志";
+        }
+        if (e instanceof IllegalArgumentException || e instanceof IllegalStateException) {
+            String message = e.getMessage();
+            if (message == null || message.isBlank()) {
+                return "请求无法完成";
+            }
+            return message.length() > 500 ? message.substring(0, 500) + "..." : message;
+        }
+        if (e instanceof org.springframework.web.server.ResponseStatusException rse) {
+            String reason = rse.getReason();
+            if (reason != null && !reason.isBlank()) {
+                return reason.length() > 500 ? reason.substring(0, 500) + "..." : reason;
+            }
+        }
+        return "内部错误，请查看服务日志";
     }
 }

@@ -9,14 +9,17 @@
 ## 部署建议
 
 1. 鉴权始终开启；为每个调用方配置独立 Bearer token（`federation.security.tokens`），或使用本地账号登录。首次部署在控制台创建管理员，或设置 `FEDERATION_ADMIN_USER` / `FEDERATION_ADMIN_PASSWORD`。
-2. 通过 `federation.security.roles` 分配角色：`QUERY`（查询/问数）、`ADMIN`（数据源/元数据/本体/模型写入）。未配置 roles 的用户默认拥有全部角色。
+2. 通过 `federation.security.roles` 分配角色：`QUERY`（查询/问数）、`ADMIN`（数据源/元数据/本体/模型写入）。**未配置 roles 的静态 token 用户默认仅 QUERY**（须显式写 `QUERY,ADMIN` 才有管理权）。
 2b. 可选 `federation.security.catalogs`（用户 → catalog/表）：非空时启用资源 ACL；`ADMIN` 绕过。
 2c. 可选 `federation.security.row-filters`（用户 → `catalog.schema.table:predicate`）：查询触及该表时，SQL 须包含谓词列标识，否则 403。
+2d. **禁止**把 `demo-token` / `reader-token` 带进生产：启动会拒绝，除非显式 `FEDERATION_ALLOW_INSECURE_DEFAULTS=true`（仅本地）。
+2e. 生产建议 `FEDERATION_REGISTRATION_OPEN=false`，由管理员建号。
+2f. `/actuator/health*` 与 `/api/v1/health` 公开；`/actuator/prometheus` 等需 Bearer。
 3. 可选配置 `FEDERATION_JWT_ISSUER_URI`，接受外部 IdP 签发的 JWT（roles claim 默认 `roles`）。控制台可通过 PKCE 登录（见 `docs/oidc.md`）或粘贴 access_token。
 4. 使用强随机 token；不要使用仓库示例值。
 5. `FEDERAL_DB_*`、`LLM_API_KEY`、`FEDERATION_ASK_EMBED_API_KEY`、`FEDERATION_ASK_PGVECTOR_*`、数据源密码仅通过环境变量或密钥管理系统注入。
 6. 将 CORS 收紧为实际前端来源（`FEDERATION_CORS_ORIGINS`）。
-7. 网关默认对 500 错误脱敏，并以 RFC 7807 Problem Details 返回；客户端可见的业务错误仍可能包含 SQL 失败原因，请勿把网关直接暴露到不可信公网而不加鉴权与网络隔离。
+7. 网关默认对 500 / SSE 非业务错误脱敏，并以 RFC 7807 Problem Details 返回；客户端可见的业务错误仍可能包含 SQL 失败原因，请勿把网关直接暴露到不可信公网而不加鉴权与网络隔离。
 8. 可选配置 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出分布式追踪。
 9. 令牌吊销：生产优先 Redis（`federation.security.revocation-redis-uri`）或共享卷文件 store；单机可用内存/本地文件。
 10. 可选 pgvector（`FEDERATION_ASK_PGVECTOR_URL`）仅用于术语召回；不可达时自动降级，不扩大攻击面。
@@ -31,4 +34,5 @@
 ## 已知边界
 
 - 支持共享 Bearer、JWT、控制台 PKCE（refresh + IdP 注销跳转）、catalog/表 ACL、Calcite 行级 WHERE 注入（JOIN 别名限定）、令牌 denylist（`/auth/logout`/`/auth/revoke`/`/auth/backchannel-logout`）。跨实例吊销：配置 `federation.security.revocation-store-path`（共享卷文件）与可选 `backchannel-logout-secret`。
-- 问数路径依赖 `SqlGuard` 与表白名单；`/api/v1/query` 在具备 `QUERY` 后仍可执行任意只读 SQL（相对已注册 catalog），需配合配额与审计。
+- 问数路径依赖 `SqlGuard` 与表白名单；`/api/v1/query` 在具备 `QUERY` 后经 `SqlGuard.assertReadOnly` 拒绝 DML/DDL，仍可对已注册 catalog 做只读查询，需配合配额、审计与 catalog/行级 ACL。
+- ChatFlow 应用/流程草稿：仅所有者或 `ADMIN` 可改；已发布应用可读（广场/问数）。

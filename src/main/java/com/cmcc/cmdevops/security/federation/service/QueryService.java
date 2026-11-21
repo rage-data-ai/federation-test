@@ -12,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 
+import com.cmcc.cmdevops.security.federation.ask.SqlGuard;
 import com.cmcc.cmdevops.security.federation.cache.ResultCache;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogRegistry;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogView;
@@ -115,6 +116,12 @@ public class QueryService {
 
         if (plan.engine() == EngineType.SPARK) {
             throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED, "Spark 引擎尚未接入");
+        }
+
+        try {
+            SqlGuard.assertReadOnly(plan.rewrittenSql());
+        } catch (SqlGuard.GuardException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
         }
 
         if (request.isExplain() && !analyzed.explain()) {

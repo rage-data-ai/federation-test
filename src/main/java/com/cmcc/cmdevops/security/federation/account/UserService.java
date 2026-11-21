@@ -122,6 +122,9 @@ public class UserService {
         if (needsSetup()) {
             throw new IllegalStateException("请先完成首次管理员配置");
         }
+        if (!properties.getSecurity().isRegistrationOpen()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "自助注册已关闭，请联系管理员创建账号");
+        }
         String name = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
         if (!USERNAME.matcher(name).matches()) {
             throw new IllegalArgumentException("用户名需为 3–32 位小写字母、数字或 . _ -，且以字母或数字开头");

@@ -88,4 +88,15 @@ class AppServiceTest {
         assertThrows(ResponseStatusException.class, () -> apps.archive(DefaultFlows.DEFAULT_APP_ID));
         assertTrue(apps.list().stream().anyMatch(app -> DefaultFlows.DEFAULT_APP_ID.equals(app.id())));
     }
+
+    @Test
+    void otherUserCannotMutateForeignDraft() {
+        App draft = apps.createFromTemplate("alice-app", "", DefaultFlows.TEMPLATE_LLM_CHAT);
+        GatewayUser.set(new GatewayUser("bob", Set.of(GatewayRole.QUERY)));
+        ResponseStatusException forbidden =
+                assertThrows(ResponseStatusException.class, () -> apps.update(draft.id(), "hijack", null, null));
+        assertEquals(403, forbidden.getStatusCode().value());
+        assertThrows(ResponseStatusException.class, () -> apps.publish(draft.id(), null));
+        assertThrows(ResponseStatusException.class, () -> flows.get(draft.flowId()));
+    }
 }

@@ -41,6 +41,19 @@ class BearerAuthFilterTest {
     }
 
     @Test
+    void requiresAuthForActuatorMetricsButNotHealth() throws Exception {
+        FederationProperties properties = new FederationProperties();
+        BearerAuthFilter filter = new BearerAuthFilter(properties, noJwt(), noUsers(), new TokenRevocationService());
+        MockHttpServletRequest metrics = new MockHttpServletRequest("GET", "/actuator/prometheus");
+        MockHttpServletResponse metricsResponse = new MockHttpServletResponse();
+        filter.doFilter(metrics, metricsResponse, new MockFilterChain());
+        assertEquals(401, metricsResponse.getStatus());
+
+        assertTrue(filter.shouldNotFilter(new MockHttpServletRequest("GET", "/actuator/health")));
+        assertTrue(filter.shouldNotFilter(new MockHttpServletRequest("GET", "/api/v1/health")));
+    }
+
+    @Test
     void rejectsAnonymousEvenWhenEnabledFlagIsFalse() throws Exception {
         FederationProperties properties = new FederationProperties();
         properties.getSecurity().setEnabled(false);
@@ -76,7 +89,8 @@ class BearerAuthFilterTest {
         AtomicBoolean passed = new AtomicBoolean();
         filter.doFilter(request, response, (req, res) -> {
             assertEquals("alice", GatewayUser.current().name());
-            assertTrue(GatewayUser.current().hasRole(GatewayRole.ADMIN));
+            assertTrue(GatewayUser.current().hasRole(GatewayRole.QUERY));
+            assertTrue(!GatewayUser.current().hasRole(GatewayRole.ADMIN));
             passed.set(true);
         });
         assertTrue(passed.get());
