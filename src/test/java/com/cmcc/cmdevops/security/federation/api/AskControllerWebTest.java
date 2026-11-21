@@ -42,6 +42,7 @@ import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient.Settings;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
+import com.cmcc.cmdevops.security.federation.security.QuotaService;
 import com.cmcc.cmdevops.security.federation.security.RoleAuthorizationInterceptor;
 
 @WebMvcTest(controllers = AskController.class)
@@ -63,6 +64,9 @@ class AskControllerWebTest {
 
     @MockitoBean
     private AskEmbedSettings embedSettings;
+
+    @MockitoBean
+    private QuotaService quotaService;
 
     @BeforeEach
     void setUp() {

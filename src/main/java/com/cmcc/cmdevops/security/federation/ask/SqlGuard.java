@@ -59,9 +59,31 @@ public class SqlGuard {
     }
 
     /**
+     * 仅校验只读（SELECT / WITH / 可解析的查询形态），不做表白名单。
+     * 供 {@code /api/v1/query} 挡住 DML/DDL；问数路径仍用 {@link #inspect}。
+     */
+    public static String assertReadOnly(String sql) {
+        ParsedQuery parsed = parseReadOnly(sql);
+        return parsed.text();
+    }
+
+    /**
      * 语法层检查，不访问数据库。返回规范化后的 SQL（去掉末尾分号）。
      */
     public static String inspect(String sql, Scope scope) {
+        ParsedQuery parsed = parseReadOnly(sql);
+        Walker walker = new Walker(scope);
+        walker.query(parsed.root(), Set.of());
+        if (!walker.violations.isEmpty()) {
+            throw new GuardException(String.join("；", walker.violations));
+        }
+        return parsed.text();
+    }
+
+    private record ParsedQuery(String text, SqlNode root) {
+    }
+
+    private static ParsedQuery parseReadOnly(String sql) {
         if (sql == null || sql.isBlank()) {
             throw new GuardException("SQL 为空");
         }
@@ -78,12 +100,7 @@ public class SqlGuard {
         if (!root.getKind().belongsTo(SqlKind.QUERY)) {
             throw new GuardException("只允许只读查询（SELECT / WITH），实际是 " + root.getKind());
         }
-        Walker walker = new Walker(scope);
-        walker.query(root, Set.of());
-        if (!walker.violations.isEmpty()) {
-            throw new GuardException(String.join("；", walker.violations));
-        }
-        return text;
+        return new ParsedQuery(text, root);
     }
 
     /**

@@ -21,12 +21,13 @@ public class FlowService {
     }
 
     public List<FlowDraft> list() {
-        return store.listFlows();
+        return store.listFlows().stream().filter(flow -> ChatflowAccess.canManage(flow.owner())).toList();
     }
 
     public FlowDraft get(String id) {
         FlowDraft flow = store.findFlow(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "流程不存在：" + id));
+        ChatflowAccess.assertCanManage(flow.owner());
         FlowGraph normalized = FlowGraphMigrations.normalize(flow.graph());
         if (normalized.equals(flow.graph())) {
             return flow;

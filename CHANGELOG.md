@@ -19,6 +19,7 @@
 
 ### Changed
 
+- 生产就绪加固：拒绝弱静态令牌启动（可 `FEDERATION_ALLOW_INSECURE_DEFAULTS`）；`/query` 只读 SQL；Actuator metrics 需鉴权；Ask SSE 错误脱敏与断开取消；ChatFlow 草稿所有权；未配 roles 默认仅 QUERY；健康检查探测联邦库；联邦库连接池 16
 - ChatFlow 自由组装 DAG：`FlowRunner` 合并为单一 walker（取消 simple/whitebox 分叉）；任意合法边连接的节点图共用一次 beginRun；`node_start` 带解析入参、`node_finish` 带耗时与出参；预览抽屉与正式问数过程均展示节点运行详情
 - ChatFlow 对齐 Dify：去掉可添加的「结束」节点；旧图 `end` 加载/发布时自动剥离（无回复出口时转为 `answer`）
 - DAG 编排：正式问数与预览共用 `FlowRunner`；`llm_chat`/insight 只写变量池；最终 `answer` 必须经回答节点；图校验要求至少一个 answer；默认智能问数 rev 22 为 `answer_kb` / `answer_sql`

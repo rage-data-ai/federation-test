@@ -79,6 +79,14 @@ class SqlGuardTest {
     }
 
     @Test
+    void assertReadOnlyAcceptsSelectAndRejectsDml() {
+        assertEquals("SELECT 1", SqlGuard.assertReadOnly("SELECT 1;"));
+        assertThrows(GuardException.class, () -> SqlGuard.assertReadOnly("DELETE FROM mysql70.tsoc.asset"));
+        assertThrows(GuardException.class, () -> SqlGuard.assertReadOnly("DROP TABLE mysql70.tsoc.asset"));
+        assertThrows(GuardException.class, () -> SqlGuard.assertReadOnly(""));
+    }
+
+    @Test
     void unionBranchesAreChecked() {
         String sql = "SELECT id FROM mysql70.tsoc.asset UNION ALL SELECT id FROM ck81.pangu.alert";
         GuardException e = assertThrows(GuardException.class, () -> SqlGuard.inspect(sql, SCOPE));

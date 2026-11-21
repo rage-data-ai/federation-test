@@ -1,6 +1,7 @@
 package com.cmcc.cmdevops.security.federation.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -17,6 +18,7 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.cmcc.cmdevops.security.federation.cache.ResultCache;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogRecord;
@@ -137,6 +139,15 @@ class QueryServiceTest {
         QueryResponse response = service.execute(request);
         assertEquals(EngineType.GATEWAY.name(), response.engine());
         assertTrue(response.rowCount() >= 2);
+    }
+
+    @Test
+    void rejectsWriteStatements() {
+        QueryRequest request = new QueryRequest();
+        request.setSql("DELETE FROM mysql.shop.customer");
+        ResponseStatusException thrown = assertThrows(ResponseStatusException.class, () -> service.execute(request));
+        assertEquals(400, thrown.getStatusCode().value());
+        assertTrue(thrown.getReason().contains("只读") || thrown.getReason().contains("无法解析"));
     }
 
     private static CatalogRecord catalog(String name, String type, String route) {

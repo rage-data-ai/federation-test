@@ -26,6 +26,7 @@ public class AppService {
     public List<App> list() {
         return store.listApps().stream()
                 .filter(app -> !App.ARCHIVED.equals(app.status()))
+                .filter(app -> ChatflowAccess.canManage(app.owner()) || App.PUBLISHED.equals(app.status()))
                 .toList();
     }
 
@@ -37,8 +38,20 @@ public class AppService {
     }
 
     public App get(String id) {
-        return store.findApp(id)
+        App app = store.findApp(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "应用不存在：" + id));
+        // 已发布可被广场/问数读取；草稿仅所有者或 ADMIN
+        if (!App.PUBLISHED.equals(app.status())) {
+            ChatflowAccess.assertCanManage(app.owner());
+        }
+        return app;
+    }
+
+    private App requireManageable(String id) {
+        App app = store.findApp(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "应用不存在：" + id));
+        ChatflowAccess.assertCanManage(app.owner());
+        return app;
     }
 
     public App create(String name, String description, String flowId) {
@@ -88,7 +101,7 @@ public class AppService {
     }
 
     public App update(String id, String name, String description, String flowId) {
-        App existing = get(id);
+        App existing = requireManageable(id);
         if (App.ARCHIVED.equals(existing.status())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "应用已归档，无法修改：" + id);
         }
@@ -115,10 +128,12 @@ public class AppService {
 
     /** 软删除：归档后不再出现在列表 / 发布列表。内置「智能问数」不可删。 */
     public App archive(String id) {
-        App existing = get(id);
+        App existing = store.findApp(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "应用不存在：" + id));
         if (isBuiltin(existing)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "内置应用不可删除");
         }
+        ChatflowAccess.assertCanManage(existing.owner());
         if (App.ARCHIVED.equals(existing.status())) {
             return existing;
         }
@@ -144,7 +159,7 @@ public class AppService {
      * 发布应用：若未指定 flowVersionId，则把当前流程草稿打成新版本再钉上。
      */
     public AppRelease publish(String appId, String flowVersionId) {
-        App app = get(appId);
+        App app = requireManageable(appId);
         if (App.ARCHIVED.equals(app.status())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "应用已归档，无法发布：" + appId);
         }
@@ -211,7 +226,7 @@ public class AppService {
         if (appId == null || appId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "预览必须指定 appId");
         }
-        App app = get(appId.strip());
+        App app = requireManageable(appId.strip());
         if (App.ARCHIVED.equals(app.status())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "应用已归档，无法预览：" + app.id());
         }

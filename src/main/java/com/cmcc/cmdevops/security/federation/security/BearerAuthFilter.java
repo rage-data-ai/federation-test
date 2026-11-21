@@ -23,7 +23,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * Bearer Token 鉴权：保护 {@code /api/**}；健康检查、Actuator、注册 / 登录 / 首次管理员初始化放行。
+ * Bearer Token 鉴权：保护 {@code /api/**} 与非健康类 Actuator；
+ * {@code /api/v1/health}、{@code /actuator/health*}、注册 / 登录 / 首次管理员初始化放行。
  * 令牌依次按静态配置、本地账号会话、IdP JWT 解析。角色见 {@link GatewayRole}。
  * {@code federation.security.enabled=false} 已废弃，不会关闭鉴权。
  */
@@ -61,10 +62,20 @@ public class BearerAuthFilter extends OncePerRequestFilter {
         if (path == null) {
             return true;
         }
-        if (path.startsWith("/actuator") || path.equals("/api/v1/health")) {
+        if (path.equals("/api/v1/health") || isPublicActuator(path)) {
             return true;
         }
+        if (path.startsWith("/actuator")) {
+            // metrics / prometheus 等需 Bearer；与 /api/** 同一套鉴权
+            return false;
+        }
         return !path.startsWith("/api/");
+    }
+
+    private static boolean isPublicActuator(String path) {
+        return "/actuator/health".equals(path)
+                || path.startsWith("/actuator/health/")
+                || "/actuator/info".equals(path);
     }
 
     @Override
@@ -149,7 +160,8 @@ public class BearerAuthFilter extends OncePerRequestFilter {
     private Set<GatewayRole> rolesOf(String username) {
         String raw = properties.getSecurity().getRoles().get(username);
         if (raw == null || raw.isBlank()) {
-            return GatewayRole.ALL;
+            // 未显式配置 roles 时仅 QUERY，避免误授 ADMIN
+            return Set.of(GatewayRole.QUERY);
         }
         EnumSet<GatewayRole> roles = EnumSet.noneOf(GatewayRole.class);
         for (String part : raw.split(",")) {
