@@ -39,6 +39,11 @@
 
 见 [`chatflow-preview.md`](chatflow-preview.md)：编排页对草稿/脏图 `POST /ask/preview`，节点高亮与出参检查；生产仍只读 Release。
 
+### 阶段 2.8 — 自由组装 DAG + 节点运行详情（已落地）
+
+- `FlowRunner` 单一 walker：任意合法边连接的节点图（须含 `answer`）正式问数与预览同路径、单次 beginRun
+- SSE：`node_start.inputs`、`node_finish.durationMs/outputs/outcome`；预览抽屉与正式问数过程面板展示每节点详情
+
 ### 阶段 3 — 应用能力加深
 
 - 应用级提示词 / 知识库范围

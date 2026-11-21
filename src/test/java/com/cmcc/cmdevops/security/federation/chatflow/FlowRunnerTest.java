@@ -178,8 +178,8 @@ class FlowRunnerTest {
         runner.run(app, new AskRequest("hi", List.of()), (event, data) -> events.add(event));
         assertTrue(events.contains("run"));
         assertTrue(events.contains("answer"));
-        // llm_chat 与后续 answer 各 finish 一次
-        verify(askService, org.mockito.Mockito.times(2)).finishRun(recorder);
+        // 统一 DAG：整图单次 begin/finishRun
+        verify(askService, org.mockito.Mockito.times(1)).finishRun(recorder);
     }
 
     @Test
@@ -299,5 +299,129 @@ class FlowRunnerTest {
                 }),
                 any(),
                 eq(false));
+    }
+
+    /** Mock recorder 把 emit 转给外层 listener，模拟真实 AskRunRecorder 转发。 */
+    private static AskRunRecorder forwardingRecorder(AskListener[] outer) {
+        AskRunRecorder recorder = mock(AskRunRecorder.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+                    AskListener target = outer[0];
+                    if (target != null) {
+                        target.emit(invocation.getArgument(0), invocation.getArgument(1));
+                    }
+                    return null;
+                })
+                .when(recorder)
+                .emit(org.mockito.ArgumentMatchers.anyString(), any());
+        return recorder;
+    }
+
+    @Test
+    void freeAssembleStartToAnswerEmitsNodeDetails() {
+        AskService askService = mock(AskService.class);
+        AskListener[] outer = new AskListener[1];
+        AskRunRecorder recorder = forwardingRecorder(outer);
+        when(askService.beginRun(any(), any(), anyBoolean())).thenAnswer(invocation -> {
+            outer[0] = invocation.getArgument(1);
+            return recorder;
+        });
+        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        FlowGraph graph = FlowGraph.of(
+                "start",
+                List.of(
+                        new FlowNode("start", "start", "开始", Map.of()),
+                        new FlowNode(
+                                "ans",
+                                "answer",
+                                "回答",
+                                Map.of("inputs", Map.of("text", "echo:{{#sys.query#}}")))),
+                List.of(new FlowEdge("start", "ans", "default")));
+        List<String> events = new ArrayList<>();
+        List<Object> payloads = new ArrayList<>();
+        runner.run(
+                new PublishedApp("app-free", "自由组装", 1L, "fv", graph),
+                new AskRequest("hello", List.of()),
+                (event, data) -> {
+                    events.add(event);
+                    payloads.add(data);
+                });
+
+        assertTrue(events.contains("node_start"));
+        assertTrue(events.contains("node_finish"));
+        assertTrue(events.contains("answer"));
+        assertTrue(events.contains("vars"));
+        long starts = events.stream().filter("node_start"::equals).count();
+        long finishes = events.stream().filter("node_finish"::equals).count();
+        assertEquals(2, starts);
+        assertEquals(2, finishes);
+        verify(askService, org.mockito.Mockito.times(1)).beginRun(any(), any(), eq(false));
+        verify(askService, org.mockito.Mockito.times(1)).finishRun(recorder);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> startPayload = (Map<String, Object>) payloads.get(events.indexOf("node_start"));
+        assertEquals("start", startPayload.get("nodeId"));
+        assertTrue(startPayload.containsKey("inputs"));
+
+        int answerFinishIdx = -1;
+        for (int i = 0; i < events.size(); i++) {
+            if ("node_finish".equals(events.get(i))) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> finish = (Map<String, Object>) payloads.get(i);
+                if ("ans".equals(finish.get("nodeId"))) {
+                    answerFinishIdx = i;
+                    assertTrue(finish.containsKey("durationMs"));
+                    assertTrue(finish.containsKey("outputs"));
+                    assertEquals("default", finish.get("outcome"));
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> outs = (Map<String, Object>) finish.get("outputs");
+                    assertEquals("echo:hello", outs.get("answer"));
+                }
+            }
+        }
+        assertTrue(answerFinishIdx >= 0);
+    }
+
+    @Test
+    void freeAssembleLlmThenAnswerSingleRun() {
+        AskService askService = mock(AskService.class);
+        AskListener[] outer = new AskListener[1];
+        AskRunRecorder recorder = forwardingRecorder(outer);
+        when(askService.beginRun(any(), any(), anyBoolean())).thenAnswer(invocation -> {
+            outer[0] = invocation.getArgument(1);
+            return recorder;
+        });
+        when(askService.runLlmChat(any(), any(), any(), any(), any(), anyBoolean()))
+                .thenReturn(AskStageResult.of("default", Map.of("answer", "hi")));
+        FlowRunner runner = new FlowRunner(askService, mock(KnowledgeTools.class), new FederationProperties());
+        FlowGraph graph = FlowGraph.of(
+                "start",
+                List.of(
+                        new FlowNode("start", "start", "开始", Map.of()),
+                        new FlowNode(
+                                "chat",
+                                "llm_chat",
+                                "对话",
+                                Map.of("skills", List.of(), "systemPrompt", "hi")),
+                        new FlowNode(
+                                "ans",
+                                "answer",
+                                "回答",
+                                Map.of("inputs", Map.of("text", "{{#对话.answer#}}")))),
+                List.of(
+                        new FlowEdge("start", "chat", "default"),
+                        new FlowEdge("chat", "ans", "default")));
+        List<String> answers = new ArrayList<>();
+        runner.run(
+                new PublishedApp("app-llm-free", "对话组装", 1L, "fv", graph),
+                new AskRequest("q", List.of()),
+                (event, data) -> {
+                    if ("answer".equals(event) && data instanceof Map<?, ?> map) {
+                        answers.add(String.valueOf(map.get("answer")));
+                    }
+                });
+        assertEquals(List.of("hi"), answers);
+        verify(askService, org.mockito.Mockito.times(1)).beginRun(any(), any(), eq(false));
+        verify(askService, org.mockito.Mockito.times(1)).finishRun(recorder);
+        verify(askService).runLlmChat(any(), any(), any(), any(), any(), anyBoolean());
     }
 }

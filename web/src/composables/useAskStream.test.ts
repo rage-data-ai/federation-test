@@ -88,6 +88,37 @@ describe('applyEvent', () => {
     applyEvent(turn, 'knowledge', {})
     expect(turn.knowledge).toEqual({ matches: [] })
   })
+
+  it('tracks node_start / node_finish run details', () => {
+    const turn = emptyTurn('q')
+    applyEvent(turn, 'node_start', {
+      nodeId: 'ans',
+      title: '回答',
+      type: 'answer',
+      inputs: { text: 'hi' }
+    })
+    expect(turn.nodeRuns).toHaveLength(1)
+    expect(turn.nodeRuns[0]).toMatchObject({
+      nodeId: 'ans',
+      status: 'running',
+      inputs: { text: 'hi' }
+    })
+    applyEvent(turn, 'vars', { nodeId: 'ans', outputs: { answer: 'hi' }, paths: ['ans.answer'] })
+    applyEvent(turn, 'node_finish', {
+      nodeId: 'ans',
+      title: '回答',
+      type: 'answer',
+      outcome: 'default',
+      durationMs: 12,
+      outputs: { answer: 'hi' }
+    })
+    expect(turn.nodeRuns[0]).toMatchObject({
+      status: 'ok',
+      outcome: 'default',
+      durationMs: 12,
+      outputs: { answer: 'hi' }
+    })
+  })
 })
 
 describe('turnFromRunView', () => {

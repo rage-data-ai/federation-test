@@ -12,7 +12,8 @@ import com.cmcc.cmdevops.security.federation.chatflow.FlowModels.PublishedApp;
 /**
  * 问数运行入口：正式问答与编排预览共用同一套 {@link FlowRunner} DAG 执行。
  * <p>差别仅在数据源与是否落库：正式读已发布图并落 run；预览可读草稿/脏图且不落正式历史。
- * 推理过程即 DAG 真实跑通（node_start/vars/回答节点），不是另一套写死流水线。
+ * 推理过程即自由组装 DAG 真实跑通（node_start 含入参 / node_finish 含耗时与出参 / vars / 回答节点），
+ * 不是另一套写死流水线。
  */
 @Service
 public class ChatflowRuntime {

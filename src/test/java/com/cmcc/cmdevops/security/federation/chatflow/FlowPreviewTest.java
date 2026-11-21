@@ -77,6 +77,12 @@ class FlowPreviewTest {
         Object firstStart = payloads.get(events.indexOf("node_start"));
         assertTrue(firstStart instanceof Map<?, ?>);
         assertEquals("start", ((Map<?, ?>) firstStart).get("nodeId"));
+        assertTrue(((Map<?, ?>) firstStart).containsKey("inputs"));
+
+        Object firstFinish = payloads.get(events.indexOf("node_finish"));
+        assertTrue(firstFinish instanceof Map<?, ?>);
+        assertTrue(((Map<?, ?>) firstFinish).containsKey("durationMs"));
+        assertTrue(((Map<?, ?>) firstFinish).containsKey("outputs"));
 
         verify(askService).beginRun(any(), any(), eq(true));
         verify(askService).discardRun(recorder);
