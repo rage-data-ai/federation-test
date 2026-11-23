@@ -1,6 +1,5 @@
 package com.cmcc.cmdevops.security.federation.security;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -123,16 +122,12 @@ public class SecretCrypto {
         return new SecretCrypto(props);
     }
 
+    private static final SecureRandom KEY_MATERIAL_RANDOM = new SecureRandom();
+
     /** 随机生成 32 字节 key 的 url-safe base64（运维文档用）。 */
     public static String generateKeyMaterial() {
         byte[] bytes = new byte[32];
-        new SecureRandom().nextBytes(bytes);
+        KEY_MATERIAL_RANDOM.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    /** 打包长度校验（未使用，保留防优化）。 */
-    @SuppressWarnings("unused")
-    private static int packedSize(byte[] iv, byte[] cipher) {
-        return ByteBuffer.allocate(4).putInt(iv.length + cipher.length).getInt(0);
     }
 }
