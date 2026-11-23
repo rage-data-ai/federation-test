@@ -44,9 +44,14 @@ federation:
   security:
     # 鉴权始终开启；环境变量仅为兼容旧部署，false 会被忽略。
     enabled: ${FEDERATION_SECURITY_ENABLED:true}
+    # 生产必须 false；本地 compose / 开发可设 FEDERATION_ALLOW_INSECURE_DEFAULTS=true
+    allow-insecure-defaults: ${FEDERATION_ALLOW_INSECURE_DEFAULTS:false}
+    # 生产建议 false，由管理员建号；本地默认开放自助注册
+    registration-open: ${FEDERATION_REGISTRATION_OPEN:true}
     tokens:
-      demo: ${FEDERATION_DEMO_TOKEN:demo-token}
-      reader: ${FEDERATION_READER_TOKEN:reader-token}
+      # 无默认弱口令：未设置环境变量则不注册静态 token（仅本地账号 / JWT）
+      demo: ${FEDERATION_DEMO_TOKEN:}
+      reader: ${FEDERATION_READER_TOKEN:}
     roles:
       demo: QUERY,ADMIN
       reader: QUERY

@@ -177,7 +177,7 @@ public class OntologyController {
                 send(emitter, "result", result);
             } catch (RuntimeException e) {
                 log.warn("本体起草失败: {}", e.getMessage());
-                send(emitter, "error", Map.of("message", e.getMessage() == null ? e.toString() : e.getMessage()));
+                send(emitter, "error", Map.of("message", AskController.safeClientMessage(e)));
             } finally {
                 emitter.complete();
                 GatewayUser.clear();

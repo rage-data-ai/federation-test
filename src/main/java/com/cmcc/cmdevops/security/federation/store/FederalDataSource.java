@@ -48,7 +48,8 @@ public class FederalDataSource {
         pool.setUsername(repository.getUsername());
         pool.setPassword(password);
         pool.setPoolName("federal");
-        pool.setMaximumPoolSize(4);
+        // 问数 SSE 可能并发占用连接；过小会导致池耗尽后请求排队/失败
+        pool.setMaximumPoolSize(16);
         pool.setConnectionTimeout(8_000);
         DataSource dataSource;
         try {

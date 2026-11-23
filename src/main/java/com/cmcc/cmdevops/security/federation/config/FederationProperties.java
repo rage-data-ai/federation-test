@@ -191,7 +191,16 @@ public class FederationProperties {
     public static class Security {
         /** 鉴权始终开启；保留字段仅为兼容旧配置，设为 false 也会被忽略。 */
         private boolean enabled = true;
-        /** 用户名 → Bearer token（兼容旧配置；未单独配 roles 时默认 QUERY+ADMIN） */
+        /**
+         * 允许仓库示例弱令牌（{@code demo-token}/{@code reader-token}）启动。
+         * 生产必须为 false，并通过环境变量注入强随机 token。
+         */
+        private boolean allowInsecureDefaults = false;
+        /**
+         * 是否开放自助注册（管理员已存在之后）。生产建议 false，由管理员在控制台建号。
+         */
+        private boolean registrationOpen = true;
+        /** 用户名 → Bearer token（兼容旧配置；未单独配 roles 时默认仅 QUERY） */
         private Map<String, String> tokens = new LinkedHashMap<>();
         /** 用户名 → 逗号分隔角色，如 QUERY 或 QUERY,ADMIN */
         private Map<String, String> roles = new LinkedHashMap<>();
@@ -235,6 +244,22 @@ public class FederationProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+
+        public boolean isAllowInsecureDefaults() {
+            return allowInsecureDefaults;
+        }
+
+        public void setAllowInsecureDefaults(boolean allowInsecureDefaults) {
+            this.allowInsecureDefaults = allowInsecureDefaults;
+        }
+
+        public boolean isRegistrationOpen() {
+            return registrationOpen;
+        }
+
+        public void setRegistrationOpen(boolean registrationOpen) {
+            this.registrationOpen = registrationOpen;
         }
 
         public Map<String, String> getTokens() {
