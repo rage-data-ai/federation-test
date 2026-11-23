@@ -79,7 +79,7 @@ class AskFeedbackControllerWebTest {
     @BeforeEach
     void setUp() {
         GatewayUser.set(new GatewayUser("alice", Set.of(GatewayRole.QUERY)));
-        store.saveRun(new AskRun("run-1", "conv-1", "alice", "最近一天高危告警最多的资产",
+        store.saveRun(new AskRun("run-1", "conv-1", "alice", null, "最近一天高危告警最多的资产",
                 List.of(new Turn("user", "高危告警最多的资产"), new Turn("assistant", "要看哪个时间范围？")),
                 AskRun.ANSWERED, "web-01 最多，5 条", "SELECT 1",
                 Map.of("tables", List.of("ck81.pangu.alert"), "rows", List.of(List.of("web-01", 5))),
@@ -188,9 +188,9 @@ class AskFeedbackControllerWebTest {
 
     @Test
     void conversationsListAndLoadOwnOnly() throws Exception {
-        store.saveRun(new AskRun("run-2", "conv-1", "alice", "只看生产", List.of(), AskRun.ANSWERED,
+        store.saveRun(new AskRun("run-2", "conv-1", "alice", null, "只看生产", List.of(), AskRun.ANSWERED,
                 "ok", null, Map.of(), null, 1_700_000_000_100L, 80));
-        store.saveRun(new AskRun("run-bob", "conv-bob", "bob", "bob 的问题", List.of(), AskRun.ANSWERED,
+        store.saveRun(new AskRun("run-bob", "conv-bob", "bob", null, "bob 的问题", List.of(), AskRun.ANSWERED,
                 "x", null, Map.of(), null, 1_700_000_000_200L, 10));
 
         mockMvc.perform(get("/api/v1/ask/conversations"))

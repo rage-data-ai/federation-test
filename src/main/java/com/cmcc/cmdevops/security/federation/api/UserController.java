@@ -33,9 +33,17 @@ public class UserController {
     public record ResetPasswordBody(String password) {
     }
 
+    public record CreateUserBody(String username, String password, String displayName) {
+    }
+
     @GetMapping
     public List<UserView> list() {
         return users.list();
+    }
+
+    @PostMapping
+    public UserView create(@RequestBody CreateUserBody body) {
+        return users.createByAdmin(body.username(), body.password(), body.displayName(), GatewayUser.current().name());
     }
 
     @PutMapping("/{id}")

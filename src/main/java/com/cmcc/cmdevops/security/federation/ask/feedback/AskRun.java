@@ -9,6 +9,7 @@ import com.cmcc.cmdevops.security.federation.ask.AskService.Turn;
  * 一次问数的服务端记录。评价、建议和后续的知识入库都只引用这里的内容，不采信前端回传的 SQL。
  *
  * @param conversationId 同一段对话里的多次问数共用一个 id
+ * @param appId          已发布应用 id；内置问数或未绑定时可空
  * @param history        发起这次问数时已有的对话（用户与助手的轮次）
  * @param status         {@link #ANSWERED} / {@link #CLARIFY} / {@link #ERROR}
  * @param evidence       支撑回答的证据：口径、推理步骤、结果预览、命中的本体实体、用到的表、SQL 执行轨迹
@@ -18,6 +19,7 @@ public record AskRun(
         String id,
         String conversationId,
         String userName,
+        String appId,
         String question,
         List<Turn> history,
         String status,

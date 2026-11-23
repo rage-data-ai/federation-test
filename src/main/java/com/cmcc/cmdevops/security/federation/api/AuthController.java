@@ -21,9 +21,11 @@ import com.cmcc.cmdevops.security.federation.security.CatalogAclService;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
 import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.RequireRole;
+import com.cmcc.cmdevops.security.federation.security.SessionCookies;
 import com.cmcc.cmdevops.security.federation.security.TokenRevocationService;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -59,28 +61,37 @@ public class AuthController {
     public record SetupBody(String username, String password, String displayName) {
     }
 
-    /** 是否还需要首次管理员初始化。无需 Bearer。 */
+    /** 是否还需要首次管理员初始化；并告知自助注册是否开放。无需 Bearer。 */
     @GetMapping("/setup-status")
     public Map<String, Object> setupStatus() {
-        return Map.of("needsSetup", users.needsSetup());
+        return Map.of(
+                "needsSetup", users.needsSetup(),
+                "registrationOpen", properties.getSecurity().isRegistrationOpen());
     }
 
     /** 首次启动创建管理员并登录。无需 Bearer；仅库中无账号时可用。 */
     @PostMapping("/setup")
-    public Session setup(@RequestBody SetupBody body) {
-        return users.bootstrapAdmin(body.username(), body.password(), body.displayName());
+    public Session setup(@RequestBody SetupBody body, HttpServletRequest request, HttpServletResponse response) {
+        Session session = users.bootstrapAdmin(body.username(), body.password(), body.displayName());
+        attachSessionCookie(request, response, session);
+        return session;
     }
 
     /** 自助注册本地账号，成功即登录。无需 Bearer。 */
     @PostMapping("/register")
-    public Session register(@RequestBody RegisterBody body) {
-        return users.register(body.username(), body.password(), body.displayName());
+    public Session register(
+            @RequestBody RegisterBody body, HttpServletRequest request, HttpServletResponse response) {
+        Session session = users.register(body.username(), body.password(), body.displayName());
+        attachSessionCookie(request, response, session);
+        return session;
     }
 
     /** 用户名 + 密码登录，返回会话令牌。无需 Bearer。 */
     @PostMapping("/login")
-    public Session login(@RequestBody LoginBody body) {
-        return users.login(body.username(), body.password());
+    public Session login(@RequestBody LoginBody body, HttpServletRequest request, HttpServletResponse response) {
+        Session session = users.login(body.username(), body.password());
+        attachSessionCookie(request, response, session);
+        return session;
     }
 
     /** 本地账号改自己的密码；其他设备上的会话随之失效。 */
@@ -113,14 +124,15 @@ public class AuthController {
         return body;
     }
 
-    /** 吊销当前请求的 Bearer（登出）；后续同 token 返回 401。 */
+    /** 吊销当前请求的 Bearer / Cookie 会话（登出）；后续同 token 返回 401。 */
     @PostMapping("/logout")
-    public Map<String, Object> logout(HttpServletRequest request) {
+    public Map<String, Object> logout(HttpServletRequest request, HttpServletResponse response) {
         String token = bearer(request);
         if (token != null) {
             users.logout(token);
             revocations.revoke(token);
         }
+        SessionCookies.clear(response, SessionCookies.secureRequest(request));
         return Map.of("success", true, "revoked", token != null);
     }
 
@@ -187,12 +199,19 @@ public class AuthController {
         return Boolean.TRUE.equals(request.getAttribute(BearerAuthFilter.LOCAL_ACCOUNT_ATTRIBUTE));
     }
 
+    private void attachSessionCookie(HttpServletRequest request, HttpServletResponse response, Session session) {
+        int ttlSeconds = Math.max(3600, properties.getSecurity().getSessionTtlHours() * 3600);
+        SessionCookies.write(response, session.token(), ttlSeconds, SessionCookies.secureRequest(request));
+    }
+
     private static String bearer(HttpServletRequest request) {
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            return null;
+        if (header != null && header.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            String token = header.substring(7).trim();
+            if (!token.isEmpty()) {
+                return token;
+            }
         }
-        String token = header.substring(7).trim();
-        return token.isEmpty() ? null : token;
+        return SessionCookies.read(request);
     }
 }

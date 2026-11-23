@@ -90,6 +90,7 @@ async function request<T = Json>(path: string, options: RequestInit = {}): Promi
   let response: Response
   try {
     response = await fetch(path, {
+      credentials: 'include',
       ...options,
       headers: headers(options.headers)
     })
@@ -189,7 +190,7 @@ export function authRegister(username: string, password: string, displayName: st
 }
 
 export function authSetupStatus() {
-  return request<{ needsSetup: boolean }>('/api/v1/auth/setup-status')
+  return request<{ needsSetup: boolean; registrationOpen?: boolean }>('/api/v1/auth/setup-status')
 }
 
 export function authSetup(username: string, password: string, displayName: string) {
@@ -208,6 +209,13 @@ export function authChangePassword(oldPassword: string, newPassword: string) {
 
 export function listUsers() {
   return request<UserAccount[]>('/api/v1/users')
+}
+
+export function createUser(username: string, password: string, displayName: string) {
+  return request<UserAccount>('/api/v1/users', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, displayName: displayName || null })
+  })
 }
 
 export function updateUser(id: number, patch: UserPatch) {
@@ -254,7 +262,10 @@ export function getOntology() {
 }
 
 export async function getOntologyTurtle(): Promise<string> {
-  const response = await fetch('/api/v1/ontology/turtle', { headers: headers() })
+  const response = await fetch('/api/v1/ontology/turtle', {
+    credentials: 'include',
+    headers: headers()
+  })
   notifyUnauthorized('/api/v1/ontology/turtle', response.status)
   if (!response.ok) {
     throw new Error(`导出失败 (${response.status})`)
@@ -593,6 +604,7 @@ async function postEvents(path: string, body: unknown, onEvent: SseHandler, sign
   try {
     response = await fetch(path, {
       method: 'POST',
+      credentials: 'include',
       headers: headers({ Accept: 'text/event-stream' }),
       body: JSON.stringify(body),
       signal

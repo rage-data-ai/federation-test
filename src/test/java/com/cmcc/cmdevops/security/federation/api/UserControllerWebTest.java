@@ -72,6 +72,7 @@ class UserControllerWebTest {
     void setUp() {
         userStore.clear();
         properties.getSecurity().setEnabled(true);
+        properties.getSecurity().setRegistrationOpen(true);
         users.bootstrapAdmin("root", "root-pass-11", "管理员");
         GatewayUser.set(new GatewayUser("root", Set.of(GatewayRole.QUERY, GatewayRole.ADMIN)));
     }
@@ -79,6 +80,19 @@ class UserControllerWebTest {
     @AfterEach
     void tearDown() {
         GatewayUser.clear();
+    }
+
+    @Test
+    void adminCreatesUserWhenRegistrationClosed() throws Exception {
+        properties.getSecurity().setRegistrationOpen(false);
+        mockMvc.perform(post("/api/v1/users")
+                        .contentType("application/json")
+                        .content("{\"username\":\"newuser\",\"password\":\"newuser-pass1\",\"displayName\":\"新人\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("newuser"))
+                .andExpect(jsonPath("$.displayName").value("新人"))
+                .andExpect(jsonPath("$.roles[0]").value("QUERY"));
+        assertNotNull(users.login("newuser", "newuser-pass1"));
     }
 
     @Test

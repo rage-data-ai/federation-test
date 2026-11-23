@@ -46,8 +46,10 @@ federation:
     enabled: ${FEDERATION_SECURITY_ENABLED:true}
     # 生产必须 false；本地 compose / 开发可设 FEDERATION_ALLOW_INSECURE_DEFAULTS=true
     allow-insecure-defaults: ${FEDERATION_ALLOW_INSECURE_DEFAULTS:false}
-    # 生产建议 false，由管理员建号；本地默认开放自助注册
-    registration-open: ${FEDERATION_REGISTRATION_OPEN:true}
+    # 生产默认关闭自助注册；本地 compose 可设 FEDERATION_REGISTRATION_OPEN=true
+    registration-open: ${FEDERATION_REGISTRATION_OPEN:false}
+    # 敏感字段落库主密钥（AES）；空则明文（仅本地）。生产必填。
+    secrets-key: ${FEDERATION_SECRETS_KEY:}
     tokens:
       # 无默认弱口令：未设置环境变量则不注册静态 token（仅本地账号 / JWT）
       demo: ${FEDERATION_DEMO_TOKEN:}
@@ -83,6 +85,8 @@ federation:
     result-preview-rows: 50
     # 对话记忆：最近 N 条 history（user+assistant）；开始节点可覆盖
     history-window-turns: ${FEDERATION_ASK_HISTORY_WINDOW:12}
+    # 同时进行的问数/预览 SSE 上限
+    max-concurrent: ${FEDERATION_ASK_MAX_CONCURRENT:32}
     # OpenAI 兼容 embeddings（NIM / 智谱等）。知识库默认接 Milvus，此项必填；仅单测无内存索引时可留空。
     embed-endpoint: ${FEDERATION_ASK_EMBED_ENDPOINT:}
     embed-api-key: ${FEDERATION_ASK_EMBED_API_KEY:}
@@ -109,6 +113,12 @@ federation:
 springdoc:
   api-docs:
     path: /v3/api-docs
+    enabled: ${SPRINGDOC_ENABLED:false}
   swagger-ui:
     path: /swagger-ui.html
+    enabled: ${SPRINGDOC_ENABLED:false}
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-},%X{requestId:-}]"
 

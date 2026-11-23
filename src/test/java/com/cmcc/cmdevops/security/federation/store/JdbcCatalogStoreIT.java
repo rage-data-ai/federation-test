@@ -19,6 +19,7 @@ import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient.Settings;
 import com.cmcc.cmdevops.security.federation.metadata.ColumnSnapshot;
 import com.cmcc.cmdevops.security.federation.metadata.TableSnapshot;
+import com.cmcc.cmdevops.security.federation.security.SecretCrypto;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -46,9 +47,10 @@ class JdbcCatalogStoreIT {
         properties.getRepository().setPassword(MYSQL.getPassword());
 
         dataSource = new FederalDataSource(properties, JsonMapper.builder().build());
-        catalogStore = new JdbcCatalogStore(dataSource);
+        SecretCrypto secrets = SecretCrypto.forTests("test-secrets-key-for-jdbc-it");
+        catalogStore = new JdbcCatalogStore(dataSource, secrets);
         metadataStore = new JdbcMetadataStore(dataSource);
-        llmStore = new JdbcLlmStore(dataSource);
+        llmStore = new JdbcLlmStore(dataSource, secrets);
     }
 
     @BeforeEach

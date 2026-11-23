@@ -8,18 +8,36 @@ import {
   setRefreshToken
 } from './auth'
 
+function stubWebStorage() {
+  const store = new Map<string, string>()
+  const api = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      store.set(key, value)
+    },
+    removeItem: (key: string) => {
+      store.delete(key)
+    },
+    clear: () => store.clear(),
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    get length() {
+      return store.size
+    }
+  }
+  vi.stubGlobal('sessionStorage', api)
+  vi.stubGlobal('localStorage', {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+    key: () => null,
+    length: 0
+  })
+}
+
 describe('access token storage', () => {
   beforeEach(() => {
-    const store = new Map<string, string>()
-    vi.stubGlobal('localStorage', {
-      getItem: (key: string) => store.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        store.set(key, value)
-      },
-      removeItem: (key: string) => {
-        store.delete(key)
-      }
-    })
+    stubWebStorage()
   })
 
   it('stores and clears bearer and refresh tokens', () => {

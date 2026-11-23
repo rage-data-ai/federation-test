@@ -44,13 +44,14 @@ public class JdbcAskFeedbackStore implements AskFeedbackStore {
     public void saveRun(AskRun run) {
         jdbc.update("""
                 INSERT INTO fed_ask_run
-                  (id, conversation_id, user_name, question, history, status, answer, sql_text, evidence, error,
+                  (id, conversation_id, user_name, app_id, question, history, status, answer, sql_text, evidence, error,
                    created_at, elapsed_ms)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 run.id(),
                 run.conversationId(),
                 run.userName(),
+                run.appId(),
                 run.question(),
                 objectMapper.writeValueAsString(run.history()),
                 run.status(),
@@ -63,7 +64,7 @@ public class JdbcAskFeedbackStore implements AskFeedbackStore {
     }
 
     private static final String RUN_SELECT = """
-            SELECT id, conversation_id, user_name, question, history, status, answer, sql_text, evidence, error,
+            SELECT id, conversation_id, user_name, app_id, question, history, status, answer, sql_text, evidence, error,
                    created_at, elapsed_ms
             FROM fed_ask_run
             """;
@@ -95,6 +96,7 @@ public class JdbcAskFeedbackStore implements AskFeedbackStore {
                 rs.getString("id"),
                 rs.getString("conversation_id"),
                 rs.getString("user_name"),
+                rs.getString("app_id"),
                 rs.getString("question"),
                 objectMapper.readValue(rs.getString("history"), new TypeReference<List<Turn>>() {
                 }),

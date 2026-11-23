@@ -24,10 +24,14 @@ services:
       FEDERATION_ALLOW_INSECURE_DEFAULTS: "true"
       FEDERATION_DEMO_TOKEN: demo-token
       FEDERATION_READER_TOKEN: reader-token
+      # 本地可开自助注册；生产保持默认 false
+      FEDERATION_REGISTRATION_OPEN: "true"
+      # 本地可空（明文）；生产必填 FEDERATION_SECRETS_KEY
+      # FEDERATION_SECRETS_KEY: replace-me
       # 可选：跳过控制台首次管理员向导
       # FEDERATION_ADMIN_USER: admin
       # FEDERATION_ADMIN_PASSWORD: change-me-now
-      # 生产建议：FEDERATION_REGISTRATION_OPEN=false
+      # 调试 OpenAPI：SPRINGDOC_ENABLED=true
     volumes:
       - ./docker/trino/catalog:/app/docker/trino/catalog
       - ./docker/trino/kafka:/app/docker/trino/kafka

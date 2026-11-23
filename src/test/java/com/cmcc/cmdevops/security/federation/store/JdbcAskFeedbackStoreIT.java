@@ -59,7 +59,7 @@ class JdbcAskFeedbackStoreIT {
         evidence.put("tables", List.of("ck81.pangu.alert"));
         evidence.put("rows", List.of(List.of("web-01", 5)));
         evidence.put("caliber", List.of(Map.of("item", "高危告警", "source", "ontology", "detail", "level >= 3")));
-        AskRun run = new AskRun("run-1", "conv-1", "alice", "最近一天高危告警最多的资产",
+        AskRun run = new AskRun("run-1", "conv-1", "alice", "app-1", "最近一天高危告警最多的资产",
                 List.of(new Turn("user", "高危告警最多的资产"), new Turn("assistant", "要看哪个时间范围？")),
                 AskRun.ANSWERED, "web-01 最多，5 条", "SELECT 1", evidence, null, 1_700_000_000_000L, 1_200);
 
@@ -71,13 +71,13 @@ class JdbcAskFeedbackStoreIT {
 
     @Test
     void listsRunsByUserAndConversation() {
-        store.saveRun(new AskRun("r1", "c1", "alice", "首问", List.of(), AskRun.ANSWERED, "a", null, Map.of(),
+        store.saveRun(new AskRun("r1", "c1", "alice", null, "首问", List.of(), AskRun.ANSWERED, "a", null, Map.of(),
                 null, 1_000, 5));
-        store.saveRun(new AskRun("r2", "c1", "alice", "追问", List.of(), AskRun.CLARIFY, null, null, Map.of(),
+        store.saveRun(new AskRun("r2", "c1", "alice", null, "追问", List.of(), AskRun.CLARIFY, null, null, Map.of(),
                 null, 2_000, 5));
-        store.saveRun(new AskRun("r3", "c2", "alice", "另一段", List.of(), AskRun.ANSWERED, "b", null, Map.of(),
+        store.saveRun(new AskRun("r3", "c2", "alice", null, "另一段", List.of(), AskRun.ANSWERED, "b", null, Map.of(),
                 null, 3_000, 5));
-        store.saveRun(new AskRun("r4", "c9", "bob", "别人的", List.of(), AskRun.ANSWERED, "c", null, Map.of(),
+        store.saveRun(new AskRun("r4", "c9", "bob", null, "别人的", List.of(), AskRun.ANSWERED, "c", null, Map.of(),
                 null, 4_000, 5));
 
         assertEquals(List.of("r3", "r2", "r1"),
@@ -90,7 +90,7 @@ class JdbcAskFeedbackStoreIT {
 
     @Test
     void failedRunKeepsErrorWithoutAnswer() {
-        store.saveRun(new AskRun("run-err", "run-err", "alice", "q", List.of(), AskRun.ERROR, null, null,
+        store.saveRun(new AskRun("run-err", "run-err", "alice", null, "q", List.of(), AskRun.ERROR, null, null,
                 Map.of(), "模型超时", 1_000, 10));
 
         AskRun read = store.findRun("run-err").orElseThrow();
@@ -161,7 +161,7 @@ class JdbcAskFeedbackStoreIT {
     }
 
     private static AskRun run(String id, String user) {
-        return new AskRun(id, id, user, "问题 " + id, List.of(), AskRun.ANSWERED, "回答", "SELECT 1", Map.of(),
+        return new AskRun(id, id, user, null, "问题 " + id, List.of(), AskRun.ANSWERED, "回答", "SELECT 1", Map.of(),
                 null, 1_000, 5);
     }
 

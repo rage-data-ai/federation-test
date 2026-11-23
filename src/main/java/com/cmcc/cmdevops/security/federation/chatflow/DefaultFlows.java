@@ -17,7 +17,7 @@ public final class DefaultFlows {
     public static final String DEFAULT_FLOW_ID = "flow-builtin-ask";
 
     /** 内置问数图修订号；迁移器据此强制升级。 */
-    public static final int BUILTIN_ASK_REVISION = 22;
+    public static final int BUILTIN_ASK_REVISION = 23;
 
     /** 大模型+SQL：只引用上游本体 / 元数据出参（运行时再叠内置 SQL 规则）。 */
     public static final String SQL_LLM_PROMPT = """
@@ -215,8 +215,9 @@ public final class DefaultFlows {
                         new FlowEdge("if_kb", "answer_kb", "true"),
                         new FlowEdge("if_kb", "ontology", "false"),
                         new FlowEdge("if_kb", "ontology", "default"),
-                        // 本体澄清≡默认：仍 emit clarify，继续元数据；元数据出错再停（叶子）
+                        // 本体澄清需显式边（clarify 不再回落 default）；大模型 clarify 为叶子
                         new FlowEdge("ontology", "metadata", "default"),
+                        new FlowEdge("ontology", "metadata", "clarify"),
                         new FlowEdge("metadata", "llm", "default"),
                         new FlowEdge("llm", "answer_sql", "default"),
                         new FlowEdge("llm", "answer_sql", "answered")));

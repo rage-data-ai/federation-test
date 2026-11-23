@@ -174,6 +174,7 @@ class BearerAuthFilterTest {
     void acceptsLocalSessionAndMarksRequest() throws Exception {
         FederationProperties properties = new FederationProperties();
         properties.getSecurity().setEnabled(true);
+        properties.getSecurity().setRegistrationOpen(true);
         UserService users = new UserService(
                 new MemoryUserStore(), properties, new BCryptPasswordEncoder(4), System::currentTimeMillis);
         users.bootstrapAdmin("root", "root-pass-11", null);
@@ -196,6 +197,28 @@ class BearerAuthFilterTest {
         MockHttpServletResponse afterLogout = new MockHttpServletResponse();
         filter.doFilter(request, afterLogout, new MockFilterChain());
         assertEquals(401, afterLogout.getStatus());
+    }
+
+    @Test
+    void acceptsSessionCookieWhenBearerMissing() throws Exception {
+        FederationProperties properties = new FederationProperties();
+        properties.getSecurity().setEnabled(true);
+        properties.getSecurity().setRegistrationOpen(true);
+        UserService users = new UserService(
+                new MemoryUserStore(), properties, new BCryptPasswordEncoder(4), System::currentTimeMillis);
+        users.bootstrapAdmin("root", "root-pass-11", null);
+        String token = users.register("carol", "carol-pass-1", null).token();
+        BearerAuthFilter filter = new BearerAuthFilter(
+                properties, noJwt(), usersOf(users), new TokenRevocationService());
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/auth/me");
+        request.setCookies(new jakarta.servlet.http.Cookie(SessionCookies.NAME, token));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean passed = new AtomicBoolean();
+        filter.doFilter(request, response, (req, res) -> {
+            assertEquals("carol", GatewayUser.current().name());
+            passed.set(true);
+        });
+        assertTrue(passed.get());
     }
 
     @Test

@@ -26,8 +26,8 @@ class FlowGraphTest {
                         new FlowEdge("a", "c", "error")));
         assertEquals("b", graph.next("a", "continue"));
         assertEquals("b", graph.next("a", "default"));
-        // 无 clarify 边时回落到 default
-        assertEquals("b", graph.next("a", "clarify"));
+        // 无 clarify 边时不回落 default（澄清即停，除非画了 clarify 边）
+        org.junit.jupiter.api.Assertions.assertNull(graph.next("a", "clarify"));
         assertEquals("c", graph.next("a", "error"));
         // true 无边：叶子终止，不误走 default
         org.junit.jupiter.api.Assertions.assertNull(graph.next("a", "true"));

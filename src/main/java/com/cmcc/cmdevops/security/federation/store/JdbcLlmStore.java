@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import com.cmcc.cmdevops.security.federation.llm.LlmClient.Settings;
 import com.cmcc.cmdevops.security.federation.llm.LlmSettingsStore;
+import com.cmcc.cmdevops.security.federation.security.SecretCrypto;
 
 @Component
 public class JdbcLlmStore implements LlmSettingsStore {
@@ -14,9 +15,11 @@ public class JdbcLlmStore implements LlmSettingsStore {
     private static final int ROW_ID = 1;
 
     private final JdbcTemplate jdbc;
+    private final SecretCrypto secrets;
 
-    public JdbcLlmStore(FederalDataSource dataSource) {
+    public JdbcLlmStore(FederalDataSource dataSource, SecretCrypto secrets) {
         this.jdbc = dataSource.jdbc();
+        this.secrets = secrets;
     }
 
     @Override
@@ -26,7 +29,7 @@ public class JdbcLlmStore implements LlmSettingsStore {
                 """, (rs, row) -> new Settings(
                 rs.getString("protocol"),
                 rs.getString("base_url"),
-                rs.getString("api_key"),
+                secrets.open(rs.getString("api_key")),
                 rs.getString("model")), ROW_ID);
         return rows.isEmpty() ? null : rows.get(0);
     }
@@ -43,7 +46,7 @@ public class JdbcLlmStore implements LlmSettingsStore {
                 ROW_ID,
                 settings.protocol(),
                 settings.baseUrl(),
-                settings.apiKey(),
+                secrets.seal(settings.apiKey()),
                 settings.model());
     }
 }

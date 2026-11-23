@@ -29,6 +29,7 @@ public final class AskRunRecorder implements AskListener {
     private final String id = UUID.randomUUID().toString();
     private final String conversationId;
     private final String userName;
+    private final String appId;
     private final String question;
     private final List<Turn> history;
     private final long startedAt;
@@ -43,6 +44,7 @@ public final class AskRunRecorder implements AskListener {
     public AskRunRecorder(AskRequest request, String userName, AskListener delegate, long now) {
         this.delegate = delegate;
         this.userName = userName;
+        this.appId = request.appId() == null || request.appId().isBlank() ? null : request.appId().strip();
         this.question = request.question().strip();
         this.history = request.history() == null
                 ? List.of()
@@ -76,7 +78,7 @@ public final class AskRunRecorder implements AskListener {
         if (!sqls.isEmpty()) {
             evidence.put("sqls", List.copyOf(sqls));
         }
-        return new AskRun(id, conversationId, userName, question, history,
+        return new AskRun(id, conversationId, userName, appId, question, history,
                 status == null ? AskRun.ERROR : status, answer, sql, new LinkedHashMap<>(evidence),
                 status == null && error == null ? "问数没有产生回答" : error,
                 startedAt, Math.max(0, now - startedAt));
