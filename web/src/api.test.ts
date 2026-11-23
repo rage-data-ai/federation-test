@@ -36,7 +36,7 @@ describe('listCatalogs', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
     const store = new Map<string, string>()
-    vi.stubGlobal('localStorage', {
+    const api = {
       getItem: (key: string) => store.get(key) ?? null,
       setItem: (key: string, value: string) => {
         store.set(key, value)
@@ -44,7 +44,9 @@ describe('listCatalogs', () => {
       removeItem: (key: string) => {
         store.delete(key)
       }
-    })
+    }
+    vi.stubGlobal('sessionStorage', api)
+    vi.stubGlobal('localStorage', api)
   })
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -75,7 +77,9 @@ describe('ask feedback requests', () => {
       'fetch',
       vi.fn().mockResolvedValue({ ok: true, text: async () => '{}' } as Response)
     )
-    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {}, removeItem: () => {} })
+    const empty = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+    vi.stubGlobal('sessionStorage', empty)
+    vi.stubGlobal('localStorage', empty)
   })
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -141,7 +145,13 @@ describe('accounts and session expiry', () => {
 
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
-    vi.stubGlobal('localStorage', { getItem: () => 'session-token', setItem: () => {}, removeItem: () => {} })
+    const store = {
+      getItem: () => 'session-token',
+      setItem: () => {},
+      removeItem: () => {}
+    }
+    vi.stubGlobal('sessionStorage', store)
+    vi.stubGlobal('localStorage', store)
     unauthorized.mockReset()
     onUnauthorized(unauthorized)
   })

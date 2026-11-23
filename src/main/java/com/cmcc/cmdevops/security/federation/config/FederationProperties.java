@@ -197,9 +197,14 @@ public class FederationProperties {
          */
         private boolean allowInsecureDefaults = false;
         /**
-         * 是否开放自助注册（管理员已存在之后）。生产建议 false，由管理员在控制台建号。
+         * 是否开放自助注册（管理员已存在之后）。生产默认 false，由管理员在控制台建号。
          */
-        private boolean registrationOpen = true;
+        private boolean registrationOpen = false;
+        /**
+         * 敏感字段落库主密钥（AES）。环境变量 {@code FEDERATION_SECRETS_KEY}：
+         * 32 字节 url-safe base64，或任意口令（SHA-256 派生）。空则不加密（仅本地）。
+         */
+        private String secretsKey = "";
         /** 用户名 → Bearer token（兼容旧配置；未单独配 roles 时默认仅 QUERY） */
         private Map<String, String> tokens = new LinkedHashMap<>();
         /** 用户名 → 逗号分隔角色，如 QUERY 或 QUERY,ADMIN */
@@ -260,6 +265,14 @@ public class FederationProperties {
 
         public void setRegistrationOpen(boolean registrationOpen) {
             this.registrationOpen = registrationOpen;
+        }
+
+        public String getSecretsKey() {
+            return secretsKey;
+        }
+
+        public void setSecretsKey(String secretsKey) {
+            this.secretsKey = secretsKey == null ? "" : secretsKey;
         }
 
         public Map<String, String> getTokens() {
@@ -532,6 +545,10 @@ public class FederationProperties {
          */
         private int historyWindowTurns = 12;
         /**
+         * 同时进行的问数 / 预览 SSE 上限（进程内信号量）。超限返回 429。
+         */
+        private int maxConcurrent = 32;
+        /**
          * OpenAI 兼容 embeddings 端点（NIM / 自建）。空则使用本地哈希嵌入。
          * 例：{@code https://integrate.api.nvidia.com/v1} 或完整 {@code .../v1/embeddings}
          */
@@ -601,6 +618,14 @@ public class FederationProperties {
 
         public void setHistoryWindowTurns(int historyWindowTurns) {
             this.historyWindowTurns = Math.max(0, historyWindowTurns);
+        }
+
+        public int getMaxConcurrent() {
+            return maxConcurrent;
+        }
+
+        public void setMaxConcurrent(int maxConcurrent) {
+            this.maxConcurrent = Math.max(1, maxConcurrent);
         }
 
         public String getEmbedEndpoint() {

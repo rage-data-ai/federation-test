@@ -4,6 +4,12 @@
 
 ### Added
 
+- 敏感字段落库加密：`FEDERATION_SECRETS_KEY` + AES-GCM；启动幂等迁移 `fed_llm` / `fed_ask_embed` / `fed_catalog`
+- 请求 ID：`X-Request-Id` + MDC `requestId`；日志 pattern 带 requestId
+- Ask/预览 SSE 并发上限：`FEDERATION_ASK_MAX_CONCURRENT`（默认 32，超限 429）
+- `fed_ask_run.app_id` 列与问数落库
+- 本地会话 HttpOnly Cookie `FED_SESSION`；控制台令牌改存 sessionStorage + `credentials: include`
+- 管理员 `POST /api/v1/users` 建号（自助注册关闭时的运维入口）
 - ChatFlow 编排预览：`POST /api/v1/ask/preview` 可读草稿/脏图；SSE `node_start`/`node_finish`；编排页预览抽屉、节点与走过边高亮、出参检查；不落正式问数历史（见 `docs/chatflow-preview.md`）
 - 本地账号：自助注册 / 密码登录（会话默认 24h、有请求续期）、管理员维护用户；控制台登录页与用户管理；见 `docs/auth.md`
 - 问数对话历史：按登录用户列出并回看自己的会话（`/api/v1/ask/conversations`）
@@ -19,6 +25,8 @@
 
 ### Changed
 
+- 自助注册默认关闭（`FEDERATION_REGISTRATION_OPEN`）；Swagger/OpenAPI 默认关闭（`SPRINGDOC_ENABLED`）
+- `clarify` 边不再回落 `default`；内置智能问数 rev 23 为 ontology→metadata 显式 clarify 边
 - 生产就绪加固：拒绝弱静态令牌启动（可 `FEDERATION_ALLOW_INSECURE_DEFAULTS`）；`/query` 只读 SQL；Actuator metrics 需鉴权；Ask SSE 错误脱敏与断开取消；ChatFlow 草稿所有权；未配 roles 默认仅 QUERY；健康检查探测联邦库；联邦库连接池 16
 - ChatFlow 自由组装 DAG：`FlowRunner` 合并为单一 walker（取消 simple/whitebox 分叉）；任意合法边连接的节点图共用一次 beginRun；`node_start` 带解析入参、`node_finish` 带耗时与出参；预览抽屉与正式问数过程均展示节点运行详情
 - ChatFlow 对齐 Dify：去掉可添加的「结束」节点；旧图 `end` 加载/发布时自动剥离（无回复出口时转为 `answer`）

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { authLogin, authRegister } from './api'
+import { authLogin, authRegister, authSetupStatus } from './api'
 import { beginOidcLogin, readOidcConfig, setAccessToken } from './auth'
 import { errMessage } from './types'
 
@@ -14,6 +14,7 @@ const form = reactive({ username: '', displayName: '', password: '', confirm: ''
 const busy = ref(false)
 const error = ref('')
 const oidcEnabled = !!readOidcConfig()
+const registrationOpen = ref(false)
 const usernameInput = ref<HTMLInputElement | null>(null)
 
 const mismatch = computed(
@@ -21,10 +22,23 @@ const mismatch = computed(
 )
 
 onMounted(() => {
+  void authSetupStatus()
+    .then((status) => {
+      registrationOpen.value = !!status.registrationOpen
+      if (!registrationOpen.value && mode.value === 'register') {
+        mode.value = 'login'
+      }
+    })
+    .catch(() => {
+      registrationOpen.value = false
+    })
   void nextTick(() => usernameInput.value?.focus())
 })
 
 function switchMode(next: Mode) {
+  if (next === 'register' && !registrationOpen.value) {
+    return
+  }
   mode.value = next
   error.value = ''
   form.password = ''
@@ -85,7 +99,7 @@ async function loginOidc() {
         </p>
       </header>
 
-      <div class="auth-gate__tabs" role="tablist" aria-label="登录或注册">
+      <div v-if="registrationOpen" class="auth-gate__tabs" role="tablist" aria-label="登录或注册">
         <button
           type="button"
           role="tab"

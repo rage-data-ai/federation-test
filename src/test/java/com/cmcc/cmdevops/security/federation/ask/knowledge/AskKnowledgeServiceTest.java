@@ -104,6 +104,7 @@ class AskKnowledgeServiceTest {
                 id,
                 "conv-1",
                 user,
+                null,
                 question,
                 List.of(),
                 AskRun.ANSWERED,

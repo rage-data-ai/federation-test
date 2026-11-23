@@ -114,6 +114,7 @@ class JdbcUserStoreIT {
     void serviceFlowAgainstMysql() {
         FederationProperties properties = new FederationProperties();
         properties.getSecurity().setEnabled(true);
+        properties.getSecurity().setRegistrationOpen(true);
         properties.getSecurity().setAdminUsername("root");
         properties.getSecurity().setAdminPassword("root-pass-11");
         UserService service = new UserService(

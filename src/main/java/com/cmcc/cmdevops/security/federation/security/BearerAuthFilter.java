@@ -89,12 +89,11 @@ public class BearerAuthFilter extends OncePerRequestFilter {
                 filterChain.doFilter(request, response);
                 return;
             }
-            String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-            if (header == null || !header.regionMatches(true, 0, "Bearer ", 0, 7)) {
-                unauthorized(response, "缺少 Authorization: Bearer <token>");
+            String token = bearerOrCookie(request);
+            if (token == null || token.isEmpty()) {
+                unauthorized(response, "缺少 Authorization: Bearer <token> 或会话 Cookie");
                 return;
             }
-            String token = header.substring(7).trim();
             if (revocations.isRevoked(token)) {
                 unauthorized(response, "令牌已吊销");
                 return;
@@ -135,8 +134,16 @@ public class BearerAuthFilter extends OncePerRequestFilter {
         return configured.equals(provided);
     }
 
+    private static String bearerOrCookie(HttpServletRequest request) {
+        String header = request.getHeader(HttpHeaders.AUTHORIZATION);
+        if (header != null && header.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return header.substring(7).trim();
+        }
+        return SessionCookies.read(request);
+    }
+
     private GatewayUser resolveUser(String token, HttpServletRequest request) {
-        if (token.isEmpty()) {
+        if (token == null || token.isEmpty()) {
             return null;
         }
         Map<String, String> tokens = properties.getSecurity().getTokens();

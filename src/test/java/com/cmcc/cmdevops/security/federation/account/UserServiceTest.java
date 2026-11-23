@@ -36,10 +36,20 @@ class UserServiceTest {
     void setUp() {
         properties = new FederationProperties();
         properties.getSecurity().setEnabled(true);
+        // 生产默认关闭注册；单测显式打开以覆盖注册路径
+        properties.getSecurity().setRegistrationOpen(true);
         store = new MemoryUserStore();
         service = new UserService(store, properties, new BCryptPasswordEncoder(4), now::get);
         // 普通用例先有管理员，自助注册才开放；专门测 setup 的用例会清库。
         service.bootstrapAdmin("root", "root-pass-11", "管理员");
+    }
+
+    @Test
+    void registerRejectedWhenClosed() {
+        properties.getSecurity().setRegistrationOpen(false);
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.register("alice", "alice-pass-1", null));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
     }
 
     @Test

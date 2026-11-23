@@ -1,5 +1,7 @@
 package com.cmcc.cmdevops.security.federation.api;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -37,6 +39,7 @@ import com.cmcc.cmdevops.security.federation.ask.AskService;
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
 import com.cmcc.cmdevops.security.federation.ask.embed.AskEmbedSettings;
 import com.cmcc.cmdevops.security.federation.chatflow.ChatflowRuntime;
+import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 import com.cmcc.cmdevops.security.federation.config.WebMvcSecurityConfiguration;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient.Settings;
@@ -45,8 +48,11 @@ import com.cmcc.cmdevops.security.federation.security.GatewayUser;
 import com.cmcc.cmdevops.security.federation.security.QuotaService;
 import com.cmcc.cmdevops.security.federation.security.RoleAuthorizationInterceptor;
 
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+
 @WebMvcTest(controllers = AskController.class)
 @AutoConfigureMockMvc(addFilters = false)
+@EnableConfigurationProperties(FederationProperties.class)
 @Import({ RoleAuthorizationInterceptor.class, WebMvcSecurityConfiguration.class, GlobalExceptionHandler.class })
 class AskControllerWebTest {
 
@@ -182,6 +188,31 @@ class AskControllerWebTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(Matchers.containsString("done")));
         verify(chatflowRuntime).ask(eq(new AskRequest("今天有多少告警？", List.of(), "conv-1")), any());
+    }
+
+    @Test
+    void askRejectsWhenConcurrencyExhausted() throws Exception {
+        FederationProperties props = new FederationProperties();
+        props.getAsk().setMaxConcurrent(1);
+        AskController limited = new AskController(
+                askService, chatflowRuntime, llmClient, embedSettings, quotaService, props);
+        java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        doAnswer(invocation -> {
+            started.countDown();
+            release.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            return null;
+        }).when(chatflowRuntime).ask(any(AskRequest.class), any());
+        GatewayUser.set(new GatewayUser("admin", Set.of(GatewayRole.ADMIN, GatewayRole.QUERY)));
+        Thread holder = Thread.ofVirtual().start(() -> limited.ask(new AskRequest("hold", List.of())));
+        assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        org.springframework.web.server.ResponseStatusException tooMany =
+                org.junit.jupiter.api.Assertions.assertThrows(
+                        org.springframework.web.server.ResponseStatusException.class,
+                        () -> limited.ask(new AskRequest("second", List.of())));
+        assertEquals(429, tooMany.getStatusCode().value());
+        release.countDown();
+        holder.join(5_000);
     }
 
     @Test

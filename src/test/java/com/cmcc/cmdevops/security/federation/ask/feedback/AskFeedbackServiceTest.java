@@ -318,7 +318,7 @@ class AskFeedbackServiceTest {
     }
 
     private static AskRun run(String id, String conversationId, String user, String status, long createdAt) {
-        return new AskRun(id, conversationId, user, "问题 " + id, List.of(), status, "回答", "SELECT 1", Map.of(),
+        return new AskRun(id, conversationId, user, null, "问题 " + id, List.of(), status, "回答", "SELECT 1", Map.of(),
                 null, createdAt, 5);
     }
 }

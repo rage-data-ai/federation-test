@@ -10,34 +10,74 @@ export type OidcConfig = {
   scope: string
 }
 
+/** 会话页内存放（关闭标签即清）；不再用 localStorage，降低 XSS 持久窃取面。本地登录另有 HttpOnly Cookie。 */
+function tokenStore(): Storage {
+  return sessionStorage
+}
+
+function migrateLegacyLocalTokens(): void {
+  try {
+    const legacyAccess = localStorage.getItem(TOKEN_KEY)
+    const legacyRefresh = localStorage.getItem(REFRESH_TOKEN_KEY)
+    if (legacyAccess && !sessionStorage.getItem(TOKEN_KEY)) {
+      sessionStorage.setItem(TOKEN_KEY, legacyAccess)
+    }
+    if (legacyRefresh && !sessionStorage.getItem(REFRESH_TOKEN_KEY)) {
+      sessionStorage.setItem(REFRESH_TOKEN_KEY, legacyRefresh)
+    }
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(REFRESH_TOKEN_KEY)
+  } catch {
+    // private mode / blocked storage
+  }
+}
+
+migrateLegacyLocalTokens()
+
 export function getAccessToken(): string {
-  return localStorage.getItem(TOKEN_KEY) || ''
+  return tokenStore().getItem(TOKEN_KEY) || ''
 }
 
 export function setAccessToken(token: string): void {
   const value = token.trim()
   if (value) {
-    localStorage.setItem(TOKEN_KEY, value)
+    tokenStore().setItem(TOKEN_KEY, value)
   } else {
+    tokenStore().removeItem(TOKEN_KEY)
+  }
+  try {
     localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // ignore
   }
 }
 
 export function clearAccessToken(): void {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(REFRESH_TOKEN_KEY)
+  tokenStore().removeItem(TOKEN_KEY)
+  tokenStore().removeItem(REFRESH_TOKEN_KEY)
+  try {
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(REFRESH_TOKEN_KEY)
+  } catch {
+    // ignore
+  }
 }
 
 export function getRefreshToken(): string {
-  return localStorage.getItem(REFRESH_TOKEN_KEY) || ''
+  return tokenStore().getItem(REFRESH_TOKEN_KEY) || ''
 }
 
 export function setRefreshToken(token: string): void {
   const value = token.trim()
   if (value) {
-    localStorage.setItem(REFRESH_TOKEN_KEY, value)
+    tokenStore().setItem(REFRESH_TOKEN_KEY, value)
   } else {
+    tokenStore().removeItem(REFRESH_TOKEN_KEY)
+  }
+  try {
     localStorage.removeItem(REFRESH_TOKEN_KEY)
+  } catch {
+    // ignore
   }
 }
 

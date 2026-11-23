@@ -7,14 +7,17 @@ import org.springframework.stereotype.Component;
 
 import com.cmcc.cmdevops.security.federation.catalog.CatalogRecord;
 import com.cmcc.cmdevops.security.federation.catalog.CatalogStore;
+import com.cmcc.cmdevops.security.federation.security.SecretCrypto;
 
 @Component
 public class JdbcCatalogStore implements CatalogStore {
 
     private final JdbcTemplate jdbc;
+    private final SecretCrypto secrets;
 
-    public JdbcCatalogStore(FederalDataSource dataSource) {
+    public JdbcCatalogStore(FederalDataSource dataSource, SecretCrypto secrets) {
         this.jdbc = dataSource.jdbc();
+        this.secrets = secrets;
     }
 
     @Override
@@ -34,7 +37,7 @@ public class JdbcCatalogStore implements CatalogStore {
             record.setPort(rs.wasNull() ? null : port);
             record.setDatabase(rs.getString("database_name"));
             record.setUsername(rs.getString("username"));
-            record.setPassword(rs.getString("password"));
+            record.setPassword(secrets.open(rs.getString("password")));
             record.setUrl(rs.getString("jdbc_url"));
             record.setDriver(rs.getString("driver"));
             record.setExtra(rs.getString("extra"));
@@ -61,7 +64,7 @@ public class JdbcCatalogStore implements CatalogStore {
                 record.getPort(),
                 record.getDatabase(),
                 record.getUsername(),
-                record.getPassword(),
+                secrets.seal(record.getPassword()),
                 record.getUrl(),
                 record.getDriver(),
                 record.getExtra(),

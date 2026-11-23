@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { inject, onMounted, reactive, ref, type Ref } from 'vue'
-import { listUsers, resetUserPassword, updateUser } from './api'
+import { createUser, listUsers, resetUserPassword, updateUser } from './api'
 import { useFocusTrap } from './composables/useFocusTrap'
 import type { AuthMe, UserAccount, UserPatch } from './types'
 import { errMessage } from './types'
@@ -12,6 +12,7 @@ const loading = ref(false)
 const busy = ref(0)
 const error = ref('')
 const message = ref('')
+const createForm = reactive({ username: '', displayName: '', password: '' })
 
 const reset = reactive({ id: 0, username: '', password: '', error: '' })
 const resetOpen = ref(false)
@@ -96,6 +97,24 @@ async function submitReset() {
     busy.value = 0
   }
 }
+
+async function submitCreate() {
+  busy.value = -1
+  error.value = ''
+  message.value = ''
+  try {
+    const created = await createUser(createForm.username, createForm.password, createForm.displayName)
+    users.value = [...users.value, created].sort((a, b) => a.username.localeCompare(b.username))
+    message.value = `已创建账号 ${created.username}`
+    createForm.username = ''
+    createForm.displayName = ''
+    createForm.password = ''
+  } catch (e) {
+    error.value = errMessage(e)
+  } finally {
+    busy.value = 0
+  }
+}
 </script>
 
 <template>
@@ -110,10 +129,26 @@ async function submitReset() {
 
     <div class="body">
       <p class="hint">
-        账号由用户自助注册，注册后即可使用，默认只有查询角色。这里可以授予或收回管理员角色、禁用账号、重置密码。
+        自助注册默认关闭。在此创建查询账号，或授予/收回管理员、禁用、重置密码。
       </p>
       <p v-if="error" class="err banner" role="alert">{{ error }}</p>
       <p v-else-if="message" class="ok" role="status">{{ message }}</p>
+
+      <form class="create-user" @submit.prevent="submitCreate">
+        <label>
+          用户名
+          <input v-model.trim="createForm.username" required autocomplete="off" placeholder="3–32 位" />
+        </label>
+        <label>
+          显示名
+          <input v-model.trim="createForm.displayName" autocomplete="off" placeholder="可选" />
+        </label>
+        <label>
+          初始密码
+          <input v-model="createForm.password" type="password" required minlength="8" autocomplete="new-password" />
+        </label>
+        <button type="submit" :disabled="busy === -1">创建账号</button>
+      </form>
 
       <table v-if="users.length">
         <thead>
@@ -229,6 +264,35 @@ async function submitReset() {
 .body > .hint {
   margin-top: 0;
   font-size: 12px;
+}
+
+.create-user {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: end;
+  margin: 12px auto 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.create-user label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.create-user input {
+  min-width: 140px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: inherit;
 }
 
 table {

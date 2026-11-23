@@ -2,11 +2,14 @@ package com.cmcc.cmdevops.security.federation.api;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -19,6 +22,7 @@ import com.cmcc.cmdevops.security.federation.ask.AskService;
 import com.cmcc.cmdevops.security.federation.ask.AskService.AskRequest;
 import com.cmcc.cmdevops.security.federation.ask.embed.AskEmbedSettings;
 import com.cmcc.cmdevops.security.federation.chatflow.ChatflowRuntime;
+import com.cmcc.cmdevops.security.federation.config.FederationProperties;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient;
 import com.cmcc.cmdevops.security.federation.llm.LlmClient.Settings;
 import com.cmcc.cmdevops.security.federation.security.GatewayRole;
@@ -38,18 +42,21 @@ public class AskController {
     private final LlmClient llmClient;
     private final AskEmbedSettings embedSettings;
     private final QuotaService quotaService;
+    private final Semaphore askSlots;
 
     public AskController(
             AskService askService,
             ChatflowRuntime chatflowRuntime,
             LlmClient llmClient,
             AskEmbedSettings embedSettings,
-            QuotaService quotaService) {
+            QuotaService quotaService,
+            FederationProperties properties) {
         this.askService = askService;
         this.chatflowRuntime = chatflowRuntime;
         this.llmClient = llmClient;
         this.embedSettings = embedSettings;
         this.quotaService = quotaService;
+        this.askSlots = new Semaphore(properties.getAsk().getMaxConcurrent());
     }
 
     @GetMapping("/llm/status")
@@ -137,6 +144,15 @@ public class AskController {
     }
 
     private SseEmitter stream(String threadPrefix, StreamBody body) {
+        if (!askSlots.tryAcquire()) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "问数并发已满，请稍后重试");
+        }
+        AtomicBoolean released = new AtomicBoolean(false);
+        Runnable releaseSlot = () -> {
+            if (released.compareAndSet(false, true)) {
+                askSlots.release();
+            }
+        };
         SseEmitter emitter = new SseEmitter(TIMEOUT_MS);
         GatewayUser user = GatewayUser.current();
         AtomicBoolean cancelled = new AtomicBoolean(false);
@@ -161,12 +177,14 @@ public class AskController {
                         // already completed by timeout/client
                     }
                 }
+                releaseSlot.run();
                 GatewayUser.clear();
             }
         });
         Runnable cancel = () -> {
             cancelled.set(true);
             worker.interrupt();
+            releaseSlot.run();
         };
         emitter.onCompletion(cancel);
         emitter.onTimeout(() -> {

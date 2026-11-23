@@ -22,6 +22,8 @@ test.describe('console smoke', () => {
   /** 同一 handler 闭包；各用例改这个值即可切换首次配置 / 登录。 */
   const authStub = {
     needsSetup: false,
+    /** false 时登录页隐藏注册入口（对齐生产默认）。 */
+    registrationOpen: true,
     me: {
       name: 'demo',
       displayName: 'demo',
@@ -35,6 +37,7 @@ test.describe('console smoke', () => {
 
   test.beforeEach(async ({ page }) => {
     authStub.needsSetup = false
+    authStub.registrationOpen = true
     authStub.me = {
       name: 'demo',
       displayName: 'demo',
@@ -49,7 +52,13 @@ test.describe('console smoke', () => {
     })
     // 鉴权始终开启：默认 stub 成「已有管理员 + 已登录」，避免打到网关 401 被踢回登录页。
     await page.route('**/api/v1/auth/setup-status', (route) =>
-      route.fulfill({ json: { needsSetup: authStub.needsSetup } })
+      route.fulfill({
+        json: {
+          needsSetup: authStub.needsSetup,
+          // 默认开放，便于登录页注册相关用例；个别用例可覆盖
+          registrationOpen: authStub.registrationOpen
+        }
+      })
     )
     await page.route('**/api/v1/auth/me', (route) => {
       if (!authStub.me) {
@@ -535,6 +544,7 @@ test.describe('console smoke', () => {
     const registered: unknown[] = []
     let token = ''
     authStub.needsSetup = false
+    authStub.registrationOpen = true
     authStub.me = null
     await page.route('**/api/v1/auth/me', (route) => {
       if (token && route.request().headers().authorization === `Bearer ${token}`) {

@@ -71,6 +71,7 @@ class AuthControllerWebTest {
     void setUp() {
         userStore.clear();
         properties.getSecurity().setEnabled(true);
+        properties.getSecurity().setRegistrationOpen(true);
         properties.getSecurity().getJwt().setIssuerUri("https://idp.example/realms/demo");
         users.bootstrapAdmin("root", "root-pass-11", "管理员");
         GatewayUser.set(new GatewayUser("alice", Set.of(GatewayRole.QUERY, GatewayRole.ADMIN)));
@@ -172,7 +173,8 @@ class AuthControllerWebTest {
         userStore.clear();
         mockMvc.perform(get("/api/v1/auth/setup-status"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.needsSetup").value(true));
+                .andExpect(jsonPath("$.needsSetup").value(true))
+                .andExpect(jsonPath("$.registrationOpen").value(true));
 
         mockMvc.perform(post("/api/v1/auth/setup")
                         .contentType("application/json")
@@ -181,11 +183,14 @@ class AuthControllerWebTest {
                 .andExpect(jsonPath("$.token").isNotEmpty())
                 .andExpect(jsonPath("$.user.username").value("admin"))
                 .andExpect(jsonPath("$.user.roles[0]").value("ADMIN"))
-                .andExpect(jsonPath("$.user.roles[1]").value("QUERY"));
+                .andExpect(jsonPath("$.user.roles[1]").value("QUERY"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Set-Cookie", org.hamcrest.Matchers.containsString("FED_SESSION=")));
 
         mockMvc.perform(get("/api/v1/auth/setup-status"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.needsSetup").value(false));
+                .andExpect(jsonPath("$.needsSetup").value(false))
+                .andExpect(jsonPath("$.registrationOpen").value(true));
 
         mockMvc.perform(post("/api/v1/auth/setup")
                         .contentType("application/json")

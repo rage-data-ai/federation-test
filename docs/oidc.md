@@ -32,9 +32,11 @@ VITE_OIDC_SCOPE=openid profile roles
 Keycloak：创建 Public client，开启 PKCE，Valid redirect URIs 包含控制台地址；Token mapper 写入 `roles`。  
 其它 IdP：控制台会请求 `{authority}/.well-known/openid-configuration`（OIDC Discovery）解析 authorize/token/logout；失败时回退 Keycloak 或 `/oauth2/v1/*` 约定路径。
 
-登录页「其他登录方式」→「通过 OIDC 单点登录」；回调后 `access_token` / `refresh_token` 写入 localStorage，并由 `api.ts` 自动附带。  
+登录页「其他登录方式」→「通过 OIDC 单点登录」；回调后 `access_token` / `refresh_token` 写入 **sessionStorage**（关闭标签即清；不再用 localStorage），并由 `api.ts` 自动附带 Bearer。  
 可用身份弹窗里的「刷新令牌」调用 `grant_type=refresh_token`（见 `refreshAccessToken`）。
 「OIDC 注销」清除本地令牌并跳转 IdP logout（`post_logout_redirect_uri`）。
+
+说明：OIDC 令牌由浏览器直连 IdP 换取，本网关无法下发 HttpOnly Cookie；XSS 仍可能读到 sessionStorage 中的 JWT。生产更稳妥的做法是 BFF 换会话（未实现）。
 
 ## 表级 ACL
 

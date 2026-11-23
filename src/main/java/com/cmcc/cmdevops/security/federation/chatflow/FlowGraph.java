@@ -36,9 +36,9 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
      * 按条件选下一条边。
      * <ul>
      *   <li>{@code continue} 与 {@code default} 同义</li>
-     *   <li>{@code clarify} / {@code answered} / {@code default}：无精确边时可回落 default</li>
-     *   <li>其它 outcome（如 {@code true}/{@code false}/{@code error}）：无精确边即叶子终止（不回落），
-     *       对齐 ChatFlow 无 end 时「未连出的分支即停」</li>
+     *   <li>{@code answered} / {@code default}：无精确边时可回落 default</li>
+     *   <li>{@code clarify}：仅走精确 clarify 边，不回落 default（避免澄清后误进回答节点）</li>
+     *   <li>其它 outcome（如 {@code true}/{@code false}/{@code error}）：无精确边即叶子终止</li>
      * </ul>
      */
     public String next(String fromId, String outcome) {
@@ -56,9 +56,7 @@ public record FlowGraph(String startNodeId, List<FlowNode> nodes, List<FlowEdge>
                 fallback = edge.to();
             }
         }
-        if ("default".equalsIgnoreCase(want)
-                || "clarify".equalsIgnoreCase(want)
-                || "answered".equalsIgnoreCase(want)) {
+        if ("default".equalsIgnoreCase(want) || "answered".equalsIgnoreCase(want)) {
             return fallback;
         }
         return null;

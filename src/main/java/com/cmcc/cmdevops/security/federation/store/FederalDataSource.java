@@ -310,6 +310,7 @@ public class FederalDataSource {
                   id VARCHAR(36) NOT NULL PRIMARY KEY,
                   conversation_id VARCHAR(64) NOT NULL,
                   user_name VARCHAR(255) NOT NULL,
+                  app_id VARCHAR(64) NULL,
                   question TEXT NOT NULL,
                   history MEDIUMTEXT NOT NULL,
                   status VARCHAR(16) NOT NULL,
@@ -320,11 +321,18 @@ public class FederalDataSource {
                   created_at BIGINT NOT NULL,
                   elapsed_ms BIGINT NOT NULL,
                   KEY idx_fed_ask_run_conversation (conversation_id, created_at),
-                  KEY idx_fed_ask_run_user (user_name, created_at)
+                  KEY idx_fed_ask_run_user (user_name, created_at),
+                  KEY idx_fed_ask_run_app (app_id, created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
         if (!indexExists("fed_ask_run", "idx_fed_ask_run_user")) {
             jdbc.execute("ALTER TABLE fed_ask_run ADD KEY idx_fed_ask_run_user (user_name, created_at)");
+        }
+        if (!columnExists("fed_ask_run", "app_id")) {
+            jdbc.execute("ALTER TABLE fed_ask_run ADD COLUMN app_id VARCHAR(64) NULL AFTER user_name");
+        }
+        if (!indexExists("fed_ask_run", "idx_fed_ask_run_app")) {
+            jdbc.execute("ALTER TABLE fed_ask_run ADD KEY idx_fed_ask_run_app (app_id, created_at)");
         }
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS fed_ask_feedback (
@@ -366,7 +374,8 @@ public class FederalDataSource {
                         });
                 loaded.forEach((name, record) -> {
                     record.setName(name);
-                    new JdbcCatalogStore(this).upsert(record);
+                    new JdbcCatalogStore(this, com.cmcc.cmdevops.security.federation.security.SecretCrypto.forTests(""))
+                            .upsert(record);
                 });
             }
         }
@@ -382,7 +391,8 @@ public class FederalDataSource {
         if (count("fed_llm") == 0) {
             String llm = legacyBody("llm");
             if (llm != null && !llm.isBlank()) {
-                new JdbcLlmStore(this).write(objectMapper.readValue(llm, Settings.class));
+                new JdbcLlmStore(this, com.cmcc.cmdevops.security.federation.security.SecretCrypto.forTests(""))
+                        .write(objectMapper.readValue(llm, Settings.class));
             }
         }
         if (tableExists("fed_document")) {

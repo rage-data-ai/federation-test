@@ -146,6 +146,34 @@ public class UserService {
         return openSession(created, now);
     }
 
+    /**
+     * 管理员创建本地账号（不自动登录）。自助注册关闭时的建号入口。
+     */
+    public UserView createByAdmin(String username, String password, String displayName, String actor) {
+        if (needsSetup()) {
+            throw new IllegalStateException("请先完成首次管理员配置");
+        }
+        String name = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
+        if (!USERNAME.matcher(name).matches()) {
+            throw new IllegalArgumentException("用户名需为 3–32 位小写字母、数字或 . _ -，且以字母或数字开头");
+        }
+        checkPassword(password);
+        if (reserved(name) || store.findByUsername(name).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "用户名已被占用");
+        }
+        long now = clock.getAsLong();
+        UserAccount created;
+        try {
+            created = store.insert(new UserAccount(
+                    0, name, cleanDisplayName(displayName, name), encoder.encode(password),
+                    Set.of(GatewayRole.QUERY), UserAccount.ACTIVE, now, now, now));
+        } catch (DuplicateUsernameException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "用户名已被占用", e);
+        }
+        log.info("AUDIT user-created user={} by={}", name, actor);
+        return UserView.of(created);
+    }
+
     public Session login(String username, String password) {
         if (needsSetup()) {
             throw new IllegalStateException("尚未配置管理员，请先完成初始化");

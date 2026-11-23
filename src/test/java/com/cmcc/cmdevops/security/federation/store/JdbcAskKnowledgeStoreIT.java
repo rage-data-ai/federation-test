@@ -56,7 +56,7 @@ class JdbcAskKnowledgeStoreIT {
 
     @Test
     void roundTripAndFindByIds() {
-        feedback.saveRun(new AskRun("run-1", "conv", "alice", "q", List.of(), AskRun.ANSWERED,
+        feedback.saveRun(new AskRun("run-1", "conv", "alice", null, "q", List.of(), AskRun.ANSWERED,
                 "a", "SELECT 1", Map.of(), null, 1_000, 5));
         AskKnowledge saved = store.save(new AskKnowledge(
                 0,
